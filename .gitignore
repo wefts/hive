@@ -1,0 +1,10 @@
+.env
+secrets.env
+*.local
+
+# Local/private runtime state.
+data/*
+!data/.gitkeep
+
+# Local scratch.
+tmp/

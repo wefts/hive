@@ -1,0 +1,42 @@
+# Main orchestrator for this hive — wires the public Swarm kernel substrate
+# plus private/local plugin adapters.
+#
+# This repo lives next to the public `swarm/` repo. The public repo ships only
+# generic substrate (`../swarm/infra/docker-compose.yml`); this file is
+# instance-specific and names real plugins, so it stays private.
+#
+# Run from the hive root: `docker compose up -d`
+# Reads `.env` from this dir; plugins load secrets via `env_file`.
+#
+# Topology now (single node): kernel app + Ollama run on the HOST; only
+# Postgres (here) and plugin adapters are containerized. Grow this file
+# spawn -> compose -> k8s without touching the kernel (the gRPC port ABI is
+# invariant — see system_architecture §9/§10).
+
+include:
+  # Postgres + pgvector — the one stateful dependency, owned by the kernel.
+  - ../swarm/infra/docker-compose.yml
+
+services:
+  # --- Plugin adapters (Tier B: out-of-process, gRPC over the port ABI) ---
+  # Skeleton, commented until task 05a lands the plugin ABI + manifest loader.
+  # Each plugin is a self-contained dir under ./plugins with its own Dockerfile,
+  # vendored proto, and plugin.yaml. Polyglot by construction — Python, Go, etc.
+  #
+  # confluence_connector:
+  #   build: ./plugins/confluence_connector
+  #   env_file:
+  #     - .env
+  #     - secrets.env            # creds; never committed, never synced
+  #   environment:
+  #     OLLAMA_BASE_URL: http://host.docker.internal:11434
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #
+  # k8s_tool:                    # Go; connect-mode (runs as its own daemon)
+  #   build: ./plugins/k8s_tool
+  #   env_file: [.env]
+  #   depends_on: [postgres]
