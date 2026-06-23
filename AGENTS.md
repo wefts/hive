@@ -60,8 +60,10 @@ docker compose up -d
 docker compose config
 ```
 
-`docker-compose.yml` includes the generic Swarm substrate from
-`../swarm/infra/docker-compose.yml`.
+The full stack (postgres + GPU ollama + ml + kernel) is documented in
+[`docs/operations.md`](docs/operations.md) — topology, prerequisites, registry
+tiers, offline run/build, scaling/HA, troubleshooting. `docker-compose.yml`
+includes the generic Swarm substrate from `../swarm/dev/docker-compose.yml`.
 
 ## Sync And Deployment
 

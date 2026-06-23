@@ -16,6 +16,9 @@ Run from this directory:
 docker compose up -d
 ```
 
+Full operational guide (topology, GPU/Ollama, registry tiers, offline, HA):
+[`docs/operations.md`](docs/operations.md).
+
 Plugin directories use:
 
 ```text

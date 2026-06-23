@@ -1,0 +1,30 @@
+# Offline override — source EVERY image from the local registry (localhost:5000),
+# no build, no external network. Models are already on disk (RO mount), so the
+# full stack boots with no internet — the "carry the machine somewhere with no
+# network and it still runs" case.
+#
+#   # one-time, while online: mirror images into the local registry
+#   ./scripts/mirror-to-local-registry.sh
+#   # thereafter, offline:
+#   docker compose -f docker-compose.yml -f docker-compose.offline.yml up -d
+#
+# `build: !reset null` drops the build section so compose never reaches out to a
+# base image or build context — it can only use the local-registry image.
+services:
+  postgres:
+    image: localhost:5000/pgvector:pg16
+
+  ollama:
+    image: localhost:5000/ollama:0.30.6
+
+  migrate:
+    image: localhost:5000/swarm-kernel:0.1.0
+    build: !reset null
+
+  ml:
+    image: localhost:5000/swarm-ml:0.1.0
+    build: !reset null
+
+  kernel:
+    image: localhost:5000/swarm-kernel:0.1.0
+    build: !reset null
