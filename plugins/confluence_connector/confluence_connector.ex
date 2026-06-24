@@ -13,9 +13,11 @@ defmodule Hive.Confluence.Connector do
   ## Shape (the contrast vs the prose Wikipedia slice)
 
   Confluence pages are **HTML storage-format** with tables, code, and `<ac:…>`
-  macros, paginated by **offset** (`start`/`limit`) over the CQL search endpoint,
-  behind **HTTP Basic** auth. `totalSize` lets the kernel `Sync` loop reconcile
-  coverage (ADR-5 §3 — the residual-trust hole is closable here).
+  macros, served from the CQL search endpoint behind **HTTP Basic** auth and
+  paginated by an **opaque cursor** in `_links.next` (a manual `start` offset is
+  silently ignored — it re-returns page 1, verified live). The kernel-driven cursor
+  is therefore the next URL the API hands back. `totalSize`, when present, lets the
+  `Sync` loop reconcile coverage (ADR-5 §3).
 
   ## What it emits
 
@@ -72,29 +74,32 @@ defmodule Hive.Confluence.Connector do
     do: %{name: "confluence", kind: :connector, source: "confluence", sync_modes: [:full, :delta]}
 
   @impl true
-  def fetch(:start, opts), do: fetch(%{"start" => 0, "__page" => 1}, opts)
+  def fetch(:start, opts), do: do_fetch(initial_url(opts), 1, opts)
 
-  def fetch(cursor, opts) when is_map(cursor) do
-    start = Map.get(cursor, "start", 0)
-    page_num = Map.get(cursor, "__page", 1)
+  def fetch(%{"url" => next_url, "__page" => page_num}, opts),
+    do: do_fetch(next_url, page_num, opts)
+
+  defp do_fetch(request_url, page_num, opts) do
     http = Keyword.get(opts, :http, &http_get/1)
     scope = Keyword.get(opts, :scope, "group")
 
-    with {:ok, body} <- http.(url(start, opts)),
+    with {:ok, body} <- http.(request_url),
          {:ok, json} <- decode(body) do
       events = json |> Map.get("results", []) |> Enum.flat_map(&page_to_event(&1, scope))
-      {:ok, paginate(events, json, start, page_num, opts)}
+      {:ok, paginate(events, json, page_num, opts)}
     end
   end
 
   # --- pagination -----------------------------------------------------------
 
-  # Next cursor + truncation from Confluence's `_links.next` and our `:max_pages`
-  # ceiling; carry `totalSize` as `:total` for the kernel's coverage reconciliation.
-  defp paginate(events, json, start, page_num, opts) do
-    has_next? = not is_nil(get_in(json, ["_links", "next"]))
+  # The CQL search endpoint paginates by an OPAQUE cursor in `_links.next` (a manual
+  # `start` offset is NOT honored — it silently re-returns page 1, verified live).
+  # So the kernel-driven cursor IS the next URL Confluence hands us. `:max_pages` is
+  # surfaced as `truncated?` (no silent cap); `totalSize` rides as `:total` for the
+  # Sync loop's coverage reconciliation (ADR-5 §3).
+  defp paginate(events, json, page_num, opts) do
+    next = get_in(json, ["_links", "next"])
     max_pages = Keyword.get(opts, :max_pages)
-    limit = Keyword.get(opts, :limit, @limit)
 
     page =
       case Map.get(json, "totalSize") do
@@ -103,15 +108,30 @@ defmodule Hive.Confluence.Connector do
       end
 
     cond do
-      not has_next? ->
+      is_nil(next) ->
         Map.merge(page, %{cursor: :done, truncated?: false})
 
       is_integer(max_pages) and page_num >= max_pages ->
         Map.merge(page, %{cursor: :done, truncated?: true})
 
       true ->
-        next = %{"start" => start + limit, "__page" => page_num + 1}
-        Map.merge(page, %{cursor: next, truncated?: false})
+        link_base = get_in(json, ["_links", "base"]) || default_link_base(opts)
+        cursor = %{"url" => join_next(link_base, next), "__page" => page_num + 1}
+        Map.merge(page, %{cursor: cursor, truncated?: false})
+    end
+  end
+
+  # `_links.next` is relative to the `/wiki` CONTEXT path, not the host root — so
+  # resolve it against `_links.base` (which Confluence returns as `<host>/wiki`),
+  # falling back to `base_url + /wiki`. Resolving against the bare host drops `/wiki`
+  # and 404s (verified live).
+  defp default_link_base(opts), do: String.trim_trailing(base_url(opts), "/") <> "/wiki"
+
+  defp join_next(link_base, next) do
+    cond do
+      String.starts_with?(next, "http") -> next
+      String.starts_with?(next, "/") -> String.trim_trailing(link_base, "/") <> next
+      true -> String.trim_trailing(link_base, "/") <> "/" <> next
     end
   end
 
@@ -234,18 +254,18 @@ defmodule Hive.Confluence.Connector do
   def auth_header(user, token),
     do: {~c"authorization", ~c"Basic " ++ String.to_charlist(Base.encode64("#{user}:#{token}"))}
 
-  defp url(start, opts) do
-    base = Keyword.get(opts, :base_url) || System.get_env("CONFLUENCE_URL") || ""
-    limit = Keyword.get(opts, :limit, @limit)
+  defp base_url(opts), do: Keyword.get(opts, :base_url) || System.get_env("CONFLUENCE_URL") || ""
 
+  # The first request; subsequent pages follow the API's `_links.next` cursor.
+  defp initial_url(opts) do
     params = %{
       "cql" => cql(opts),
       "expand" => @expand,
-      "start" => to_string(start),
-      "limit" => to_string(limit)
+      "start" => "0",
+      "limit" => to_string(Keyword.get(opts, :limit, @limit))
     }
 
-    String.trim_trailing(base, "/") <> @search <> "?" <> URI.encode_query(params)
+    String.trim_trailing(base_url(opts), "/") <> @search <> "?" <> URI.encode_query(params)
   end
 
   # CQL: current pages, optionally one space, optionally a delta watermark.
@@ -295,7 +315,10 @@ defmodule Hive.Confluence.Connector do
   # never a kernel default). The choice is logged so it is never silent.
   defp ssl_opts do
     if System.get_env("CONFLUENCE_TLS_INSECURE") == "1" do
-      Logger.warning("confluence connector: TLS verification DISABLED (CONFLUENCE_TLS_INSECURE=1)")
+      Logger.warning(
+        "confluence connector: TLS verification DISABLED (CONFLUENCE_TLS_INSECURE=1)"
+      )
+
       [verify: :verify_none]
     else
       [

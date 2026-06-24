@@ -76,23 +76,25 @@ defmodule Hive.Confluence.ConnectorTest do
     "_links" => %{"webui" => "/z"}
   }
 
-  defp page1_body(opts \\ []) do
-    next = Keyword.get(opts, :next, true)
-    links = if next, do: %{"next" => "/rest/api/content?start=50"}, else: %{}
-
-    %{"results" => [@page_101, @page_102, @page_103], "start" => 0, "limit" => 50, "size" => 3, "_links" => links}
+  # Confluence's CQL search paginates by a CURSOR carried in `_links.next` (a manual
+  # `start` offset is NOT honored — verified on the live API). The connector must
+  # follow that opaque next URL, not compute its own offset.
+  defp page1_body do
+    # `next` is relative to the /wiki context (no /wiki prefix), resolved against `_links.base`.
+    %{"results" => [@page_101, @page_102, @page_103], "limit" => 50, "size" => 3,
+      "_links" => %{"base" => "https://example.test/wiki", "next" => "/rest/api/content/search?cursor=NEXTTOK&limit=50"}}
     |> JSON.encode!()
   end
 
   defp page2_body do
-    %{"results" => [@page_201], "start" => 50, "limit" => 50, "size" => 1, "_links" => %{}}
+    %{"results" => [@page_201], "limit" => 50, "size" => 1, "_links" => %{}}
     |> JSON.encode!()
   end
 
-  # http stub: route by whether the URL carries the start=50 cursor.
+  # http stub: route by whether the URL carries the opaque next cursor token.
   defp http_two_pages do
     fn url ->
-      if String.contains?(url, "start=50"), do: {:ok, page2_body()}, else: {:ok, page1_body()}
+      if String.contains?(url, "cursor=NEXTTOK"), do: {:ok, page2_body()}, else: {:ok, page1_body()}
     end
   end
 
@@ -153,7 +155,7 @@ defmodule Hive.Confluence.ConnectorTest do
   test "fetch/2 follows _links.next then stops at :done" do
     {:ok, p1} = Connector.fetch(:start, opts())
     assert p1.cursor != :done
-    assert p1.cursor["start"] == 50
+    assert p1.cursor["url"] =~ "cursor=NEXTTOK"
     refute p1.truncated?
 
     {:ok, p2} = Connector.fetch(p1.cursor, opts())
