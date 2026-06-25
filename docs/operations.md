@@ -1,5 +1,5 @@
 ---
-date: 2026-06-23
+date: 2026-06-25
 status: Current
 owner: hive
 ---
@@ -112,6 +112,106 @@ connector services are a commented skeleton until then).
 `WIKI_URL/USER/USER_TOKEN`). Real values live only in `secrets.env`, **never committed**,
 never in a public repo. Scope is set per connector (intranet sources default to `group`, so
 they can never surface as `public`).
+
+## Cognitive turn-on (shadow) — operator runbook
+
+How to test the cognitive layer (reward-gated enrichment → entity-resolution → origin
+accounting → relaxation) end-to-end on a **clone of the real corpus**, measure whether it
+**improves answers** (gate 7), and calibrate — without risking production.
+
+**The guard (non-negotiable).** The loop *mutates* state, so it runs **only on an isolated
+persistent shadow DB**, never `swarm_dev` (conditional-prod). The harness asserts
+`current_database()` and refuses `swarm_dev` or any env↔connected mismatch — so always set
+`SWARM_DB_NAME` explicitly (there is no safe default in `MIX_ENV=dev`). Snapshot before, wipe/roll
+back after; promotion to prod is a reviewed go/no-go, never automatic.
+
+**Prereqs:** `postgres`, `ollama`+GPU (qwen3:14b), and `ml` gRPC (bge-m3) up; connector creds
+loaded (`set -a; . hive/secrets.env; set +a`). All commands run from **`swarm/kernel/`** with
+`MIX_ENV=dev SWARM_ML_ADDRESS=<ml host:port>` (e.g. `172.19.0.5:50051`).
+
+**The one thing only you can produce — `qa.json`** (gate 7 lives or dies on it): real questions +
+the node keys a correct answer should cite. External, **never committed** (keys are content).
+
+```json
+[{"q": "a real user question", "gold": ["node_key_of_the_right_page", "..."]}]
+```
+
+> **Do a small smoke FIRST, not the multi-day run.** One cycle, a small slice (low `*_MAXPAGES`),
+> `CYCLES=1`, ~5 `qa.json` questions — validate *your* end-to-end flow (ingest → qa → loop → lift)
+> in minutes. Then scale. (Operator-analog of CTC-5.)
+
+### Steps
+
+1. **Ingest the real corpus into the shadow** (Confluence + MediaWiki via the ADR-5 Sync; scale the
+   `*_MAXPAGES` tunables up from the smoke):
+
+   ```bash
+   SWARM_DB_NAME=swarm_shadow SWARM_ML_ADDRESS=172.19.0.5:50051 MIX_ENV=dev \
+   CONF_MAXPAGES=… WIKI_MAXPAGES=… mise exec -- mix run --no-start \
+     -r ../../hive/plugins/confluence_connector/confluence_connector.ex \
+     -r ../../hive/plugins/mediawiki_connector/mediawiki_connector.ex \
+     ../../hive/scripts/conn_2source_slice.exs
+   ```
+
+2. **Snapshot** the shadow (rollback insurance):
+
+   ```bash
+   docker exec hive-postgres-1 pg_dump -U swarm swarm_shadow > shadow-seed.sql
+   ```
+
+3. **Control run** — proves the measure/read path is non-mutating and the DB guard passes:
+
+   ```bash
+   LOOP_MODE=control SWARM_DB_NAME=swarm_shadow SWARM_ML_ADDRESS=172.19.0.5:50051 MIX_ENV=dev \
+     mise exec -- mix run --no-start ../../hive/scripts/cognitive_loop.exs
+   ```
+
+4. **Pre-loop answerability baseline** (capture BEFORE the hot run; needs `qa.json`):
+
+   ```bash
+   QUERY_SET=/abs/qa.json SCOPES=group RECALL_K=10 SWARM_DB_NAME=swarm_shadow MIX_ENV=dev \
+   SWARM_ML_ADDRESS=172.19.0.5:50051 \
+     mise exec -- mix run --no-start ../../hive/scripts/answerability_lift.exs
+   ```
+
+5. **Apply the CTC-5 priors** in `swarm/kernel/config/config.exs` (directional — re-derive in step 7):
+   - **#3 ER over-proposes:** `config :swarm, :entity_resolution, vec_threshold:` `0.85` → **~0.93**.
+   - **#4 reward gate non-selective:** `config :swarm, :enrichment, priority: [threshold:` `0.35` →
+     **your p50** `]`. The default gates nothing on a fresh corpus → enrichment runs on *everything*
+     at ~120 s/source. Do **not** copy the public 0.89; derive yours in step 7.
+
+6. **Hot run** (`MAX_PER_PASS` = enrichment budget per pass; `CYCLES` = enrich→ER cadence rounds):
+
+   ```bash
+   LOOP_MODE=real CYCLES=4 ENRICH_ROUNDS=2 MAX_PER_PASS=20 \
+   SWARM_DB_NAME=swarm_shadow SWARM_ML_ADDRESS=172.19.0.5:50051 MIX_ENV=dev \
+     mise exec -- mix run --no-start ../../hive/scripts/cognitive_loop.exs
+   ```
+
+   Each cycle prints aggregate **gauges** (no content): `entities`, `claims`, `merges`, `seen_max`,
+   `top1` (single-super-node concentration), `frag` (un-merged key collisions), `rejected` (ER).
+   The **circuit-breaker auto-halts + rolls back** on poisoning — concentration spike
+   (`top1` jumps >0.3 above 0.5 with ≥8 claims), entity collapse (<0.7× prior), merge-rate spike, or
+   `seen_max` runaway (>20). A clean run: `top1` flat/decreasing, `seen_max` low, `frag` → 0, no trip.
+
+7. **Post-loop = the verdict.** Re-run the answerability harness (step 4) and **diff vs the baseline
+   block — that lift is gate 7** (does cognition improve answers). Then:
+
+   ```bash
+   SWARM_DB_NAME=swarm_shadow MIX_ENV=dev \
+     mise exec -- mix run --no-start ../../hive/scripts/calibrate.exs   # ER + reward thresholds from real logs
+   ```
+
+   Re-measure fragmentation → 0; **watch for multi-origin corroboration** (`seen_max` > 1 from
+   distinct origins / exact-triple overlap) — if it appears, that is the trigger to promote the
+   deferred lineage-aware clustering (workspace ADR-13). Fill the 10-gate go/no-go table in
+   `board/research/cognitive-turn-on-calibration.md` with real numbers and convene a ≥2-family
+   council before any promotion toward prod.
+
+**Rollback.** The breaker rolls back automatically; to reset manually, restore the snapshot
+(`docker exec -i hive-postgres-1 psql -U swarm swarm_shadow < shadow-seed.sql`) or delete just the
+cognitive layer (entity nodes + `claim` edges + `enrichment_watermark` + `entity_resolution_audit`).
+The ingested corpus is preserved; no enriched state should persist past a no-go.
 
 ## Security scanning
 
