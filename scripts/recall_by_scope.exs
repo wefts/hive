@@ -56,8 +56,13 @@ probes =
 rank_of = fn ids, node_id -> Enum.find_index(ids, &(&1 == node_id)) end
 title_ids = fn phrase -> Core.search(phrase, scopes, limit: k) |> Enum.map(& &1.id) end
 
+lex_w = String.to_float(System.get_env("LEX_W", "1.0"))
+dense_w = String.to_float(System.get_env("DENSE_W", "1.0"))
+
 retr_ids = fn phrase, dense? ->
-  %{memories: m, expanded: e} = Retrieval.search(phrase, scopes, limit: k, dense: dense?, max_depth: 1)
+  %{memories: m, expanded: e} =
+    Retrieval.search(phrase, scopes, limit: k, dense: dense?, max_depth: 1, lex_weight: lex_w, dense_weight: dense_w)
+
   Enum.map(m, & &1.node_id) ++ Enum.map(e, & &1.id)
 end
 
