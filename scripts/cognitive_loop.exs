@@ -24,6 +24,11 @@ alias Swarm.Repo
 
 db = System.get_env("SWARM_DB_NAME", "swarm_shadow")
 if db == "swarm_dev", do: raise("REFUSED: cognitive_loop must never run on swarm_dev (conditional-prod)")
+# NB: this env-var view is NOT the connected DB. In MIX_ENV=dev, runtime.exs defaults
+# the Repo to swarm_dev when SWARM_DB_NAME is unset — so this `db` (default swarm_shadow)
+# could disagree with where the Repo actually connects. The real guard is below, after
+# Repo.start_link: assert current_database() so the script can never silently mutate
+# conditional-prod nor diverge from its own gauges (CTC-5 finding #1).
 
 # LOOP_MODE (not MODE — that collides with an ambient MODE=cli in this shell).
 mode = System.get_env("LOOP_MODE", "shakedown")
@@ -35,6 +40,23 @@ enrich_rounds = String.to_integer(System.get_env("ENRICH_ROUNDS", "2"))
 {:ok, _} = Application.ensure_all_started(:grpc)
 {:ok, _} = Repo.start_link()
 {:ok, _} = DynamicSupervisor.start_link(strategy: :one_for_one, name: GRPC.Client.Supervisor)
+
+# Truthful DB guard (CTC-5 finding #1): check the database the Repo ACTUALLY connected
+# to, not the env-var view above. Refuses conditional-prod, and refuses a silent
+# env/runtime-default divergence (where the script's gauges would describe a different
+# DB than it mutates). Set SWARM_DB_NAME explicitly — there is no safe default in dev.
+%{rows: [[actual_db]]} = Repo.query!("SELECT current_database()")
+
+if actual_db == "swarm_dev" do
+  raise("REFUSED: Repo connected to swarm_dev (conditional-prod) — cognitive_loop must never mutate it")
+end
+
+if actual_db != db do
+  raise(
+    "REFUSED: SWARM_DB_NAME=#{db} but the Repo connected to #{actual_db} " <>
+      "(env/runtime-default mismatch) — set SWARM_DB_NAME explicitly so gauges and mutations agree"
+  )
+end
 
 # Bound the loop small + ER stricter than prod (first integrated run, council).
 enr = Application.get_env(:swarm, :enrichment, [])
