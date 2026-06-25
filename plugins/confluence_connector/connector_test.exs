@@ -26,10 +26,12 @@ defmodule Hive.Confluence.ConnectorTest do
       "storage" => %{
         "representation" => "storage",
         "value" =>
-          "<p>Deploy via <code>task ship</code>.</p>" <>
-            "<ac:structured-macro ac:name=\"info\"><ac:rich-text-body><p>note</p></ac:rich-text-body></ac:structured-macro>" <>
+          "<h2>Deploy</h2>" <>
+            "<p>Deploy via <code>task ship</code>.</p>" <>
+            "<ac:structured-macro ac:name=\"code\"><ac:parameter ac:name=\"language\">bash</ac:parameter>" <>
+            "<ac:plain-text-body><![CDATA[make build\nmake test]]></ac:plain-text-body></ac:structured-macro>" <>
             "<p>See <ac:link><ri:page ri:content-title=\"Rollback\" /></ac:link> &amp; logs.</p>" <>
-            "<table><tbody><tr><td>step</td></tr></tbody></table>"
+            "<table><tbody><tr><th>step</th><th>cmd</th></tr><tr><td>build</td><td>make</td></tr></tbody></table>"
       }
     },
     "ancestors" => [%{"id" => "1", "title" => "Space Home"}, %{"id" => "50", "title" => "Operations"}],
@@ -112,14 +114,22 @@ defmodule Hive.Confluence.ConnectorTest do
 
   # --- pure parsers ---------------------------------------------------------
 
-  test "strip_storage/1 unescapes entities, drops tags/macros/tables, keeps prose" do
-    prose = Connector.strip_storage(@page_101["body"]["storage"]["value"])
-    assert prose =~ "Deploy via task ship"
-    assert prose =~ "See"
-    assert prose =~ "& logs"
-    refute prose =~ "<"
-    refute prose =~ "step"
-    refute prose =~ "ac:"
+  test "to_markdown/1 emits swarm_markdown_v1 — headings, fenced code, pipe tables, prose" do
+    md = Connector.to_markdown(@page_101["body"]["storage"]["value"])
+    # heading
+    assert md =~ "## Deploy"
+    # prose + inline code + unescaped entity
+    assert md =~ "task ship"
+    assert md =~ "& logs"
+    # fenced code block (structure PRESERVED, not flattened)
+    assert md =~ "```"
+    assert md =~ "make build" and md =~ "make test"
+    # pipe table (structure PRESERVED, not discarded)
+    assert md =~ "| step | cmd |"
+    assert md =~ "| build | make |"
+    # no raw XHTML tags / Confluence macro markup leaks through
+    refute md =~ ~r/<[a-z]/
+    refute md =~ "ac:"
   end
 
   test "extract_links/1 pulls ri:page content-title targets" do
@@ -144,7 +154,8 @@ defmodule Hive.Confluence.ConnectorTest do
     page_entity = Enum.find(event.entities, &(&1.key == "Runbook: Deploy"))
     assert page_entity.type == "article"
     assert page_entity.scope == "group"
-    assert page_entity.content =~ "Deploy via task ship"
+    assert page_entity.content =~ "Deploy via"
+    assert page_entity.content =~ "| step | cmd |"
 
     assert Enum.any?(event.entities, &(&1.key == "Rollback" and &1.content == ""))
     assert %{from: "Runbook: Deploy", to: "Rollback", type: "links_to"} in event.relations

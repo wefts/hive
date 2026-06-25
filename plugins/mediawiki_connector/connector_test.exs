@@ -62,6 +62,13 @@ defmodule Hive.MediaWiki.ConnectorTest do
     assert out =~ "bold"
   end
 
+  test "plain_text/1 converts wikitext headings to swarm_markdown_v1 ATX headings" do
+    out = Connector.plain_text("== Overview ==\n\nbody\n\n=== Details ===\n\nmore")
+    assert out =~ "## Overview"
+    assert out =~ "### Details"
+    refute out =~ "=="
+  end
+
   test "fetch/2 emits one event per page with provenance, scope, body, links" do
     {:ok, page} = Connector.fetch(:start, opts())
     assert length(page.events) == 2

@@ -140,12 +140,12 @@ defmodule Hive.Confluence.Connector do
   defp page_to_event(page, scope) do
     title = page |> Map.get("title", "") |> String.trim()
     xhtml = get_in(page, ["body", "storage", "value"]) || ""
-    prose = strip_storage(xhtml)
+    md = to_markdown(xhtml)
 
     cond do
       archived?(page) -> []
-      title == "" or String.length(prose) < @min_body -> []
-      true -> [build_event(page, title, xhtml, prose, scope)]
+      title == "" or String.length(md) < @min_body -> []
+      true -> [build_event(page, title, xhtml, md, scope)]
     end
   end
 
@@ -205,23 +205,140 @@ defmodule Hive.Confluence.Connector do
     end
   end
 
-  # --- storage-XHTML → prose / links ----------------------------------------
+  # --- storage-XHTML → swarm_markdown_v1 / links ----------------------------
 
   @doc """
-  Strip Confluence storage-XHTML to readable prose: drop `<table>…</table>` blocks
-  (their cells aren't prose), strip every remaining tag (including `<ac:…>` macro
-  and `<ri:…>` ref markup), then unescape XML entities and collapse whitespace.
-  Structure-aware body handling (tables/code as data) is the Phase-2 segmenter's
-  job; here we emit clean text and let `extract_links/1` keep the link structure.
+  Convert Confluence storage-XHTML to the `swarm_markdown_v1` body profile (ADR-14
+  §2; the kernel's structure-aware segmenter consumes it). Markup is stripped as
+  noise but **structure is preserved**: `<h1-6>` → ATX headings, `<ac:…code…>` →
+  fenced code, `<table>` → pipe tables (a flattened table loses row/cell relations),
+  `<li>` → `-` lists, `<code>` → inline backticks. Code bodies are placeholder-
+  protected so later tag-stripping/unescaping never corrupts them.
   """
-  @spec strip_storage(String.t()) :: String.t()
-  def strip_storage(xhtml) when is_binary(xhtml) do
-    xhtml
-    |> String.replace(~r/<table\b.*?<\/table>/su, " ")
-    |> String.replace(~r/<[^>]+>/u, " ")
+  @spec to_markdown(String.t()) :: String.t()
+  def to_markdown(xhtml) when is_binary(xhtml) do
+    {protected, code} = protect_code(xhtml)
+
+    protected
+    |> convert_tables()
+    |> convert_headings()
+    |> convert_lists()
+    |> convert_inline_code()
+    |> convert_paragraphs()
+    |> strip_tags()
     |> unescape()
-    |> String.replace(~r/\s+/u, " ")
+    |> normalize_ws()
+    |> restore_code(code)
     |> String.trim()
+  end
+
+  # Replace `<ac:structured-macro ac:name="code">…<![CDATA[…]]></…>` with a
+  # placeholder; return the placeholder text + the fenced blocks to restore later.
+  @code_macro ~r/<ac:structured-macro[^>]*ac:name="code".*?<\/ac:structured-macro>/su
+  defp protect_code(xhtml) do
+    blocks = Regex.scan(@code_macro, xhtml) |> Enum.map(fn [m] -> fence_of(m) end)
+
+    {text, _} =
+      Enum.reduce(blocks, {xhtml, 0}, fn _b, {acc, i} ->
+        {String.replace(acc, @code_macro, " CODE#{i} ", global: false), i + 1}
+      end)
+
+    {text, blocks}
+  end
+
+  defp fence_of(macro) do
+    lang =
+      case Regex.run(~r/<ac:parameter[^>]*ac:name="language"[^>]*>(.*?)<\/ac:parameter>/su, macro) do
+        [_, l] -> String.trim(l)
+        _ -> ""
+      end
+
+    body =
+      case Regex.run(~r/<!\[CDATA\[(.*?)\]\]>/su, macro) do
+        [_, b] -> b
+        _ -> macro |> String.replace(~r/<[^>]+>/u, "") |> String.trim()
+      end
+
+    "```#{lang}\n#{body}\n```"
+  end
+
+  defp restore_code(text, blocks) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.reduce(text, fn {fence, i}, acc ->
+      String.replace(acc, " CODE#{i} ", "\n\n#{fence}\n\n")
+    end)
+  end
+
+  defp convert_tables(html) do
+    Regex.replace(~r/<table[^>]*>(.*?)<\/table>/su, html, fn _, inner ->
+      "\n\n" <> table_md(inner) <> "\n\n"
+    end)
+  end
+
+  defp table_md(inner) do
+    rows =
+      Regex.scan(~r/<tr[^>]*>(.*?)<\/tr>/su, inner, capture: :all_but_first)
+      |> Enum.map(fn [r] -> row_cells(r) end)
+      |> Enum.reject(&(&1 == []))
+
+    case rows do
+      [head | _] = all ->
+        sep = "| " <> Enum.map_join(head, " | ", fn _ -> "---" end) <> " |"
+        [md_row(head), sep | Enum.map(tl(all), &md_row/1)] |> Enum.join("\n")
+
+      [] ->
+        ""
+    end
+  end
+
+  defp row_cells(row) do
+    Regex.scan(~r/<t[hd][^>]*>(.*?)<\/t[hd]>/su, row, capture: :all_but_first)
+    |> Enum.map(fn [c] ->
+      c |> strip_tags() |> unescape() |> String.replace(~r/\s+/u, " ") |> String.trim()
+    end)
+  end
+
+  defp md_row(cells), do: "| " <> Enum.join(cells, " | ") <> " |"
+
+  defp convert_headings(html) do
+    Regex.replace(~r/<h([1-6])[^>]*>(.*?)<\/h\1>/su, html, fn _, n, inner ->
+      "\n\n" <>
+        String.duplicate("#", String.to_integer(n)) <> " " <> clean_inline(inner) <> "\n\n"
+    end)
+  end
+
+  defp convert_lists(html) do
+    items =
+      Regex.replace(~r/<li[^>]*>(.*?)<\/li>/su, html, fn _, inner ->
+        "\n- " <> clean_inline(inner)
+      end)
+
+    String.replace(items, ~r/<\/?[uo]l[^>]*>/u, "\n")
+  end
+
+  defp convert_inline_code(html) do
+    Regex.replace(~r/<code[^>]*>(.*?)<\/code>/su, html, fn _, inner ->
+      "`" <> clean_inline(inner) <> "`"
+    end)
+  end
+
+  defp convert_paragraphs(html) do
+    html
+    |> String.replace(~r/<br[^>]*>/u, "\n")
+    |> String.replace(~r/<\/?p[^>]*>/u, "\n\n")
+  end
+
+  defp clean_inline(html),
+    do: html |> strip_tags() |> unescape() |> String.replace(~r/\s+/u, " ") |> String.trim()
+
+  defp strip_tags(html), do: String.replace(html, ~r/<[^>]+>/u, "")
+
+  defp normalize_ws(text) do
+    text
+    |> String.replace(~r/[ \t]+/u, " ")
+    |> String.replace(~r/ *\n */u, "\n")
+    |> String.replace(~r/\n{3,}/u, "\n\n")
   end
 
   @doc "Extract linked page titles from Confluence `<ri:page ri:content-title=\"…\">` refs."

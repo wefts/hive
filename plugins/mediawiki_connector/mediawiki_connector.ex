@@ -196,7 +196,7 @@ defmodule Hive.MediaWiki.Connector do
       end
     end)
     |> String.replace(~r/'''?/u, "")
-    |> String.replace(~r/^=+\s*(.*?)\s*=+\s*$/mu, "\\1")
+    |> atx_headings()
     |> String.replace(~r/<[^>]+>/u, "")
     |> String.replace(~r/[ \t]+/u, " ")
     |> String.replace(~r/\n{3,}/u, "\n\n")
@@ -212,6 +212,14 @@ defmodule Hive.MediaWiki.Connector do
 
   defp drop_media_links(text),
     do: String.replace(text, ~r/\[\[(?:File|Image|Category|Fichier):[^\]]*\]\]/iu, "")
+
+  # Wikitext headings (`== H ==`, level = number of `=`) → swarm_markdown_v1 ATX
+  # headings (`## H`), so the kernel segmenter can split the body into sections.
+  defp atx_headings(text) do
+    Regex.replace(~r/^(={1,6})\s*(.*?)\s*=+\s*$/mu, text, fn _, eqs, title ->
+      String.duplicate("#", String.length(eqs)) <> " " <> title
+    end)
+  end
 
   @doc "Canonicalise a MediaWiki title (url-decode, drop anchor, `_`→space, upcase first)."
   @spec canonical_title(String.t()) :: String.t()
