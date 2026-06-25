@@ -59,8 +59,12 @@ if actual_db != db do
 end
 
 # Bound the loop small + ER stricter than prod (first integrated run, council).
+# MAX_PER_PASS is the per-pass enrichment budget — env-tunable so the dry-run can
+# scale exposure (1 source for a smoke, a handful for the bounded run) and the
+# operator can size the hot run. Default 3 (the council's small first-run bound).
+max_per_pass = String.to_integer(System.get_env("MAX_PER_PASS", "3"))
 enr = Application.get_env(:swarm, :enrichment, [])
-Application.put_env(:swarm, :enrichment, Keyword.merge(enr, max_per_pass: 3, claim_reliability: 0.5))
+Application.put_env(:swarm, :enrichment, Keyword.merge(enr, max_per_pass: max_per_pass, claim_reliability: 0.5))
 
 defmodule Loop do
   alias Swarm.Repo
@@ -198,7 +202,7 @@ gen = if mode == "runaway", do: Inject.runaway_gen(), else: Inject.shakedown_gen
                            vec_threshold: 0.999, lex_threshold: 0.5]}
   end
 
-IO.puts("== cognitive-loop harness == db=#{db} mode=#{mode} cycles=#{cycles} enrich_rounds=#{enrich_rounds}")
+IO.puts("== cognitive-loop harness == db=#{db} mode=#{mode} cycles=#{cycles} enrich_rounds=#{enrich_rounds} max_per_pass=#{max_per_pass}")
 
 # Negative control: prove the measure/read path is non-mutating before any hot run.
 if mode == "control" do
