@@ -90,6 +90,29 @@ volume (all images) + the models directory.
 losing a replica is transparent. `ollama` (GPU) and `postgres` (state) stay
 singletons; kernel clustering (BEAM + leader election) is future work.
 
+## Connectors (ingest sources)
+
+Two real connectors live in `plugins/`, implementing the kernel's `fetch/2` contract
+(swarm ADR-5) and emitting the `swarm_markdown_v1` body profile (structure preserved —
+headings, tables, code):
+
+| Plugin | Source | Auth | Notes |
+| --- | --- | --- | --- |
+| `mediawiki` | intranet MediaWiki | BotPassword (degrades to anon) | allpages + `continue` pagination; wikitext→md; redirect resolution |
+| `confluence` | intranet Confluence | HTTP Basic | CQL search; opaque `_links.next` cursor; storage-XHTML→md; `group` scope |
+
+Both are kernel-driven for completeness (`truncated?` on a real ceiling, never silent) and
+carry a `:since` delta watermark for incremental top-up. **Loading:** currently auto-loaded
+**in-process** by `Swarm.Plugins` (the dev-adapter mode, ports.md / ADR-11); the
+out-of-process plugin ABI + manifest loader is future work (the `docker-compose.yml`
+connector services are a commented skeleton until then).
+
+**Config + secrets.** Each connector reads its base URL + credentials from env; the required
+**names** are listed in `secrets.env.example` (`CONFLUENCE_URL/USER/TOKEN`,
+`WIKI_URL/USER/USER_TOKEN`). Real values live only in `secrets.env`, **never committed**,
+never in a public repo. Scope is set per connector (intranet sources default to `group`, so
+they can never surface as `public`).
+
 ## Security scanning
 
 The intranet `docker-scanner` bundles trivy + hadolint + dockle (amd64; enable
