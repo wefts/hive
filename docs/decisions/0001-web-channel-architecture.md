@@ -24,17 +24,21 @@ no-leak a live multi-user test and requires a real IdP.
 2. **A new UI surface ⇒ a new typed Core RPC. The channel NEVER reads the graph DB.** Every
    datum flows through a scope-enforcing Core RPC. New RPCs (Evidence / Brief / ActivityFeed /
    Neighborhood) extend `core.proto`; they are swarm/ dependencies, sequenced per the plan.
-3. **Identity is Keycloak (OIDC).** An authenticated session maps to the kernel's `viewer` +
-   allowed `scopes` (from Keycloak groups/roles). **The kernel remains the sole
-   scope-enforcement authority** — the channel only passes the authenticated identity; it
-   never decides visibility. The coarse scope case needs no kernel change (the kernel already
-   accepts `viewer`+`scopes`).
+3. **Identity is a pluggable user scaffold (channel-owned), kernel stays scope authority.**
+   The channel owns a user model (`user_id`, `source`, `scopes/roles`, `invited_by`,
+   `status`) → kernel `viewer` + `scopes`. **Keycloak (OIDC) is the PRIMARY source**
+   (org/SSO; scopes from groups); **local non-SSO accounts are SECONDARY** so an **external
+   user can be invited** when needed (how the test cohorts enter). An admin role **`groot`**
+   (root-like; named for security, not "root/admin") bootstraps, invites, and grants scopes.
+   Every new user is **default-deny scope; grants are explicit** (SSO group or `groot`). The
+   kernel only ever receives an authenticated `viewer`+`scopes` and **remains the sole
+   scope-enforcement authority** — the coarse case needs no kernel change.
 4. **Rendering is deterministic** (presentation-determinism): no model chooses formatting or
    re-spells any value/id/link/citation; persona/i18n re-phrase from structured fields only.
-
-OPEN (the §7 fork, not locked here): the **cohort-2 ACL granularity** — whether "may know the
-info but not access the source" stays coarse (public-only) or becomes a fine per-source ACL
-with citation redaction (a swarm/ kernel change). Decided before P3.
+5. **Cohort-2 ACL = (A) coarse** (decided): a user without source access sees only
+   `public`-scoped derived knowledge; no kernel change. The fine per-source ACL + citation
+   redaction (B) is a **deferred swarm/ phase** if the "knowable-but-not-accessible" need
+   proves real — revisited before P3.
 
 ## Consequences
 

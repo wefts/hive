@@ -25,11 +25,22 @@ is already a Python grpcio client of it).
   kernel's Core API (`:50061`). It requires **zero kernel code change to exist** (Phase 0).
 - **Rendering:** **server-side HTML** (Python → HTMX partials); Alpine for local
   interactivity; Tailwind + Basecoat tokens; dark mode. **No model in the render path.**
-- **Identity & access (P1):** the channel sits behind **Keycloak (OIDC)**; an authenticated
-  session maps to the kernel's `viewer` + allowed `scopes` (from Keycloak groups/roles).
-  The kernel stays the scope-enforcement authority — the channel only *passes* the
-  authenticated identity, it never decides visibility. (Coarse case = no kernel change; the
-  fine cohort-2 ACL is the §7 fork.)
+- **Identity & access (P1) — a pluggable user scaffold, not just SSO pass-through:**
+  - The channel owns a **user model** (`user_id`, `source`, `scopes/roles`, `invited_by`,
+    `status`) and maps each user to the kernel's `viewer` + allowed `scopes`.
+  - **Identity sources are pluggable:** **Keycloak (OIDC) is PRIMARY** (org/SSO users);
+    **local (non-SSO) accounts are SECONDARY** — so an **external user can be invited** when
+    needed (the mechanism by which the real testers get in). The scaffold exists regardless
+    of source.
+  - **Admin role `groot`** (root-like; named for security + a Guardians reference, not
+    "root/admin" so it's a smaller target): bootstraps the instance, **invites external
+    users, and assigns their scopes**. High-value account — protected separately.
+  - **Security posture:** every new user is **default-deny scope**; scopes are granted
+    **explicitly** (an SSO group mapping, or a `groot` grant per invited user) — never
+    implicit. The **kernel remains the sole scope-enforcement authority**; the channel only
+    passes an authenticated `viewer`+`scopes`, it never decides visibility. External users +
+    a private graph = scope discipline is the load-bearing security property.
+  - Coarse cohort-2 ACL (§7, decided **A**) = no kernel change.
 - **Manifest** (ports.md minimum): name `web_channel`, kind `channel`, runtime
   sidecar, entrypoint, protocol version (`swarm.core.v1`), env (Core API address, viewer
   identity mapping), capabilities (the RPCs it consumes), safety class `read-only`
@@ -80,26 +91,34 @@ DB reach-around.
 - **Manual QA:** brief §0 script (ask answerable → found+citation spot-checked char-for-char; ask out-of-scope → dignified not_found; stop kernel → error; special-char ref verbatim).
 - **Cut line:** a single input box + answer card (status badge, confidence, citation chips), a **fixed operator viewer, no auth yet**. The daily-usable query surface — ship it first.
 
-### P1 — Keycloak identity + scope mapping + the live privacy-no-leak gate (FOUNDATIONAL)
+### P1 — User scaffold (SSO primary + local secondary + `groot`) + the live privacy-no-leak gate (FOUNDATIONAL)
 
 - **Why first:** real testers with real (lack of) Confluence access turn scope/privacy
   no-leak — the ONE hard invariant — into a **live adversarial test by real humans**, not a
-  unit test. You cannot put differentiated-access testers on the system without auth.
-- **Identity:** web_channel sits behind **Keycloak (OIDC)**; a session resolves to a
-  canonical `viewer` + the allowed **scopes** derived from Keycloak groups/roles (e.g. a
-  `confluence` group → the `group` scope). Every `Ask`/`KbSearch` carries them. The kernel
-  already accepts `viewer`+`scopes` (`AskRequest`), so the **coarse** case is channel +
-  Keycloak deployment — **no kernel change**.
-- **The two PO tester cohorts:** (1) **no Confluence access, must never get it** → the hard
-  no-leak gate (existing default-deny scope model). (2) **no direct access but may
-  legitimately KNOW info from it** → the **ACL-granularity fork (§7):** coarse (cohort-2
-  sees only `public`-scoped derived knowledge) vs fine (derived knowledge visible, the
-  source **citation redacted** — a swarm/ kernel ACL change).
-- **Criteria / HARD GATE:** a cohort-1 tester NEVER receives Confluence content via answer
-  prose, citations, `KbSearch` hits, or (later) evidence drill-down — proven by **real
-  testers running adversarial queries**, not output inspection alone (brief A.2.6 + §8 checklist).
-- **Signals:** Keycloak in compose; Keycloak-group→scope mapping tests; an adversarial scope
-  suite run under each tester identity; Keycloak secrets/realm config out of public repos.
+  unit test. You cannot admit differentiated-access testers without the user/auth scaffold.
+- **User scaffold (channel-owned):** a user model (`user_id`, `source`, `scopes/roles`,
+  `invited_by`, `status`) → kernel `viewer` + `scopes`. **Identity sources pluggable:**
+  - **Keycloak (OIDC) PRIMARY** — org/SSO users; scopes from groups (e.g. `confluence`
+    group → `group` scope).
+  - **Local (non-SSO) SECONDARY** — **invite an external user** (invite token / local
+    credential) when needed; this is how the test cohorts get in.
+  - **`groot` admin role** — bootstraps the instance, invites external users, assigns their
+    scopes. High-value account, protected separately (not "root/admin" by name, for security).
+- **Security:** every new user is **default-deny scope**; scopes granted **explicitly** (SSO
+  group mapping or a `groot` grant) — never implicit. The kernel already accepts
+  `viewer`+`scopes` (`AskRequest`) and **remains the sole scope authority** — the channel only
+  passes an authenticated identity; coarse case = **no kernel change**.
+- **The two PO tester cohorts (cohort-2 = coarse, decided A):** (1) **no Confluence access,
+  must never get it** → the hard no-leak gate. (2) **no direct access but may legitimately
+  KNOW info from it** → **coarse: sees only `public`-scoped derived knowledge** (fine
+  per-source redaction is a deferred swarm/ ACL change, §7).
+- **Criteria / HARD GATE:** a cohort-1 (and any external/default-deny) user NEVER receives
+  Confluence content via answer prose, citations, `KbSearch` hits, or (later) evidence
+  drill-down — proven by **real testers running adversarial queries**, not output inspection
+  alone (brief A.2.6 + §8 checklist). `groot`-only actions (invite, grant) are authz-gated + audited.
+- **Signals:** Keycloak in compose; group→scope + local-invite + `groot`-grant mapping tests;
+  an adversarial scope suite run under each cohort identity; Keycloak realm + local-cred
+  secrets out of public repos; default-deny asserted for a freshly-invited user.
 - **Cut line:** Keycloak login → scoped `Ask`; the cohort-1 no-leak gate **green with real testers**.
 
 ### P2 — Home-brief dashboard (PO feature-first; `KbStatus` now + new `Brief` RPC)
@@ -168,26 +187,23 @@ admitted without auth, and the no-leak gate is the project's one hard invariant.
    scope. Recorded as a deliberate brief change, not smoothed over; the brief's §6 non-goal
    should be updated.
 
-## 7. PO decisions (resolved 2026-06-25) + the one open fork
+## 7. PO decisions (resolved 2026-06-25)
 
 - **Phase priority:** dashboard-first (the brief's feature order). ✓
-- **Identity:** **Keycloak (OIDC)** — real login/session→viewer now, not a fixed operator. ✓
-- **Persona/i18n:** English kernel default first; T9 UA/FR re-phrasing later (folds in the
-  older `board/todo/hive-chat-channel` persona stub). ✓
-- **Real testers:** the PO can supply real testers in two cohorts (no Confluence access /
-  no-direct-access-but-may-know) — making the privacy no-leak gate (P1) a live test. ✓
+- **Identity:** a **pluggable user scaffold** — **Keycloak (OIDC) PRIMARY**, **local non-SSO
+  SECONDARY** (invite external users when needed), an **admin role `groot`** (invites +
+  grants scopes). The scaffold is built regardless of source; default-deny + explicit grant;
+  kernel stays scope authority. ✓
+- **Persona/i18n:** English kernel default first; T9 UA/FR re-phrasing later. The
+  `board/todo/hive-chat-channel` is a **sibling public chat channel** (not superseded) sharing
+  the T9 persona skill. ✓
+- **Cohort-2 ACL granularity:** **DECIDED — (A) coarse** (cohort-2 sees only `public`-scoped
+  derived knowledge; no kernel change; ships with P1). Rationale: see how dashboard/chat look
+  first; kernel changes come later regardless. **(B)** fine per-source ACL + citation redaction
+  is a **deferred swarm/ phase** if the "knowable-but-not-accessible" need proves real. ✓
+- **Real testers:** the PO supplies real testers in two cohorts (no access / no-direct-access);
+  they enter as **invited external (local) users** — making the privacy no-leak gate (P1) a
+  live adversarial test. ✓
 
-**THE ONE OPEN FORK — ACL granularity for cohort-2** ("no direct Confluence access, but may
-legitimately KNOW info from it"):
-
-- **(A) Coarse, no kernel change.** Cohort-2 gets only `public`-scoped answers/knowledge;
-  anything `group`/private is default-denied. Simple, ships with P1. Cost: cohort-2 can't see
-  Confluence-*derived* knowledge unless it was explicitly declassified to `public`.
-- **(B) Fine, a swarm/ kernel change.** Per-source/per-claim ACL: cohort-2 sees the
-  *derived knowledge / answer* while the **citation to the private source is redacted**
-  ("source restricted"). Closer to "may know the info but not access the source," but it is a
-  real kernel ACL + citation-redaction change (and a declassification-policy question: which
-  derived claims become knowable). Defer to a dedicated phase.
-
-Recommendation: **start (A) coarse** so P1 + the cohort-1 hard gate ship now; treat (B) as a
-flagged follow-on phase if cohort-2's "knowable-but-not-accessible" need is real in practice.
+No open forks remain for P0–P2. The cohort-2 fine-ACL (B) and the persona/i18n skill are the
+next decisions, due before P3 and the persona phase respectively.
