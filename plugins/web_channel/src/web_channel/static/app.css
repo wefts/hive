@@ -33,6 +33,13 @@ body {
 }
 .brand { font-weight: 700; letter-spacing: 0.02em; }
 .muted { color: var(--muted); font-size: 0.9em; }
+.spacer { flex: 1; }
+.navlink { color: var(--accent); font-size: 0.85em; text-decoration: none; margin-left: 0.6rem; }
+.navlink:hover { text-decoration: underline; }
+.btn {
+  display: inline-block; padding: 0.55rem 1rem; border-radius: var(--radius);
+  background: var(--accent); color: #fff; font-weight: 600; text-decoration: none;
+}
 
 .ask { display: flex; gap: 0.5rem; align-items: center; }
 .ask .q {
@@ -77,6 +84,19 @@ body {
 .chip .src { color: var(--accent); font-weight: 600; }
 .chip .ref { color: var(--fg); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .chip .cc  { color: var(--muted); }
+
+.users { width: 100%; border-collapse: collapse; margin-top: 0.6rem; font-size: 0.9rem; }
+.users th, .users td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+.users th { color: var(--muted); font-weight: 600; }
+.invite { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.6rem; }
+.invite input, .invite select {
+  padding: 0.55rem 0.7rem; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.invite button {
+  padding: 0.55rem 1rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--accent); color: #fff; font-weight: 600; cursor: pointer;
+}
 
 .meta { margin-top: 0.9rem; font-size: 0.85rem; }
 .conf-high { color: var(--green); }

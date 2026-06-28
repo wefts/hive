@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <span class="badge status-found">groot</span>
+  <h2 class="answer">Users</h2>
+  <table class="users">
+    <thead><tr><th>Username</th><th>Email</th><th>Groups</th></tr></thead>
+    <tbody>
+      {% for u in users %}
+        <tr>
+          <td>{{ u.username }}</td>
+          <td class="muted">{{ u.email }}</td>
+          <td>{{ u.groups|join(', ') if u.groups else '—' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2 class="answer">Invite a user</h2>
+  <form class="invite" method="post" action="/admin/invite" autocomplete="off">
+    <input type="text" name="username" placeholder="username" required aria-label="username">
+    <input type="password" name="password" placeholder="temporary password" required aria-label="temporary password">
+    <select name="group" aria-label="group">
+      <option value="">no group (public only)</option>
+      {% for g in groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+    </select>
+    <button type="submit">Invite</button>
+  </form>
+  <p class="muted">The user gets a temporary password (must reset at first login). A group grants its mapped scope; no group = public only.</p>
+</section>
+{% endblock %}

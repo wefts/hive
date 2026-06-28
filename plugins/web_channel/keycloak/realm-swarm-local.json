@@ -1,0 +1,99 @@
+{
+  "realm": "swarm-local",
+  "enabled": true,
+  "displayName": "Swarm (local dev)",
+  "loginTheme": "keycloak",
+  "sslRequired": "none",
+  "roles": {
+    "realm": [
+      { "name": "groot", "description": "web_channel admin (invite + grant scopes) — root-like, named for security" }
+    ]
+  },
+  "groups": [
+    { "name": "confluence", "path": "/confluence" }
+  ],
+  "clients": [
+    {
+      "clientId": "web_channel",
+      "name": "Swarm web_channel",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "web-channel-local-dev-secret-CHANGE-IN-PROD",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8080/auth/callback",
+        "http://127.0.0.1:8080/auth/callback",
+        "http://spark.mpl.intranet:8080/auth/callback",
+        "http://localhost:8080/*",
+        "http://spark.mpl.intranet:8080/*"
+      ],
+      "webOrigins": ["+"],
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        },
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@local.dev",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Cohort-Group",
+      "credentials": [{ "type": "password", "value": "alice", "temporary": false }],
+      "groups": ["/confluence"]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@local.dev",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Cohort-NoAccess",
+      "credentials": [{ "type": "password", "value": "bob", "temporary": false }],
+      "groups": []
+    },
+    {
+      "username": "groot",
+      "enabled": true,
+      "email": "groot@local.dev",
+      "emailVerified": true,
+      "firstName": "Groot",
+      "lastName": "Admin",
+      "credentials": [{ "type": "password", "value": "groot", "temporary": false }],
+      "realmRoles": ["groot"],
+      "groups": ["/confluence"]
+    }
+  ]
+}

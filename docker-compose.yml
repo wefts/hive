@@ -137,13 +137,55 @@ services:
     environment:
       # Reach the kernel Core API over the compose network (never hardcode a host).
       SWARM_CORE_ADDR: kernel:50061
-      SWARM_VIEWER: ${WEB_CHANNEL_VIEWER:-operator}
-      # Scope is hard-locked to public in the channel (P0 pre-auth); no scope env.
+      # --- P1 identity: Keycloak OIDC. When OIDC_ENABLED, /ask requires login and
+      # viewer+scopes come from the token; when off, the P0 fixed-operator path runs.
+      OIDC_ENABLED: "true"
+      SWARM_VIEWER: ${WEB_CHANNEL_VIEWER:-operator}   # fallback identity only when OIDC is off
+      # Browser-reachable issuer (same URL the browser and this container use, so the
+      # token `iss` is consistent). Swap to prod = https://sso.smile.eu/realms/Smile.
+      OIDC_ISSUER: ${KEYCLOAK_PUBLIC_URL:-http://spark.mpl.intranet:8081}/realms/${KEYCLOAK_REALM:-swarm-local}
+      OIDC_CLIENT_ID: ${WEB_CHANNEL_OIDC_CLIENT_ID:-web_channel}
+      OIDC_CLIENT_SECRET: ${WEB_CHANNEL_OIDC_SECRET:-web-channel-local-dev-secret-CHANGE-IN-PROD}
+      WEB_CHANNEL_BASE_URL: ${WEB_CHANNEL_PUBLIC_URL:-http://spark.mpl.intranet:8080}
+      # No committed signing key: empty ⇒ the app mints a random ephemeral key
+      # (sessions reset on restart). Set WEB_CHANNEL_SESSION_SECRET (secrets.env) to persist.
+      SESSION_SECRET: ${WEB_CHANNEL_SESSION_SECRET:-}
+      # group→scope map (JSON); default-deny otherwise. Kernel stays scope authority.
+      GROUP_SCOPE_MAP: ${WEB_CHANNEL_GROUP_SCOPE_MAP:-{"confluence":"group"}}
+      # Admin API for the groot invite/provision (server-to-server, internal URL).
+      KEYCLOAK_ADMIN_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-swarm-local}
+      KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    extra_hosts:
+      # Reach the host-published Keycloak port at the same hostname the browser uses,
+      # so the OIDC issuer is identical server-side and browser-side (dev split-horizon).
+      - "${KEYCLOAK_PUBLIC_HOST:-spark.mpl.intranet}:host-gateway"
     ports:
       - "${WEB_CHANNEL_PORT:-8080}:8080"
     depends_on:
       kernel:
         condition: service_started
+
+  # --- Identity: local Keycloak (OIDC) — P1 dev login mechanism ------------
+  # Mirrors the Smile stack (KC 26.6.1, DHI image, OIDC + groups mapper) so the
+  # channel config is swap-able to the real sso.smile.eu/realms/Smile (operator).
+  # Dev-mode (start-dev), realm imported from the committed export. Admin + client
+  # secret come from env (dev defaults here; real values via secrets.env in prod).
+  keycloak:
+    image: ${DHI_REGISTRY:-dhi.smile.fr}/keycloak:26.6.1-debian13
+    init: true
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./plugins/web_channel/keycloak/realm-swarm-local.json:/opt/keycloak/data/import/realm.json:ro
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8080"
 
   # confluence_connector:
   #   build: ./plugins/confluence_connector

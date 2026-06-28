@@ -13,7 +13,13 @@
   <main class="shell">
     <header class="topbar">
       <span class="brand">swarm</span>
-      <span class="muted">operator console · P0</span>
+      <span class="muted">operator console</span>
+      {% if principal %}
+        <span class="spacer"></span>
+        <span class="muted">{{ principal.display or principal.viewer }} · scopes: {{ principal.scopes|join(', ') }}</span>
+        {% if principal.is_groot %}<a class="navlink" href="/admin">admin</a>{% endif %}
+        <a class="navlink" href="/logout">logout</a>
+      {% endif %}
     </header>
     {% block content %}{% endblock %}
   </main>
