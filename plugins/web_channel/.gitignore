@@ -1,0 +1,9 @@
+# Generated gRPC stubs (regenerated from proto/core.proto via scripts/gen-proto.sh)
+src/web_channel/_gen/
+# Python tooling
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.ty_cache/

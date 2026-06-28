@@ -1,0 +1,84 @@
+/* web_channel P0 — small self-contained stylesheet (dark-mode tokens, card/badge/
+   chip). No external fonts/CDN: the page renders with no network call (brief §5/§8).
+   The full Tailwind + Basecoat design system arrives in P2 (the dashboard). */
+
+:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --border: #30363d;
+  --fg: #e6edf3;
+  --muted: #8b949e;
+  --accent: #2f81f7;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --red: #f85149;
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.shell { max-width: 760px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+
+.topbar {
+  display: flex; align-items: baseline; gap: 0.6rem;
+  margin-bottom: 1.5rem; padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.brand { font-weight: 700; letter-spacing: 0.02em; }
+.muted { color: var(--muted); font-size: 0.9em; }
+
+.ask { display: flex; gap: 0.5rem; align-items: center; }
+.ask .q {
+  flex: 1; padding: 0.7rem 0.9rem;
+  background: var(--panel); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 1rem;
+}
+.ask .q:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask button {
+  padding: 0.7rem 1.1rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--accent); color: #fff; font-weight: 600; cursor: pointer;
+}
+.ask button:disabled { opacity: 0.5; cursor: progress; }
+
+/* htmx in-flight hint (not a spinner on local reads; Ask legitimately takes time) */
+.htmx-indicator { opacity: 0; transition: opacity 120ms ease-in; }
+.htmx-request .htmx-indicator { opacity: 1; }
+
+.card {
+  margin-top: 1.5rem; padding: 1.1rem 1.25rem;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+}
+
+.badge {
+  display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
+  font-size: 0.78rem; font-weight: 700; text-transform: lowercase;
+  border: 1px solid var(--border);
+}
+.status-found { color: var(--green); border-color: var(--green); }
+.status-warn  { color: var(--yellow); border-color: var(--yellow); }
+.status-error { color: var(--red); border-color: var(--red); }
+
+.answer { margin: 0.9rem 0 0; white-space: pre-wrap; }
+
+.citations { list-style: none; margin: 1rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.chip {
+  display: inline-flex; gap: 0.5rem; align-items: baseline;
+  padding: 0.3rem 0.6rem; background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.85rem;
+}
+.chip .src { color: var(--accent); font-weight: 600; }
+.chip .ref { color: var(--fg); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chip .cc  { color: var(--muted); }
+
+.meta { margin-top: 0.9rem; font-size: 0.85rem; }
+.conf-high { color: var(--green); }
+.conf-mid  { color: var(--yellow); }
+.conf-low  { color: var(--red); }

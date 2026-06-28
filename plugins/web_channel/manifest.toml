@@ -1,0 +1,23 @@
+# Plugin manifest (docs/architecture/ports.md § Manifest Minimum).
+# The bridge between the private hive and the public kernel; also the future
+# migration path out of hive/plugins/ into a standalone repo.
+name = "web_channel"
+kind = "channel"
+runtime = "sidecar"                     # out-of-process container; its own Compose service
+entrypoint = "uvicorn web_channel.main:app --host 0.0.0.0 --port 8080"
+protocol_version = "swarm.core.v1"      # the Core API wire contract it speaks
+safety_class = "read-only"              # P0–P2 issue no graph writes
+
+# Environment (see compose). The web server binds a fixed container port 8080
+# (the host mapping is compose's WEB_CHANNEL_PORT); there is no bind-address env.
+# Scope is HARD-LOCKED to public in P0 (pre-auth) — there is deliberately no scope
+# env; P1 derives scopes from the authenticated user.
+[env]
+SWARM_CORE_ADDR = "host:port of the kernel Core API gRPC (e.g. kernel:50061)"
+SWARM_VIEWER = "fixed operator identity until P1 auth lands (default: operator)"
+SWARM_ASK_TIMEOUT_S = "Ask deadline in seconds; bounds a hung kernel (optional, default 300)"
+
+# Capabilities = the Core RPCs this channel consumes.
+# P0 uses only Ask; KbStatus/KbSearch arrive with later phases.
+[capabilities]
+consumes = ["swarm.core.v1.Core/Ask"]

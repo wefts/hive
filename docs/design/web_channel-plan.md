@@ -21,8 +21,10 @@ sibling of `cli_channel`. Both speak the **same outward contract — the gRPC Co
 is already a Python grpcio client of it).
 
 - **Runtime mode:** out-of-process **sidecar/container** (ports.md) — a small Python web
-  app in `hive/plugins/web_channel/`, its own Compose service, a gRPC client of the
-  kernel's Core API (`:50061`). It requires **zero kernel code change to exist** (Phase 0).
+  app in `hive/plugins/web_channel/` (**FastAPI + Jinja2, a `grpc.aio` Core client, served by
+  uvicorn**; framework chosen 2026-06-28 — see `board/doing/web-channel-p0.md` for the rationale),
+  its own Compose service, a gRPC client of the kernel's Core API (`:50061`). It requires **zero
+  kernel code change to exist** (Phase 0).
 - **Rendering:** **server-side HTML** (Python → HTMX partials); Alpine for local
   interactivity; Tailwind + Basecoat tokens; dark mode. **No model in the render path.**
 - **Identity & access (P1) — a pluggable user scaffold, not just SSO pass-through:**

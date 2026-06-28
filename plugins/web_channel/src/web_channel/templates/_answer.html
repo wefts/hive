@@ -1,0 +1,30 @@
+{# Answer card (HTMX partial). Every value is autoescaped → rendered verbatim and
+   HTML-safe (brief A.0.4). Status comes from the structured field, not the prose. #}
+<article class="card">
+  <span class="badge {{ status_class }}">{{ status_label }}</span>
+
+  {% if error_detail %}
+    <p class="muted">Could not reach the knowledge base ({{ error_detail }}).
+      The connection is down — nothing was answered.</p>
+  {% else %}
+    {% if answer %}<p class="answer">{{ answer }}</p>{% endif %}
+
+    {% if citations %}
+      <ul class="citations">
+        {% for c in citations %}
+          <li class="chip">
+            <span class="src">{{ c.source }}</span>
+            <span class="ref">{{ c.ref }}</span>
+            <span class="cc">{{ "%.2f"|format(c.confidence) }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if show_confidence %}
+      <div class="meta {{ confidence_class }}">
+        tier={{ tier }} · confidence={{ "%.2f"|format(confidence) }}
+      </div>
+    {% endif %}
+  {% endif %}
+</article>

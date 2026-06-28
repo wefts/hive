@@ -119,10 +119,32 @@ services:
         condition: service_started
 
   # --- Plugin adapters (Tier B: out-of-process, gRPC over the port ABI) ---
-  # Skeleton, commented until task 05a lands the plugin ABI + manifest loader.
   # Each plugin is a self-contained dir under ./plugins with its own Dockerfile,
-  # vendored proto, and plugin.yaml. Polyglot by construction — Python, Go, etc.
-  #
+  # vendored proto, and manifest. Polyglot by construction — Python, Go, etc.
+
+  # --- Channel: web_channel (FastAPI/HTMX operator console) ----------------
+  # First Tier-B plugin: an out-of-process gRPC CLIENT of the Core API. It speaks
+  # exactly the contract cli_channel speaks and NEVER reads the graph DB (ADR-1
+  # hive). P0 = channel-only (Ask), fixed operator, public scope; auth is P1.
+  web_channel:
+    image: web-channel:0.1.0
+    init: true
+    build:
+      context: ./plugins/web_channel
+      args:
+        DHI_REGISTRY: ${DHI_REGISTRY:-dhi.smile.fr}
+        UV_REGISTRY: ${UV_REGISTRY:-ghcr.io}
+    environment:
+      # Reach the kernel Core API over the compose network (never hardcode a host).
+      SWARM_CORE_ADDR: kernel:50061
+      SWARM_VIEWER: ${WEB_CHANNEL_VIEWER:-operator}
+      # Scope is hard-locked to public in the channel (P0 pre-auth); no scope env.
+    ports:
+      - "${WEB_CHANNEL_PORT:-8080}:8080"
+    depends_on:
+      kernel:
+        condition: service_started
+
   # confluence_connector:
   #   build: ./plugins/confluence_connector
   #   env_file:
