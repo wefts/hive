@@ -108,6 +108,12 @@ services:
       SWARM_DB_PASSWORD: ${SWARM_DB_PASSWORD:-swarm}
       SWARM_DB_NAME: ${SWARM_DB_NAME:-swarm_dev}
       SWARM_ML_ADDRESS: ml:50051
+      # Dev consilium fleet: small GPU-resident models so an escalated answer
+      # returns in seconds, not minutes (this single-GPU box can't swap the heavy
+      # default panel of 5 large models + a 70B judge fast enough). Unset these (or
+      # override) for prod → the decorrelated heavy panel in swarm config.exs stands.
+      SWARM_CONSILIUM_PANEL: ${SWARM_CONSILIUM_PANEL:-lfm2.5:8b,gemma4:e2b}
+      SWARM_CONSILIUM_JUDGE: ${SWARM_CONSILIUM_JUDGE:-gemma4:e4b}
     ports:
       - "${SWARM_CORE_API_PORT:-50061}:50061"
     depends_on:

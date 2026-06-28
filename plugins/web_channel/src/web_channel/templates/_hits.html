@@ -1,0 +1,11 @@
+{% if hits is none %}
+  <li class="muted">search unavailable</li>
+{% elif hits %}
+  {% for h in hits %}
+    <li class="hit"><span class="htype">{{ h.type }}</span>
+      <span class="hkey">{{ h.key }}</span>
+      <span class="muted">{{ "%.2f"|format(h.score) }}</span></li>
+  {% endfor %}
+{% else %}
+  <li class="muted">no matches for "{{ q }}"</li>
+{% endif %}

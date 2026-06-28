@@ -26,6 +26,12 @@ def ask_timeout_s() -> float:
     return float(os.environ.get("SWARM_ASK_TIMEOUT_S", "300"))
 
 
+def read_timeout_s() -> float:
+    """Deadline for fast read RPCs (KbStatus/KbSearch — no LLM); bounded so a hung
+    kernel can't stall a dashboard render (brief: no infinite spinner)."""
+    return float(os.environ.get("SWARM_READ_TIMEOUT_S", "15"))
+
+
 async def ask(query: str, scopes: list[str], viewer: str) -> core_pb2.AskResponse:
     """Call Core.Ask. Raises grpc.aio.AioRpcError on an unreachable kernel or a
     DEADLINE_EXCEEDED — the route maps either to an honest `error` state (A.0.3)."""
@@ -34,4 +40,22 @@ async def ask(query: str, scopes: list[str], viewer: str) -> core_pb2.AskRespons
         return await stub.Ask(
             core_pb2.AskRequest(query=query, scopes=scopes, viewer=viewer),
             timeout=ask_timeout_s(),
+        )
+
+
+async def kb_status() -> core_pb2.StatusResponse:
+    """Graph health + self-model (nodes/edges/inventory/namespaces/capabilities).
+    Fast, no LLM — the dashboard 'state of my memory' tile."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.KbStatus(core_pb2.StatusRequest(), timeout=read_timeout_s())
+
+
+async def kb_search(query: str, scopes: list[str], limit: int = 10) -> core_pb2.SearchResponse:
+    """Scope-filtered retrieval over the graph (the ⌘K palette). Fast, no LLM."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.KbSearch(
+            core_pb2.SearchRequest(query=query, scopes=scopes, limit=limit),
+            timeout=read_timeout_s(),
         )

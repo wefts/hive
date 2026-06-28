@@ -102,3 +102,30 @@ body {
 .conf-high { color: var(--green); }
 .conf-mid  { color: var(--yellow); }
 .conf-low  { color: var(--red); }
+
+/* --- P2 dashboard --- */
+[x-cloak] { display: none !important; }
+.ask-row { display: flex; align-items: center; gap: 0.75rem; }
+.ask-row .ask { flex: 1; }
+.kbd { white-space: nowrap; border: 1px solid var(--border); padding: 0.4rem 0.6rem; border-radius: var(--radius); background: var(--panel); cursor: pointer; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+.tile { padding: 1rem 1.1rem; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.tile h3 { margin: 0 0 0.6rem; font-size: 0.95rem; }
+.muted-tile { opacity: 0.8; }
+.stat { font-size: 1.05rem; }
+.stat .num { font-weight: 700; color: var(--accent); }
+.inv { list-style: none; margin: 0.6rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.inv li { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.2rem 0.5rem; font-size: 0.82rem; }
+.history { list-style: none; margin: 0; padding: 0; }
+.history li { padding: 0.3rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+.htype { color: var(--accent); font-size: 0.8rem; }
+.hkey { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.palette-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; z-index: 50; }
+.palette { width: min(640px, 92vw); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem; box-shadow: 0 12px 40px rgba(0,0,0,0.5); }
+.palette input { width: 100%; padding: 0.7rem 0.9rem; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: var(--radius); font-size: 1rem; }
+.palette input:focus { outline: 2px solid var(--accent); }
+.hits { list-style: none; margin: 0.6rem 0 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+.hits li { padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--border); display: flex; gap: 0.6rem; align-items: baseline; }
+.palette-hint { margin-top: 0.5rem; font-size: 0.78rem; }

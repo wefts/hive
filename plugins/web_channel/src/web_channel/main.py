@@ -143,14 +143,76 @@ def _error_view(detail: str) -> dict:
     }
 
 
+def _status_view(s: core_pb2.StatusResponse) -> dict:
+    """KbStatus → the 'state of my memory' tile context (all from real kernel state)."""
+    return {
+        "nodes": s.nodes,
+        "edges": s.edges,
+        "last_activity": s.last_activity or "never",
+        "inventory": [{"type": tc.type, "count": tc.count} for tc in s.inventory],
+        "namespaces": [
+            {"namespace": n.namespace, "model": n.model, "dim": n.dim, "status": n.status}
+            for n in s.namespaces
+        ],
+        "capabilities": list(s.capabilities),
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     principal = _current_principal(request)
-    ctx = {
-        "oidc_enabled": auth.oidc_enabled(),
-        "principal": principal.to_session() if principal else None,
-    }
-    return templates.TemplateResponse(request, "index.html", ctx)
+    # Sign-in gate (P1) — only when OIDC is on and there's no session.
+    if auth.oidc_enabled() and principal is None:
+        return templates.TemplateResponse(
+            request, "index.html", {"oidc_enabled": True, "principal": None}
+        )
+    # Cold open lands on the dashboard (brief A.1.1), not a blank box. The KbStatus
+    # tile loads async (HTMX) so the page is instant and never blocks on the kernel.
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        {
+            "oidc_enabled": auth.oidc_enabled(),
+            "principal": principal.to_session() if principal else None,
+            "history": request.session.get("history", []),
+        },
+    )
+
+
+@app.get("/tile/status", response_class=HTMLResponse)
+async def tile_status(request: Request) -> HTMLResponse:
+    """The 'state of my memory' tile — real KbStatus, or an honest unavailable state."""
+    try:
+        ctx = {"status": _status_view(await core_client.kb_status())}
+    except Exception:
+        logger.exception("KbStatus failed for dashboard tile")
+        ctx = {"status": None}
+    return templates.TemplateResponse(request, "_status_tile.html", ctx)
+
+
+@app.get("/search", response_class=HTMLResponse)
+async def search(request: Request, q: str = "") -> HTMLResponse:
+    """⌘K command palette: scope-filtered KbSearch → hit list (keyboard-first)."""
+    q = q.strip()
+    if not q:
+        return HTMLResponse("")
+    if auth.oidc_enabled():
+        principal = _current_principal(request)
+        if principal is None:
+            return HTMLResponse(
+                '<li class="muted">session ended — <a href="/login">log in</a></li>'
+            )
+        scopes = principal.scopes
+    else:
+        scopes = _scopes()
+    try:
+        resp = await core_client.kb_search(q, scopes=scopes, limit=10)
+        hits = [{"type": h.type, "key": h.key, "score": h.score} for h in resp.hits]
+        ctx = {"hits": hits, "q": q}
+    except Exception:
+        logger.exception("KbSearch failed")
+        ctx = {"hits": None, "q": q}
+    return templates.TemplateResponse(request, "_hits.html", ctx)
 
 
 @app.get("/login")
@@ -269,6 +331,12 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
         viewer, scopes = principal.viewer, principal.scopes
     else:
         viewer, scopes = _viewer(), _scopes()
+
+    # Session-scoped ask history for the dashboard (most-recent-first, deduped, capped).
+    qs = q.strip()
+    request.session["history"] = (
+        [qs] + [h for h in request.session.get("history", []) if h != qs]
+    )[:8]
 
     try:
         resp = await core_client.ask(q, scopes=scopes, viewer=viewer)
