@@ -112,8 +112,10 @@ services:
       # returns in seconds, not minutes (this single-GPU box can't swap the heavy
       # default panel of 5 large models + a 70B judge fast enough). Unset these (or
       # override) for prod → the decorrelated heavy panel in swarm config.exs stands.
-      SWARM_CONSILIUM_PANEL: ${SWARM_CONSILIUM_PANEL:-lfm2.5:8b,gemma4:e2b}
-      SWARM_CONSILIUM_JUDGE: ${SWARM_CONSILIUM_JUDGE:-gemma4:e4b}
+      # Capable models for real synthesis (the GB10's 128GB keeps them resident, so
+      # no swap penalty). qwen3:14b answers + a different-family judge (ADR-7 decorrelation).
+      SWARM_CONSILIUM_PANEL: ${SWARM_CONSILIUM_PANEL:-qwen3:14b,gemma4:e4b}
+      SWARM_CONSILIUM_JUDGE: ${SWARM_CONSILIUM_JUDGE:-gemma4:31b}
     ports:
       - "${SWARM_CORE_API_PORT:-50061}:50061"
     depends_on:
