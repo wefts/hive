@@ -20,6 +20,10 @@
     <header class="topbar">
       <span class="brand">swarm</span>
       <span class="muted">operator console</span>
+      {% if authed %}
+        <a class="navlink" href="/">home</a>
+        <a class="navlink" href="/dashboard">dashboard</a>
+      {% endif %}
       <span class="spacer"></span>
       {% if authed %}
         <button class="btn" data-variant="outline" data-size="sm"

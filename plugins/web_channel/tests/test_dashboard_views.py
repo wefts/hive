@@ -175,3 +175,83 @@ def test_activity_dead_session_stops_polling(monkeypatch) -> None:
     assert "every 6s" not in r.text
     assert 'hx-swap-oob="true"' in r.text
     assert "log in" in r.text.lower()
+
+
+# --- /dashboard observability page (graph + stats + activity) --------------
+
+
+def test_dashboard_page_renders_graph_and_vendored_cytoscape(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+    r = client.get("/dashboard")
+    assert r.status_code == 200
+    assert 'id="cy"' in r.text  # the graph canvas
+    assert "/static/vendor/cytoscape.min.js" in r.text  # vendored, offline
+    assert "/static/dashboard.js" in r.text
+    assert 'hx-get="/activity' in r.text  # activity feed moved here
+    assert 'hx-get="/tile/status"' in r.text  # full stats here
+    # offline invariant: no external URL in the <head>
+    assert "https://" not in r.text.split("<body")[0].replace("initial-scale", "")
+
+
+def test_dashboard_search_json_scoped(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        web,
+        "_current_principal",
+        lambda req: auth.Principal(viewer="alice", scopes=["public", "group"]),
+    )
+    seen: dict = {}
+
+    async def fake_search(query, scopes, limit=10):
+        seen["scopes"] = scopes
+        return core_pb2.SearchResponse(
+            hits=[core_pb2.SearchHit(id=7, type="article", key="LDAP", score=0.9)]
+        )
+
+    monkeypatch.setattr(core_client, "kb_search", fake_search)
+    r = client.get("/dashboard/search", params={"q": "ldap"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["hits"][0] == {"id": 7, "type": "article", "key": "LDAP", "score": 0.9}
+    assert seen["scopes"] == ["public", "group"]  # session scopes passed to the kernel
+
+
+def test_dashboard_graph_json_found(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+
+    async def fake(node_id, scopes, viewer, depth=1, node_limit=50, relation_types=None):
+        return core_pb2.NeighborhoodResponse(
+            status=core_pb2.FOUND,
+            center_id=node_id,
+            nodes=[core_pb2.NodeView(id=2, type="entity", key="kerberos", scope="public", depth=1)],
+            edges=[core_pb2.EdgeView(src_id=node_id, dst_id=2, relation="uses", reliability=0.8)],
+            truncated=False,
+        )
+
+    monkeypatch.setattr(core_client, "neighborhood", fake)
+    r = client.get("/dashboard/graph/1")
+    assert r.status_code == 200
+    g = r.json()
+    assert g["status"] == "found" and g["center_id"] == 1
+    assert g["nodes"][0]["key"] == "kerberos"
+    assert g["edges"][0]["relation"] == "uses"
+
+
+def test_dashboard_graph_json_not_found_is_empty(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+
+    async def fake(node_id, scopes, viewer, depth=1, node_limit=50, relation_types=None):
+        return core_pb2.NeighborhoodResponse(status=core_pb2.NOT_FOUND, center_id=node_id)
+
+    monkeypatch.setattr(core_client, "neighborhood", fake)
+    r = client.get("/dashboard/graph/999")
+    assert r.status_code == 200
+    g = r.json()
+    assert g["status"] == "not_found" and g["nodes"] == [] and g["edges"] == []
+
+
+def test_dashboard_graph_dead_session_401(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(web, "_current_principal", lambda req: None)
+    r = client.get("/dashboard/graph/1")
+    assert r.status_code == 401

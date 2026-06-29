@@ -26,7 +26,13 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from grpc import aio
@@ -278,10 +284,10 @@ async def index(request: Request) -> Response:
         recent = []
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "home.html",
         {
             "oidc_enabled": auth.oidc_enabled(),
-            "authed": True,  # dashboard → show the ⌘K search + palette in the header
+            "authed": True,  # home → show the ⌘K search + palette in the header
             "principal": principal.to_session() if principal else None,
             "recent": [
                 {
@@ -415,6 +421,63 @@ async def activity(request: Request, cursor: str = "") -> HTMLResponse:
     return templates.TemplateResponse(
         request, "_activity.html", {"events": events, "next_cursor": next_cursor}
     )
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request) -> Response:
+    """The observability page: full stats + activity + the connections graph.
+    Same sign-in gate as home; the channel never reads the DB (RPCs only)."""
+    principal = _current_principal(request)
+    if principal is None and (auth.oidc_enabled() or localusers.has_any()):
+        return RedirectResponse("/login")
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        {
+            "authed": True,
+            "principal": principal.to_session() if principal else None,
+        },
+    )
+
+
+@app.get("/dashboard/search")
+async def dashboard_search(request: Request, q: str = "") -> JSONResponse:
+    """Scope-filtered KbSearch as JSON — the graph explorer's entity picker. Returns
+    SearchHit.id (the bridge to Neighborhood). Honest empty on no session/error."""
+    q = q.strip()
+    ctx = _session_ctx(request)
+    if not q or ctx is None:
+        return JSONResponse({"hits": []})
+    _viewer_id, scopes = ctx
+    try:
+        resp = await core_client.kb_search(q, scopes=scopes, limit=10)
+        hits = [{"id": h.id, "type": h.type, "key": h.key, "score": h.score} for h in resp.hits]
+    except Exception:
+        logger.exception("dashboard KbSearch failed")
+        hits = []
+    return JSONResponse({"hits": hits})
+
+
+@app.get("/dashboard/graph/{node_id}")
+async def dashboard_graph(request: Request, node_id: int, rel: str = "") -> JSONResponse:
+    """A bounded, scope-filtered neighborhood as JSON for the Cytoscape graph (ADR-15).
+    Kernel enforces scope (Neighborhood RPC); verbatim ids/keys/relations, no DB reads."""
+    ctx = _session_ctx(request)
+    if ctx is None:
+        return JSONResponse({"status": "not_found", "nodes": [], "edges": []}, status_code=401)
+    viewer, scopes = ctx
+    relation_types = [r for r in (rel.split(",") if rel else []) if r.strip()]
+    try:
+        resp = await core_client.neighborhood(
+            node_id, scopes=scopes, viewer=viewer, depth=1, relation_types=relation_types
+        )
+        view = _neighborhood_view(resp)
+    except Exception:
+        logger.exception("dashboard Neighborhood failed")
+        return JSONResponse({"status": "error", "nodes": [], "edges": []})
+    if view is None:
+        return JSONResponse({"status": "not_found", "center_id": node_id, "nodes": [], "edges": []})
+    return JSONResponse({"status": "found", **view})
 
 
 @app.get("/login", response_class=HTMLResponse)

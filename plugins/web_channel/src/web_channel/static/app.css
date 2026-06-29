@@ -166,3 +166,14 @@ body { line-height: 1.6; }
 /* ⌘K hit → a full-width link that opens the entity's neighborhood */
 .hit-link { display: flex; gap: 0.75rem; align-items: baseline; width: 100%; color: var(--foreground); }
 .hit-link:hover { color: var(--primary); text-decoration: none; }
+
+/* --- /dashboard observability page ------------------------------------------ */
+.page-title { font-size: 1.3rem; font-weight: 700; color: var(--foreground); margin: 0 0 1.25rem; }
+.dash { display: flex; flex-direction: column; gap: 1.5rem; }
+.dash .act-list { max-height: 360px; overflow-y: auto; }
+#graph-meta { margin: 0.5rem 0; }
+/* Cytoscape needs an explicit height at init, or it renders into a 0px box. */
+.cy-canvas {
+  height: 520px; width: 100%; margin-top: 0.75rem;
+  background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-md);
+}

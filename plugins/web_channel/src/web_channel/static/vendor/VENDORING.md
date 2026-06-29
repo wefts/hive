@@ -10,6 +10,7 @@ or Tailwind toolchain** in this repo or in the image.
 | `basecoat.min.css` | [basecoat-css](https://basecoatui.com) (bundles tailwindcss v4.3.1) | 1.0.1 | MIT | `1bd2a6e1ce11fad0ac1266f5d85ce6b5affddd5fdb8f609d635fd7427ef1043d` |
 | `htmx.min.js` | htmx | (see file header) | BSD-2 | — |
 | `alpine.min.js` | Alpine.js | (see file header) | MIT | — |
+| `cytoscape.min.js` | [cytoscape](https://js.cytoscape.org) | 3.34.0 | MIT | `9c2a3bf2592e0b14a1f7bec07c03a54f16dedf32af9cd0af155c716aa6c87bc3` |
 
 ## basecoat.min.css
 
@@ -39,3 +40,28 @@ grep -oE 'https?://[^ "]+' src/web_channel/static/vendor/basecoat.min.css | sort
 ```
 
 Then update the version + sha256 row above and re-run the QA screenshots.
+
+## cytoscape.min.js
+
+The graph-visualisation library for the `/dashboard` connections explorer (ADR-3,
+hive). The UMD single-file build — a pure client-side renderer (canvas/SVG); it
+makes **no network calls** of its own, so the bounded neighborhood (≤50 nodes,
+kernel-enforced) renders entirely offline. The data is fetched from our own
+scope-enforcing `/dashboard/graph/{id}` JSON endpoint (the kernel stays the scope
+authority); Cytoscape only lays it out — presentation-determinism holds (no model,
+ids/keys rendered verbatim).
+
+**Verified self-contained:** the only `http(s)` strings are attribution/license
+comments (`engelschall.com`, the MIT-license URLs); no `fetch`/XHR/`importScripts`
+loads.
+
+### Refresh procedure
+
+```sh
+VER=3.34.0   # pin an exact version, never @latest
+curl -sSfL "https://cdn.jsdelivr.net/npm/cytoscape@${VER}/dist/cytoscape.min.js" \
+  -o src/web_channel/static/vendor/cytoscape.min.js
+sha256sum src/web_channel/static/vendor/cytoscape.min.js   # record in the table above
+# Re-verify no remote loads crept in (expect only license/attribution comment URLs):
+grep -oE 'https?://[^ "]+' src/web_channel/static/vendor/cytoscape.min.js | sort -u
+```
