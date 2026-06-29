@@ -91,6 +91,9 @@ def _post_view(turn: dict) -> dict:
         "citations": turn["citations"] if turn["status"] in ("found", "partial") else [],
         "asked_at": datetime.fromtimestamp(asked).strftime("%Y-%m-%d %H:%M:%S") if asked else "",
         "duration": f"{dur / 1000:.1f}s" if dur else None,
+        # Opaque handle to the retained deliberation (ADR-15); the post shows the
+        # "see how it decided" affordance only when it is present.
+        "ask_ref": turn.get("ask_ref", ""),
     }
 
 
@@ -189,6 +192,75 @@ def _status_view(s: core_pb2.StatusResponse) -> dict:
     }
 
 
+def _session_ctx(request: Request) -> tuple[str, list[str]] | None:
+    """(viewer, scopes) for this request, or None when OIDC is on but there is no
+    session — the caller then renders an honest 'session ended', never querying the
+    kernel anonymously. When OIDC is off, the fixed operator at public scope."""
+    if auth.oidc_enabled():
+        principal = _current_principal(request)
+        return (principal.viewer, principal.scopes) if principal else None
+    return _viewer(), _scopes()
+
+
+def _deliberation_view(d: core_pb2.DeliberationResponse) -> dict | None:
+    """Deliberation → panel-vs-judge context, or None for any non-FOUND (expired /
+    not-owner / scopes-no-longer-cover) — rendered as an honest absent state, never
+    an error. All fields verbatim from the typed response (presentation determinism)."""
+    if d.status != core_pb2.FOUND:
+        return None
+    return {
+        "answer": d.answer,
+        "confidence": d.confidence,
+        "confidence_class": render.confidence_class(d.confidence),
+        # A designed indicator, not a bare float: agreement = 1 - disagreement.
+        "disagreement": d.disagreement,
+        "agreement_pct": max(0, min(100, round((1.0 - d.disagreement) * 100))),
+        "judge": d.judge,
+        "panel": [{"model": t.model, "answer": t.answer} for t in d.panel],
+        "created_at": d.created_at,
+    }
+
+
+def _neighborhood_view(r: core_pb2.NeighborhoodResponse) -> dict | None:
+    """Neighborhood → connections context, or None for NOT_FOUND (out-of-scope /
+    absent center) → an honest empty state. Edges grouped by relation; the distinct
+    relation set drives the link-type filter chips. All verbatim from typed fields."""
+    if r.status != core_pb2.FOUND:
+        return None
+    nodes = [
+        {"id": n.id, "type": n.type, "key": n.key, "scope": n.scope, "depth": n.depth}
+        for n in r.nodes
+    ]
+    edges = [
+        {
+            "src_id": e.src_id,
+            "dst_id": e.dst_id,
+            "relation": e.relation,
+            "reliability": e.reliability,
+        }
+        for e in r.edges
+    ]
+    relations = sorted({e["relation"] for e in edges})
+    return {
+        "center_id": r.center_id,
+        "nodes": nodes,
+        "edges": edges,
+        "relations": relations,
+        "truncated": r.truncated,
+    }
+
+
+def _activity_event_view(e: core_pb2.ActivityEvent) -> dict:
+    """One typed ActivityEvent → render context (verbatim typed fields)."""
+    return {
+        "kind": e.kind,
+        "at": e.at,
+        "subject_type": e.subject_type,
+        "outcome": e.outcome,
+        "count": e.count,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> Response:
     principal = _current_principal(request)
@@ -267,12 +339,82 @@ async def search(request: Request, q: str = "") -> HTMLResponse:
         scopes = _scopes()
     try:
         resp = await core_client.kb_search(q, scopes=scopes, limit=10)
-        hits = [{"type": h.type, "key": h.key, "score": h.score} for h in resp.hits]
+        # id is the bridge search → graph: a hit opens its Neighborhood (ADR-15).
+        hits = [{"id": h.id, "type": h.type, "key": h.key, "score": h.score} for h in resp.hits]
         ctx = {"hits": hits, "q": q}
     except Exception:
         logger.exception("KbSearch failed")
         ctx = {"hits": None, "q": q}
     return templates.TemplateResponse(request, "_hits.html", ctx)
+
+
+@app.get("/deliberation/{ask_ref}", response_class=HTMLResponse)
+async def deliberation(request: Request, ask_ref: str) -> HTMLResponse:
+    """The panel-vs-judge deliberation behind an escalated answer (ADR-15), opened
+    from a post's affordance. Viewer+scopes from the session; the kernel re-auths."""
+    ctx = _session_ctx(request)
+    if ctx is None:
+        return HTMLResponse('<p class="muted">Session ended — <a href="/login">log in</a>.</p>')
+    viewer, scopes = ctx
+    try:
+        resp = await core_client.deliberation(ask_ref, scopes=scopes, viewer=viewer)
+        delib = _deliberation_view(resp)
+    except Exception:
+        logger.exception("Deliberation failed")
+        delib = None
+    return templates.TemplateResponse(request, "_deliberation.html", {"delib": delib})
+
+
+@app.get("/neighborhood/{node_id}", response_class=HTMLResponse)
+async def neighborhood(request: Request, node_id: int, rel: str = "") -> HTMLResponse:
+    """The bounded, scope-filtered connections around a node (ADR-15), opened from a
+    ⌘K hit. `rel` is an optional comma-separated relation-type filter."""
+    ctx = _session_ctx(request)
+    if ctx is None:
+        return HTMLResponse('<p class="muted">Session ended — <a href="/login">log in</a>.</p>')
+    viewer, scopes = ctx
+    relation_types = [r for r in (rel.split(",") if rel else []) if r.strip()]
+    try:
+        resp = await core_client.neighborhood(
+            node_id, scopes=scopes, viewer=viewer, depth=1, relation_types=relation_types
+        )
+        view = _neighborhood_view(resp)
+    except Exception:
+        logger.exception("Neighborhood failed")
+        view = None
+    return templates.TemplateResponse(
+        request,
+        "_neighborhood.html",
+        {"hood": view, "center_id": node_id, "active_rel": rel},
+    )
+
+
+@app.get("/activity", response_class=HTMLResponse)
+async def activity(request: Request, cursor: str = "") -> HTMLResponse:
+    """One poll of the scope-safe ActivityFeed (ADR-15). Returns the new events plus
+    an out-of-band poller carrying the opaque `next_cursor` for the next tick. On a
+    dead session, returns a static message WITHOUT a poller, so polling stops."""
+    ctx = _session_ctx(request)
+    if ctx is None:
+        # Disarm the poller (OOB, no trigger) so the loop actually stops, then notify.
+        return HTMLResponse(
+            '<li class="muted">Session ended — <a href="/login">log in</a>.</li>'
+            '<span id="activity-poller" hx-swap-oob="true"></span>'
+        )
+    viewer, scopes = ctx
+    events: list[dict] = []
+    next_cursor = cursor
+    try:
+        resp = await core_client.activity_feed(
+            scopes=scopes, viewer=viewer, cursor=cursor, limit=25
+        )
+        events = [_activity_event_view(e) for e in resp.events]
+        next_cursor = resp.next_cursor
+    except Exception:
+        logger.exception("ActivityFeed failed")  # keep polling at the same cursor
+    return templates.TemplateResponse(
+        request, "_activity.html", {"events": events, "next_cursor": next_cursor}
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -475,11 +617,12 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
     qs = q.strip()
     asked_at = time.time()
     started = time.monotonic()
-    answer_text, tier, status_str, conf, cites = "", "error", "error", 0.0, []
+    answer_text, tier, status_str, conf, cites, ask_ref = "", "error", "error", 0.0, [], ""
     try:
         resp = await core_client.ask(q, scopes=scopes, viewer=viewer)
         answer_text, tier, conf = resp.answer, resp.tier, resp.confidence
         status_str = _STATUS_STR.get(resp.status, "unspecified")
+        ask_ref = resp.ask_ref  # opaque deliberation handle; "" unless escalated (ADR-15)
         cites = [
             {"source": c.source, "ref": c.ref, "confidence": c.confidence} for c in resp.citations
         ]
@@ -505,6 +648,7 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
             cites,
             asked_at=asked_at,
             duration_ms=duration_ms,
+            ask_ref=ask_ref,
         )
     except Exception:
         logger.exception("convlog write failed")
@@ -518,6 +662,7 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
         "citations": cites,
         "asked_at": asked_at,
         "duration_ms": duration_ms,
+        "ask_ref": ask_ref,
     }
     # A new post for the feed (HTMX prepends it).
     return templates.TemplateResponse(request, "_post.html", {"post": _post_view(turn)})

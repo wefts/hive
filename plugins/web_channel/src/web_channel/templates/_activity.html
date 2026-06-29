@@ -1,0 +1,15 @@
+{# One ActivityFeed poll (ADR-15). The new events are appended to #activity-events
+   (the poller's hx-target); the out-of-band span replaces the poller, carrying the
+   opaque next_cursor for the following tick. No raw cursor/seq is ever shown. #}
+{% for e in events %}
+  <li class="act-event">
+    <span class="badge act-kind">{{ e.kind }}</span>
+    {% if e.subject_type %}<span class="htype">{{ e.subject_type }}</span>{% endif %}
+    {% if e.outcome %}<span class="meta">{{ e.outcome }}</span>{% endif %}
+    {% if e.count %}<span class="meta">×{{ e.count }}</span>{% endif %}
+    <span class="muted act-at">{{ e.at }}</span>
+  </li>
+{% endfor %}
+<span id="activity-poller" hx-swap-oob="true"
+      hx-get="/activity?cursor={{ next_cursor | urlencode }}"
+      hx-trigger="every 6s" hx-target="#activity-events" hx-swap="beforeend"></span>

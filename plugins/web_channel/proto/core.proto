@@ -19,6 +19,16 @@ service Core {
   rpc KbStatus(StatusRequest) returns (StatusResponse);
   // Retrieval over the graph, scope-filtered.
   rpc KbSearch(SearchRequest) returns (SearchResponse);
+  // The panel-vs-judge deliberation behind a past escalated answer, by ask_ref
+  // (ADR-15). Read-only, retained, returned only to the owning viewer within scope.
+  rpc Deliberation(DeliberationRequest) returns (DeliberationResponse);
+  // A bounded, scope-filtered neighborhood around one node: nodes + typed edges
+  // (ADR-15). The "connections" surface — never the full hairball.
+  rpc Neighborhood(NeighborhoodRequest) returns (NeighborhoodResponse);
+  // Worker/job activity as a polled, scope-safe typed event log with an OPAQUE
+  // cursor (ADR-15). Poll, not stream; no raw sequence on the wire — the kernel
+  // skips out-of-scope events server-side so hidden volume/timing is not inferable.
+  rpc ActivityFeed(ActivityFeedRequest) returns (ActivityFeedResponse);
 }
 
 message AskRequest {
@@ -54,6 +64,10 @@ message AskResponse {
   string tier = 3;
   repeated Citation citations = 4;
   AnswerStatus status = 5;
+  // Opaque handle to the retained panel-vs-judge deliberation (ADR-15), set ONLY
+  // when an escalation produced one for a non-anonymous asker; empty otherwise.
+  // The channel shows a "see the thinking" affordance only when it is present.
+  string ask_ref = 6;
 }
 
 message StatusRequest {}
@@ -97,4 +111,95 @@ message SearchHit {
 
 message SearchResponse {
   repeated SearchHit hits = 1;
+}
+
+// --- Deliberation (ADR-15) -------------------------------------------------
+
+message DeliberationRequest {
+  string ask_ref = 1;
+  // Allowed visibility scopes for this context (default-deny; same as AskRequest).
+  repeated string scopes = 2;
+  // The requesting viewer; must own the retained deliberation (ADR-7).
+  string viewer = 3;
+}
+
+// One panel model's raw take, before the judge synthesized the single voice.
+message PanelTake {
+  string model = 1;
+  string answer = 2;
+}
+
+message DeliberationResponse {
+  // FOUND ⇒ the panel view below; NOT_FOUND ⇒ unknown/expired ask_ref, or the
+  // viewer is not the owner / current scopes no longer cover it (existence never
+  // revealed); a non-FOUND response carries ONLY status (no partial read).
+  AnswerStatus status = 1;
+  string ask_ref = 2;
+  string answer = 3;
+  double confidence = 4;
+  // Mean pairwise panel disagreement [0,1] — a confidence signal (ADR-7).
+  double disagreement = 5;
+  repeated PanelTake panel = 6;
+  string judge = 7;
+  // When the deliberation ran (ISO-8601), matching StatusResponse.last_activity.
+  string created_at = 8;
+}
+
+// --- Neighborhood (ADR-15) -------------------------------------------------
+
+message NeighborhoodRequest {
+  int64 node_id = 1;                  // the center (e.g. a SearchHit.id)
+  uint32 depth = 2;                   // hops; clamped to [1,2]; 0 ⇒ default 1
+  uint32 node_limit = 3;              // max nodes; clamped to [1,50]; 0 ⇒ default 50
+  repeated string relation_types = 4; // edge-type filter; empty ⇒ all types
+  repeated string scopes = 5;
+  string viewer = 6;
+}
+
+message NodeView {
+  int64 id = 1;
+  string type = 2;
+  string key = 3;
+  string scope = 4;       // always within the request scopes
+  double confidence = 5;  // best-path confidence from the center
+  uint32 depth = 6;       // min hop-distance from the center
+}
+
+message EdgeView {
+  int64 src_id = 1;
+  int64 dst_id = 2;
+  string relation = 3;
+  double reliability = 4;
+}
+
+message NeighborhoodResponse {
+  AnswerStatus status = 1;       // FOUND | NOT_FOUND (center not visible/absent) | ERROR
+  int64 center_id = 2;
+  repeated NodeView nodes = 3;   // excludes the center; confidence desc then id
+  repeated EdgeView edges = 4;   // only between returned in-scope nodes; (src,dst,relation)
+  bool truncated = 5;            // node_limit or ADR-3 edge-budget hit (best-effort)
+}
+
+// --- ActivityFeed (ADR-15) -------------------------------------------------
+
+message ActivityFeedRequest {
+  string cursor = 1;                 // opaque resume token from a prior next_cursor; "" ⇒ most recent
+  uint32 limit = 2;                  // clamped to [1,100]; 0 ⇒ default 50
+  repeated string kinds = 3;         // event-kind filter (closed set); empty ⇒ all kinds
+  repeated string scopes = 4;
+  string viewer = 5;
+}
+
+message ActivityEvent {
+  string kind = 1;          // closed set, e.g. "node_added" | "edge_reinforced" | "node_merged"
+  string at = 2;            // ISO-8601
+  string subject_type = 3;  // referenced node type (scope-gated, in-scope only); "" if none
+  string outcome = 4;       // typed outcome (e.g. "merged" | "refused"); "" if n/a
+  int64 count = 5;          // typed count of IN-SCOPE subjects only; 0 if n/a
+}
+
+message ActivityFeedResponse {
+  AnswerStatus status = 1;            // FOUND | NOT_FOUND (no visible events) | ERROR
+  repeated ActivityEvent events = 2;  // already scope-filtered; ordered oldest→newest within the page
+  string next_cursor = 3;             // opaque token to pass as the next request.cursor
 }

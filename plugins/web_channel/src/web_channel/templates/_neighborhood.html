@@ -1,0 +1,57 @@
+{# Bounded, scope-filtered connections (ADR-15). Nodes are clickable to walk the
+   graph; relation chips filter edge types; truncated shown honestly. Verbatim from
+   typed fields; honest empty state on NOT_FOUND. The channel never reads the DB. #}
+{% if hood %}
+<div class="card hood">
+  <section>
+    <div class="hood-head">
+      <span class="badge status-found">connections</span>
+      <span class="meta">center #{{ hood.center_id }} · {{ hood.nodes|length }} nodes · {{ hood.edges|length }} edges</span>
+      {% if hood.truncated %}<span class="badge status-warn">truncated</span>{% endif %}
+    </div>
+
+    {% if hood.relations %}
+      <div class="hood-filter">
+        <a class="badge link" data-variant="{{ 'outline' if active_rel else '' }}"
+           hx-get="/neighborhood/{{ hood.center_id }}" hx-target="#answer" hx-swap="innerHTML">all</a>
+        {% for r in hood.relations %}
+          <a class="badge link" data-variant="{{ '' if active_rel == r else 'outline' }}"
+             hx-get="/neighborhood/{{ hood.center_id }}?rel={{ r }}"
+             hx-target="#answer" hx-swap="innerHTML">{{ r }}</a>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if hood.nodes %}
+      <ul class="hood-nodes">
+        {% for n in hood.nodes %}
+          <li>
+            <a class="hood-node" title="open this entity's connections"
+               hx-get="/neighborhood/{{ n.id }}" hx-target="#answer" hx-swap="innerHTML">
+              <span class="htype">{{ n.type }}</span> <span class="hkey">{{ n.key }}</span>
+            </a>
+            <span class="muted">depth {{ n.depth }} · {{ n.scope }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No connected nodes in scope.</p>
+    {% endif %}
+
+    {% if hood.edges %}
+      <ul class="hood-edges">
+        {% for e in hood.edges %}
+          <li class="muted">#{{ e.src_id }} <span class="rel">{{ e.relation }}</span> #{{ e.dst_id }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+</div>
+{% else %}
+<div class="card">
+  <section>
+    <span class="badge status-warn">no connections</span>
+    <p class="muted">Nothing connected to that entity is visible to you (or it doesn't exist).</p>
+  </section>
+</div>
+{% endif %}

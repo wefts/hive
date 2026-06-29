@@ -24,6 +24,20 @@
     <div hx-get="/tile/status" hx-trigger="load">
       <div class="card"><section><span class="muted">loading…</span></section></div>
     </div>
+
+    <!-- Activity: the scope-safe ActivityFeed, polled (HTMX) with an opaque cursor.
+         The poller appends new events and replaces itself (OOB) with the next cursor. -->
+    <div class="card">
+      <header><h3 class="section-label">Activity</h3></header>
+      <section>
+        <ul id="activity-events" class="act-list"></ul>
+        <span id="activity-poller"
+              hx-get="/activity?cursor=" hx-trigger="load"
+              hx-target="#activity-events" hx-swap="beforeend"></span>
+        <p class="muted act-note">Live · thin slice (ingest writes). Richer worker
+          outcomes (entity-resolution, enrichment) appear once the cognitive loop runs.</p>
+      </section>
+    </div>
   </aside>
 
   <main class="main">

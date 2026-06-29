@@ -59,3 +59,60 @@ async def kb_search(query: str, scopes: list[str], limit: int = 10) -> core_pb2.
             core_pb2.SearchRequest(query=query, scopes=scopes, limit=limit),
             timeout=read_timeout_s(),
         )
+
+
+async def deliberation(
+    ask_ref: str, scopes: list[str], viewer: str
+) -> core_pb2.DeliberationResponse:
+    """The retained panel-vs-judge deliberation behind a past escalated answer (ADR-15).
+    Returned only to the owning viewer within scope; otherwise NOT_FOUND. Fast, no LLM."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.Deliberation(
+            core_pb2.DeliberationRequest(ask_ref=ask_ref, scopes=scopes, viewer=viewer),
+            timeout=read_timeout_s(),
+        )
+
+
+async def neighborhood(
+    node_id: int,
+    scopes: list[str],
+    viewer: str,
+    depth: int = 1,
+    node_limit: int = 50,
+    relation_types: list[str] | None = None,
+) -> core_pb2.NeighborhoodResponse:
+    """A bounded, scope-filtered neighborhood around one node (ADR-15) — the
+    connections surface. Kernel clamps depth≤2/node_limit≤50. Fast, no LLM."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.Neighborhood(
+            core_pb2.NeighborhoodRequest(
+                node_id=node_id,
+                depth=depth,
+                node_limit=node_limit,
+                relation_types=relation_types or [],
+                scopes=scopes,
+                viewer=viewer,
+            ),
+            timeout=read_timeout_s(),
+        )
+
+
+async def activity_feed(
+    scopes: list[str],
+    viewer: str,
+    cursor: str = "",
+    limit: int = 50,
+    kinds: list[str] | None = None,
+) -> core_pb2.ActivityFeedResponse:
+    """One poll of the scope-safe worker/job activity log (ADR-15). The `cursor` is
+    opaque (pass back a prior `next_cursor`; "" ⇒ most recent). Fast, no LLM."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ActivityFeed(
+            core_pb2.ActivityFeedRequest(
+                cursor=cursor, limit=limit, kinds=kinds or [], scopes=scopes, viewer=viewer
+            ),
+            timeout=read_timeout_s(),
+        )

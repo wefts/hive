@@ -25,5 +25,16 @@
     {% endif %}
 
     {% if post.path %}<div class="trace">how: {{ post.path }}{% if post.tier %} · tier={{ post.tier }}{% endif %}</div>{% endif %}
+
+    {# "See how it decided" — only when this answer retained a deliberation (ADR-15). #}
+    {% if post.ask_ref %}
+      <div class="post-delib">
+        <button class="btn" data-variant="outline" data-size="sm"
+                hx-get="/deliberation/{{ post.ask_ref }}"
+                hx-target="next .delib-slot" hx-swap="innerHTML"
+                hx-on::after-request="this.style.display='none'">see how it decided</button>
+        <div class="delib-slot"></div>
+      </div>
+    {% endif %}
   </section>
 </article>

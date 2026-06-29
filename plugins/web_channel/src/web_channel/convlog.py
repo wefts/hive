@@ -51,8 +51,10 @@ def init() -> None:
                 duration_ms INTEGER
             )"""
         )
-        # Idempotent migration for stores created before the timing columns existed.
-        for col, decl in (("asked_at", "REAL"), ("duration_ms", "INTEGER")):
+        # Idempotent migration for stores created before these columns existed.
+        # `ask_ref` is the opaque handle to a retained deliberation (ADR-15), so a
+        # reopened past turn can still offer the "see how it decided" affordance.
+        for col, decl in (("asked_at", "REAL"), ("duration_ms", "INTEGER"), ("ask_ref", "TEXT")):
             with contextlib.suppress(sqlite3.OperationalError):  # column already present
                 conn.execute(f"ALTER TABLE conversations ADD COLUMN {col} {decl}")
         conn.execute("CREATE INDEX IF NOT EXISTS ix_conv_viewer ON conversations (viewer, id DESC)")
@@ -70,9 +72,11 @@ def log_turn(
     citations: list[dict],
     asked_at: float | None = None,
     duration_ms: int | None = None,
+    ask_ref: str = "",
 ) -> None:
     """Persist one Q&A turn. Best-effort: a logging failure must never break /ask.
-    `asked_at` is when the question was submitted; `duration_ms` how long the swarm took."""
+    `asked_at` is when the question was submitted; `duration_ms` how long the swarm
+    took; `ask_ref` is the opaque deliberation handle (empty when none)."""
     if not _initialized:
         init()
     now = time.time()
@@ -80,7 +84,7 @@ def log_turn(
         conn.execute(
             "INSERT INTO conversations "
             "(ts, viewer, scopes, question, answer, tier, status, confidence, citations, "
-            "asked_at, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "asked_at, duration_ms, ask_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 now,
                 viewer,
@@ -93,6 +97,7 @@ def log_turn(
                 json.dumps(citations),
                 asked_at if asked_at is not None else now,
                 duration_ms,
+                ask_ref,
             ),
         )
 
@@ -104,7 +109,8 @@ def recent(viewer: str, limit: int = 20) -> list[dict]:
     with _conn() as conn:
         rows = conn.execute(
             "SELECT id, ts, question, answer, tier, status, confidence, citations, "
-            "asked_at, duration_ms FROM conversations WHERE viewer = ? ORDER BY id DESC LIMIT ?",
+            "asked_at, duration_ms, ask_ref FROM conversations WHERE viewer = ? "
+            "ORDER BY id DESC LIMIT ?",
             (viewer, limit),
         ).fetchall()
     return [_row_to_turn(r) for r in rows]
@@ -117,7 +123,7 @@ def get(viewer: str, conv_id: int) -> dict | None:
     with _conn() as conn:
         row = conn.execute(
             "SELECT id, ts, question, answer, tier, status, confidence, citations, "
-            "asked_at, duration_ms FROM conversations WHERE viewer = ? AND id = ?",
+            "asked_at, duration_ms, ask_ref FROM conversations WHERE viewer = ? AND id = ?",
             (viewer, conv_id),
         ).fetchone()
     return _row_to_turn(row) if row else None
@@ -135,4 +141,5 @@ def _row_to_turn(r) -> dict:
         "citations": json.loads(r[7] or "[]"),
         "asked_at": r[8] if r[8] is not None else r[1],
         "duration_ms": r[9],
+        "ask_ref": r[10] if len(r) > 10 and r[10] else "",
     }

@@ -14,7 +14,8 @@
 <body x-data="{ palette: false }"
       @keydown.meta.k.window.prevent="palette = true"
       @keydown.ctrl.k.window.prevent="palette = true"
-      @keydown.escape.window="palette = false">
+      @keydown.escape.window="palette = false"
+      @close-palette.window="palette = false">
   <main class="shell">
     <header class="topbar">
       <span class="brand">swarm</span>

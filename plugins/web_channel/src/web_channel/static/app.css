@@ -128,3 +128,41 @@ body { line-height: 1.6; }
 .login { max-width: 420px; }
 .login-form { display: flex; flex-direction: column; gap: 0.75rem; margin: 1rem 0; }
 .site-footer { margin-top: 2rem; }
+
+/* --- dashboard views (ADR-15): deliberation · neighborhood · activity --------- */
+
+/* deliberation: panel takes side-by-side, an agreement meter, judge synthesis */
+.post-delib { margin-top: 1rem; }
+.delib-slot { margin-top: 0.75rem; }
+.delib { margin-top: 0.5rem; }
+.delib-head { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.agree-bar { height: 8px; background: var(--secondary); border-radius: 999px; overflow: hidden; margin: 0.6rem 0 1rem; }
+.agree-bar span { display: block; height: 100%; background: var(--primary); border-radius: 999px; }
+.panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+.panel-model { margin: 0; font-size: 0.8rem; font-weight: 600; color: var(--primary); }
+.judge { border-color: var(--primary); }
+
+/* neighborhood: bounded node list + relation-type filter chips + edges */
+.hood-head { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.hood-filter { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.75rem 0; }
+.badge.link { cursor: pointer; text-decoration: none; }
+.hood-nodes { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+.hood-nodes li { display: flex; justify-content: space-between; gap: 0.75rem; align-items: baseline; padding: 0.45rem 0; border-bottom: 1px solid var(--border); }
+.hood-nodes li:last-child { border-bottom: 0; }
+.hood-node { color: var(--foreground); }
+.hood-node:hover { color: var(--primary); text-decoration: none; }
+.hood-edges { list-style: none; margin: 0.75rem 0 0; padding: 0.75rem 0 0; border-top: 1px solid var(--border); font-size: 0.85rem; }
+.hood-edges li { padding: 0.2rem 0; }
+.rel { color: var(--primary); }
+
+/* activity: a polled, accumulating event list */
+.act-list { list-style: none; margin: 0; padding: 0; }
+.act-event { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+.act-event:last-child { border-bottom: 0; }
+.act-kind { font-size: 0.7rem; }
+.act-at { margin-left: auto; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.act-note { margin-top: 0.75rem; font-size: 0.78rem; }
+
+/* ⌘K hit → a full-width link that opens the entity's neighborhood */
+.hit-link { display: flex; gap: 0.75rem; align-items: baseline; width: 100%; color: var(--foreground); }
+.hit-link:hover { color: var(--primary); text-decoration: none; }

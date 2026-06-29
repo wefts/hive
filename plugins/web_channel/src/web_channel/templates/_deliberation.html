@@ -1,0 +1,36 @@
+{# Panel-vs-judge deliberation (ADR-15). Verbatim from typed fields; honest absent
+   state when the kernel returns no longer available (expired / not-owner / scope). #}
+{% if delib %}
+<div class="delib">
+  <div class="delib-head">
+    <span class="badge status-found">deliberation</span>
+    <span class="meta {{ delib.confidence_class }}">confidence {{ "%.2f"|format(delib.confidence) }}</span>
+    <span class="meta">· {{ delib.agreement_pct }}% panel agreement</span>
+    {% if delib.created_at %}<span class="meta">· {{ delib.created_at }}</span>{% endif %}
+  </div>
+
+  <div class="agree-bar" role="img"
+       aria-label="{{ delib.agreement_pct }} percent panel agreement">
+    <span style="width: {{ delib.agreement_pct }}%"></span>
+  </div>
+
+  <h4 class="section-label">the panel — each model's take</h4>
+  <div class="panel-grid">
+    {% for t in delib.panel %}
+      <div class="card panel-take">
+        <header><h5 class="panel-model">{{ t.model }}</h5></header>
+        <section><p class="answer">{{ t.answer }}</p></section>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="card judge">
+    <header>
+      <h4 class="section-label">judge synthesis{% if delib.judge %} · {{ delib.judge }}{% endif %}</h4>
+    </header>
+    <section><p class="answer">{{ delib.answer }}</p></section>
+  </div>
+</div>
+{% else %}
+<p class="muted">This deliberation is no longer available.</p>
+{% endif %}

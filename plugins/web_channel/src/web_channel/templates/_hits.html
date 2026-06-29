@@ -2,9 +2,15 @@
   <li class="muted">search unavailable</li>
 {% elif hits %}
   {% for h in hits %}
-    <li class="hit"><span class="htype">{{ h.type }}</span>
-      <span class="hkey">{{ h.key }}</span>
-      <span class="muted">{{ "%.2f"|format(h.score) }}</span></li>
+    <li class="hit">
+      <a class="hit-link" title="show this entity's connections"
+         hx-get="/neighborhood/{{ h.id }}" hx-target="#answer" hx-swap="innerHTML"
+         hx-on::after-request="window.dispatchEvent(new CustomEvent('close-palette'))">
+        <span class="htype">{{ h.type }}</span>
+        <span class="hkey">{{ h.key }}</span>
+        <span class="muted">{{ "%.2f"|format(h.score) }}</span>
+      </a>
+    </li>
   {% endfor %}
 {% else %}
   <li class="muted">no matches for "{{ q }}"</li>
