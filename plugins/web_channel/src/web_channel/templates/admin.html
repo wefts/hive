@@ -1,61 +1,75 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <span class="badge status-found">groot</span>
+<div class="stack">
+<div class="card">
+  <header>
+    <h2 class="card-title">Users <span class="badge status-found">groot</span></h2>
+  </header>
+  <section>
+    <h3 class="section-label">SSO / Keycloak users</h3>
+    {% if users is none %}
+      <p class="muted"><span class="badge status-warn">Keycloak unavailable</span>
+        Could not list SSO users right now.</p>
+    {% else %}
+      <div class="table-container">
+        <table class="table">
+          <thead><tr><th>Username</th><th>Email</th><th>Groups</th></tr></thead>
+          <tbody>
+            {% for u in users %}
+              <tr><td>{{ u.username }}</td><td class="muted">{{ u.email }}</td>
+                <td>{{ u.groups|join(', ') if u.groups else '—' }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+  <section>
+    <h3 class="section-label">Local users</h3>
+    <div class="table-container">
+      <table class="table">
+        <thead><tr><th>Username</th><th>Scopes</th><th>groot?</th></tr></thead>
+        <tbody>
+          {% for u in local_users %}
+            <tr><td>{{ u.username }}</td><td>{{ u.scopes|join(', ') }}</td>
+              <td>{{ 'yes' if u.is_groot else '' }}</td></tr>
+          {% else %}
+            <tr><td colspan="3" class="muted">none yet</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
 
-  <h2 class="answer">SSO / Keycloak users</h2>
-  {% if users is none %}
-    <p class="muted"><span class="badge status-warn">Keycloak unavailable</span>
-      Could not list SSO users right now.</p>
-  {% else %}
-    <table class="users">
-      <thead><tr><th>Username</th><th>Email</th><th>Groups</th></tr></thead>
-      <tbody>
-        {% for u in users %}
-          <tr><td>{{ u.username }}</td><td class="muted">{{ u.email }}</td>
-            <td>{{ u.groups|join(', ') if u.groups else '—' }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endif %}
-
-  <h2 class="answer">Local users</h2>
-  <table class="users">
-    <thead><tr><th>Username</th><th>Scopes</th><th>groot?</th></tr></thead>
-    <tbody>
-      {% for u in local_users %}
-        <tr><td>{{ u.username }}</td><td>{{ u.scopes|join(', ') }}</td>
-          <td>{{ 'yes' if u.is_groot else '' }}</td></tr>
-      {% else %}
-        <tr><td colspan="3" class="muted">none yet</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</section>
-
-<section class="card">
-  <h2 class="answer">Invite an SSO user (Keycloak)</h2>
-  <form class="invite" method="post" action="/admin/invite" autocomplete="off">
-    <input type="text" name="username" placeholder="username" required aria-label="username">
-    <input type="password" name="password" placeholder="temporary password" required aria-label="temporary password">
-    <select name="group" aria-label="group">
-      <option value="">no group (public only)</option>
-      {% for g in groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
-    </select>
-    <button type="submit">Invite to Keycloak</button>
-  </form>
-
-  <h2 class="answer">Create a local user (no SSO)</h2>
-  <form class="invite" method="post" action="/admin/local-invite" autocomplete="off">
-    <input type="text" name="username" placeholder="username" required aria-label="local username">
-    <input type="password" name="password" placeholder="password" required aria-label="local password">
-    <select name="group" aria-label="group">
-      <option value="">no group (public only)</option>
-      {% for g in groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
-    </select>
-    <button type="submit">Create local user</button>
-  </form>
-  <p class="muted">Local users sign in through the local password form; a group grants its
-    mapped scope (default-deny otherwise). SSO users authenticate against Keycloak.</p>
-</section>
+<div class="card">
+  <header><h2 class="card-title">Invite</h2></header>
+  <section>
+    <h3 class="section-label">Invite an SSO user (Keycloak)</h3>
+    <form class="invite" method="post" action="/admin/invite" autocomplete="off">
+      <input class="input" type="text" name="username" placeholder="username" required aria-label="username">
+      <input class="input" type="password" name="password" placeholder="temporary password" required aria-label="temporary password">
+      <select class="input" name="group" aria-label="group">
+        <option value="">no group (public only)</option>
+        {% for g in groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+      </select>
+      <button class="btn" type="submit">Invite to Keycloak</button>
+    </form>
+  </section>
+  <section>
+    <h3 class="section-label">Create a local user (no SSO)</h3>
+    <form class="invite" method="post" action="/admin/local-invite" autocomplete="off">
+      <input class="input" type="text" name="username" placeholder="username" required aria-label="local username">
+      <input class="input" type="password" name="password" placeholder="password" required aria-label="local password">
+      <select class="input" name="group" aria-label="group">
+        <option value="">no group (public only)</option>
+        {% for g in groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+      </select>
+      <button class="btn" type="submit">Create local user</button>
+    </form>
+    <p class="muted">Local users sign in through the local password form; a group grants its
+      mapped scope (default-deny otherwise). SSO users authenticate against Keycloak.</p>
+  </section>
+</div>
+</div>
 {% endblock %}

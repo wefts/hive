@@ -1,49 +1,51 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="layout">
-  <aside class="sidebar">
-    <nav class="tile">
-      <h3>Recent conversations</h3>
-      {% if recent %}
-        <ul class="recent">
-          {% for r in recent %}
-            <li>
-              <a href="#" hx-get="/conversation/{{ r.id }}" hx-target="#answer" hx-swap="innerHTML"
-                 class="recent-link">{{ r.question }}</a>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="muted">No conversations yet.</p>
-      {% endif %}
-    </nav>
+  <aside class="aside-col">
+    <div class="card">
+      <header><h3 class="section-label">Recent conversations</h3></header>
+      <section>
+        {% if recent %}
+          <ul class="recent">
+            {% for r in recent %}
+              <li>
+                <a href="#" hx-get="/conversation/{{ r.id }}" hx-target="#answer" hx-swap="innerHTML"
+                   class="recent-link">{{ r.question }}</a>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted">No conversations yet.</p>
+        {% endif %}
+      </section>
+    </div>
 
     <!-- State of my memory: real KbStatus, loaded async so the page never blocks. -->
     <div hx-get="/tile/status" hx-trigger="load">
-      <div class="tile"><span class="muted">loading…</span></div>
+      <div class="card"><section><span class="muted">loading…</span></section></div>
     </div>
   </aside>
 
   <main class="main">
-    <section class="compose">
-      <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML"
-            hx-on::after-request="if(event.detail.successful) this.reset()" autocomplete="off">
-        <input class="q" type="text" name="q" placeholder="Ask the swarm…"
-               autofocus autocomplete="off" required aria-label="question">
-        <button type="submit">Ask</button>
-        <span class="htmx-indicator muted">…thinking</span>
-      </form>
-    </section>
+    <form class="compose" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful) this.reset()" autocomplete="off">
+      <input class="input q" type="text" name="q" placeholder="Ask the swarm…"
+             autofocus autocomplete="off" required aria-label="question">
+      <button class="btn" type="submit">Ask</button>
+      <span class="htmx-indicator muted">…thinking</span>
+    </form>
 
-    <section id="answer" class="answer-area">
-      <p class="muted invite">Ask the swarm a question above — or pick a past conversation on the left.</p>
+    <section id="answer" class="answer-area" aria-live="polite">
+      <p class="invite-msg">Ask the swarm a question above — or pick a past conversation on the left.</p>
     </section>
   </main>
 </div>
 
-<footer class="site-footer">
-  <h3>What changed · open questions · needs you</h3>
-  <p class="muted">Not available yet — needs the <code>Brief</code> kernel RPC and a running
-    cognitive loop. Shown honestly rather than faked.</p>
+<footer class="card site-footer">
+  <header><h3 class="section-label">What changed · open questions · needs you</h3></header>
+  <section>
+    <p class="muted">Not available yet — needs the <code>Brief</code> kernel RPC and a running
+      cognitive loop. Shown honestly rather than faked.</p>
+  </section>
 </footer>
 {% endblock %}

@@ -1,24 +1,28 @@
 {% if status %}
-<div class="tile">
-  <h3>State of my memory</h3>
-  <div class="stat"><span class="num">{{ status.nodes }}</span> nodes ·
-    <span class="num">{{ status.edges }}</span> edges</div>
-  <div class="muted">last activity: {{ status.last_activity }}</div>
-  {% if status.inventory %}
-    <ul class="inv">
-      {% for i in status.inventory %}<li><span class="htype">{{ i.type }}</span> {{ i.count }}</li>{% endfor %}
-    </ul>
-  {% endif %}
-  {% for n in status.namespaces %}
-    <div class="muted">embeddings: {{ n.model }} · dim {{ n.dim }} · {{ n.status }}</div>
-  {% endfor %}
-  {% if status.capabilities %}
-    <div class="muted">capabilities: {{ status.capabilities|join(', ') }}</div>
-  {% endif %}
+<div class="card">
+  <header><h3 class="section-label">State of my memory</h3></header>
+  <section>
+    <div class="stat"><span class="num">{{ status.nodes }}</span> nodes ·
+      <span class="num">{{ status.edges }}</span> edges</div>
+    <div class="muted">last activity: {{ status.last_activity }}</div>
+    {% if status.inventory %}
+      <ul class="inv">
+        {% for i in status.inventory %}<li><span class="htype">{{ i.type }}</span> {{ i.count }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    {% for n in status.namespaces %}
+      <div class="muted">embeddings: {{ n.model }} · dim {{ n.dim }} · {{ n.status }}</div>
+    {% endfor %}
+    {% if status.capabilities %}
+      <div class="muted">capabilities: {{ status.capabilities|join(', ') }}</div>
+    {% endif %}
+  </section>
 </div>
 {% else %}
-<div class="tile">
-  <span class="badge status-warn">unavailable</span>
-  <p class="muted">The knowledge base is unreachable right now.</p>
+<div class="card">
+  <section>
+    <span class="badge status-warn">unavailable</span>
+    <p class="muted">The knowledge base is unreachable right now.</p>
+  </section>
 </div>
 {% endif %}

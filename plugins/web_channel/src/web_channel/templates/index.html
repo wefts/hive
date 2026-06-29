@@ -1,17 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
 {% if oidc_enabled and not principal %}
-  <section class="card">
-    <span class="badge status-warn">sign in</span>
-    <p class="muted">This console requires sign-in.</p>
-    <p><a class="btn" href="/login">Log in with Keycloak</a></p>
-  </section>
+  <div class="card">
+    <section>
+      <span class="badge status-warn">sign in</span>
+      <p class="muted">This console requires sign-in.</p>
+      <p><a class="btn" href="/login">Log in with Keycloak</a></p>
+    </section>
+  </div>
 {% else %}
-  <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML"
+  <form class="compose" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML"
         hx-disabled-elt="find button" autocomplete="off">
-    <input class="q" type="text" name="q" placeholder="Ask the swarm…"
+    <input class="input q" type="text" name="q" placeholder="Ask the swarm…"
            autofocus autocomplete="off" required aria-label="question">
-    <button type="submit">Ask</button>
+    <button class="btn" type="submit">Ask</button>
     <span class="htmx-indicator muted">…thinking</span>
   </form>
   <section id="answer" aria-live="polite"></section>

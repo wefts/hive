@@ -4,8 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Swarm — web_channel</title>
+  <!-- Vendored locally: the page renders with no external network call (brief §5/§8).
+       Basecoat is the design system (ADR-2); app.css is our one token layer over it. -->
+  <link rel="stylesheet" href="/static/vendor/basecoat.min.css">
   <link rel="stylesheet" href="/static/app.css">
-  <!-- Vendored locally: the page renders with no external network call (brief §5/§8). -->
   <script src="/static/vendor/htmx.min.js" defer></script>
   <script src="/static/vendor/alpine.min.js" defer></script>
 </head>
@@ -19,7 +21,8 @@
       <span class="muted">operator console</span>
       <span class="spacer"></span>
       {% if authed %}
-        <button class="kbd" @click="palette = true" title="Search memories (⌘K)">⌘K&nbsp;search</button>
+        <button class="btn" data-variant="outline" data-size="sm"
+                @click="palette = true" title="Search memories (⌘K)">⌘K&nbsp;search</button>
       {% endif %}
       {% if principal %}
         <span class="muted">{{ principal.display or principal.viewer }} · scopes: {{ principal.scopes|join(', ') }}</span>
@@ -33,8 +36,8 @@
   {% if authed %}
   <!-- ⌘K command palette (opened from the header; shared across pages) -->
   <div class="palette-overlay" x-show="palette" x-cloak @click.self="palette = false">
-    <div class="palette">
-      <input type="text" name="q" placeholder="Search memories…" autocomplete="off"
+    <div class="palette" role="dialog" aria-modal="true" aria-label="Search memories">
+      <input class="input" type="text" name="q" placeholder="Search memories…" autocomplete="off"
              aria-label="search memories" x-ref="paletteInput"
              x-effect="if (palette) $nextTick(() => $refs.paletteInput.focus())"
              hx-get="/search" hx-trigger="keyup changed delay:250ms, search"
