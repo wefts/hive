@@ -65,3 +65,44 @@ def test_answer_card_shows_trace_path(monkeypatch) -> None:
     monkeypatch.setattr(core_client, "ask", fake_ask)
     r = client.post("/ask", data={"q": "q"})
     assert "consilium" in r.text.lower()  # the gate→consilium trace path is shown
+
+
+def test_conversation_reopen_renders_past_turn(monkeypatch) -> None:
+    from web_channel import auth
+
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)  # viewer = operator
+    convlog.log_turn(
+        "operator",
+        ["public"],
+        "what is X?",
+        "X is a thing.",
+        "escalate",
+        "found",
+        0.8,
+        [{"source": "file", "ref": "/x.md", "confidence": 0.9}],
+    )
+    cid = convlog.recent("operator", 1)[0]["id"]
+    r = client.get(f"/conversation/{cid}")
+    assert r.status_code == 200
+    assert "what is X?" in r.text and "X is a thing." in r.text and "/x.md" in r.text
+
+
+def test_conversation_missing_is_404(monkeypatch) -> None:
+    from web_channel import auth
+
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+    r = client.get("/conversation/99999999")
+    assert r.status_code == 404
+
+
+def test_conversation_is_viewer_scoped(monkeypatch) -> None:
+    # A viewer can only reopen their OWN conversations (convlog.get filters by viewer).
+    from web_channel import auth
+
+    convlog.log_turn(
+        "alice", ["public", "group"], "secret q", "secret a", "escalate", "found", 0.9, []
+    )
+    cid = convlog.recent("alice", 1)[0]["id"]
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)  # viewer = operator, not alice
+    r = client.get(f"/conversation/{cid}")
+    assert r.status_code == 404  # operator cannot open alice's conversation

@@ -200,19 +200,42 @@ async def index(request: Request) -> Response:
     # tile loads async (HTMX) so the page is instant and never blocks on the kernel.
     viewer = principal.viewer if principal else _viewer()
     try:
-        posts = [_post_view(t) for t in convlog.recent(viewer, 20)]  # durable feed
+        recent = convlog.recent(viewer, 15)  # for the sidebar links (durable, per-viewer)
     except Exception:
         logger.exception("convlog read failed")
-        posts = []
+        recent = []
     return templates.TemplateResponse(
         request,
         "dashboard.html",
         {
             "oidc_enabled": auth.oidc_enabled(),
             "principal": principal.to_session() if principal else None,
-            "posts": posts,
+            "recent": [
+                {
+                    "id": t["id"],
+                    "question": _split_question(t["question"])[0],
+                    "status": t["status"],
+                }
+                for t in recent
+            ],
         },
     )
+
+
+@app.get("/conversation/{conv_id}", response_class=HTMLResponse)
+async def conversation(request: Request, conv_id: int) -> HTMLResponse:
+    """Reopen a past conversation (a Recent link) into the main answer area."""
+    if auth.oidc_enabled():
+        principal = _current_principal(request)
+        if principal is None:
+            return HTMLResponse('<p class="muted">Session ended — <a href="/login">log in</a>.</p>')
+        viewer = principal.viewer
+    else:
+        viewer = _viewer()
+    turn = convlog.get(viewer, conv_id)
+    if turn is None:
+        return HTMLResponse('<p class="muted">Conversation not found.</p>', status_code=404)
+    return templates.TemplateResponse(request, "_post.html", {"post": _post_view(turn)})
 
 
 @app.get("/tile/status", response_class=HTMLResponse)

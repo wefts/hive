@@ -103,21 +103,36 @@ def recent(viewer: str, limit: int = 20) -> list[dict]:
         init()
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT ts, question, answer, tier, status, confidence, citations, "
+            "SELECT id, ts, question, answer, tier, status, confidence, citations, "
             "asked_at, duration_ms FROM conversations WHERE viewer = ? ORDER BY id DESC LIMIT ?",
             (viewer, limit),
         ).fetchall()
-    return [
-        {
-            "ts": r[0],
-            "question": r[1],
-            "answer": r[2],
-            "tier": r[3],
-            "status": r[4],
-            "confidence": r[5],
-            "citations": json.loads(r[6] or "[]"),
-            "asked_at": r[7] if r[7] is not None else r[0],
-            "duration_ms": r[8],
-        }
-        for r in rows
-    ]
+    return [_row_to_turn(r) for r in rows]
+
+
+def get(viewer: str, conv_id: int) -> dict | None:
+    """One past conversation by id, scoped to the viewer (None if not theirs/absent)."""
+    if not _initialized:
+        init()
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT id, ts, question, answer, tier, status, confidence, citations, "
+            "asked_at, duration_ms FROM conversations WHERE viewer = ? AND id = ?",
+            (viewer, conv_id),
+        ).fetchone()
+    return _row_to_turn(row) if row else None
+
+
+def _row_to_turn(r) -> dict:
+    return {
+        "id": r[0],
+        "ts": r[1],
+        "question": r[2],
+        "answer": r[3],
+        "tier": r[4],
+        "status": r[5],
+        "confidence": r[6],
+        "citations": json.loads(r[7] or "[]"),
+        "asked_at": r[8] if r[8] is not None else r[1],
+        "duration_ms": r[9],
+    }

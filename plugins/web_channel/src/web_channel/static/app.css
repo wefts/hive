@@ -166,13 +166,24 @@ a:hover { text-decoration: underline; }
 .login button { padding: 0.7rem 1rem; background: var(--accent-dim); color: #fff; border: 0; border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; font-size: 1rem; }
 .login button:hover { background: #2a7bff; }
 
-/* --- microblog layout (compose · feed | sidebar · footer) --- */
+/* --- layout: aside (left) | main (right) --- */
 .compose { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-5); }
 .compose .ask { flex: 1; min-width: 280px; }
-.layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--space-5); align-items: start; }
-@media (max-width: 760px) { .layout { grid-template-columns: 1fr; } .sidebar { order: -1; } }
-.feed { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
-.feed .empty { padding: var(--space-6) 0; text-align: center; }
+.layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+@media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+.main { min-width: 0; }
+.answer-area { min-height: 2rem; }
+.invite { padding: var(--space-6) 0; }
+
+/* recent conversations: a quiet list of links */
+.recent { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
+.recent li { border-bottom: 1px solid var(--border-soft); }
+.recent li:last-child { border-bottom: 0; }
+.recent-link {
+  display: block; padding: 0.5rem 0; color: var(--fg2); font-size: 0.92rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.recent-link:hover { color: var(--accent); text-decoration: none; }
 
 .post { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-5); }
 .post-title { font-size: 1.05rem; font-weight: 600; color: var(--fg); line-height: 1.4; }

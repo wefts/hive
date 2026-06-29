@@ -5,31 +5,46 @@
      @keydown.ctrl.k.window.prevent="palette = true"
      @keydown.escape.window="palette = false">
 
-  <section class="compose">
-    <form class="ask" hx-post="/ask" hx-target="#feed" hx-swap="afterbegin"
-          hx-on::after-request="if(event.detail.successful) this.reset()" autocomplete="off">
-      <input class="q" type="text" name="q" placeholder="Ask the swarm…"
-             autofocus autocomplete="off" required aria-label="question">
-      <button type="submit">Ask</button>
-      <span class="htmx-indicator muted">…thinking</span>
-    </form>
-    <button class="kbd" @click="palette = true" title="Search memories (⌘K)">⌘K&nbsp;search</button>
-  </section>
-
   <div class="layout">
-    <main class="feed" id="feed">
-      {% for post in posts %}{% include "_post.html" %}{% endfor %}
-      {% if not posts %}
-        <p class="muted empty">No conversations yet — ask the swarm something above.</p>
-      {% endif %}
-    </main>
-
     <aside class="sidebar">
+      <nav class="tile">
+        <h3>Recent conversations</h3>
+        {% if recent %}
+          <ul class="recent">
+            {% for r in recent %}
+              <li>
+                <a href="#" hx-get="/conversation/{{ r.id }}" hx-target="#answer" hx-swap="innerHTML"
+                   class="recent-link">{{ r.question }}</a>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted">No conversations yet.</p>
+        {% endif %}
+      </nav>
+
       <!-- State of my memory: real KbStatus, loaded async so the page never blocks. -->
       <div hx-get="/tile/status" hx-trigger="load">
         <div class="tile"><span class="muted">loading…</span></div>
       </div>
     </aside>
+
+    <main class="main">
+      <section class="compose">
+        <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML"
+              hx-on::after-request="if(event.detail.successful) this.reset()" autocomplete="off">
+          <input class="q" type="text" name="q" placeholder="Ask the swarm…"
+                 autofocus autocomplete="off" required aria-label="question">
+          <button type="submit">Ask</button>
+          <span class="htmx-indicator muted">…thinking</span>
+        </form>
+        <button class="kbd" @click="palette = true" title="Search memories (⌘K)">⌘K&nbsp;search</button>
+      </section>
+
+      <section id="answer" class="answer-area">
+        <p class="muted invite">Ask the swarm a question above — or pick a past conversation on the left.</p>
+      </section>
+    </main>
   </div>
 
   <footer class="site-footer">
