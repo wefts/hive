@@ -209,6 +209,7 @@ async def index(request: Request) -> Response:
         "dashboard.html",
         {
             "oidc_enabled": auth.oidc_enabled(),
+            "authed": True,  # dashboard → show the ⌘K search + palette in the header
             "principal": principal.to_session() if principal else None,
             "recent": [
                 {
@@ -366,6 +367,7 @@ async def admin(request: Request) -> HTMLResponse:
         request,
         "admin.html",
         {
+            "authed": True,
             "principal": principal.to_session(),
             "users": users,
             "local_users": localusers.list_users(),

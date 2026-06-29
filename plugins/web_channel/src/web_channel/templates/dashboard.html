@@ -1,69 +1,49 @@
 {% extends "base.html" %}
 {% block content %}
-<div x-data="{ palette: false }"
-     @keydown.meta.k.window.prevent="palette = true"
-     @keydown.ctrl.k.window.prevent="palette = true"
-     @keydown.escape.window="palette = false">
+<div class="layout">
+  <aside class="sidebar">
+    <nav class="tile">
+      <h3>Recent conversations</h3>
+      {% if recent %}
+        <ul class="recent">
+          {% for r in recent %}
+            <li>
+              <a href="#" hx-get="/conversation/{{ r.id }}" hx-target="#answer" hx-swap="innerHTML"
+                 class="recent-link">{{ r.question }}</a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">No conversations yet.</p>
+      {% endif %}
+    </nav>
 
-  <div class="layout">
-    <aside class="sidebar">
-      <nav class="tile">
-        <h3>Recent conversations</h3>
-        {% if recent %}
-          <ul class="recent">
-            {% for r in recent %}
-              <li>
-                <a href="#" hx-get="/conversation/{{ r.id }}" hx-target="#answer" hx-swap="innerHTML"
-                   class="recent-link">{{ r.question }}</a>
-              </li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <p class="muted">No conversations yet.</p>
-        {% endif %}
-      </nav>
-
-      <!-- State of my memory: real KbStatus, loaded async so the page never blocks. -->
-      <div hx-get="/tile/status" hx-trigger="load">
-        <div class="tile"><span class="muted">loading…</span></div>
-      </div>
-    </aside>
-
-    <main class="main">
-      <section class="compose">
-        <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML"
-              hx-on::after-request="if(event.detail.successful) this.reset()" autocomplete="off">
-          <input class="q" type="text" name="q" placeholder="Ask the swarm…"
-                 autofocus autocomplete="off" required aria-label="question">
-          <button type="submit">Ask</button>
-          <span class="htmx-indicator muted">…thinking</span>
-        </form>
-        <button class="kbd" @click="palette = true" title="Search memories (⌘K)">⌘K&nbsp;search</button>
-      </section>
-
-      <section id="answer" class="answer-area">
-        <p class="muted invite">Ask the swarm a question above — or pick a past conversation on the left.</p>
-      </section>
-    </main>
-  </div>
-
-  <footer class="site-footer">
-    <h3>What changed · open questions · needs you</h3>
-    <p class="muted">Not available yet — needs the <code>Brief</code> kernel RPC and a running
-      cognitive loop. Shown honestly rather than faked.</p>
-  </footer>
-
-  <!-- ⌘K command palette -->
-  <div class="palette-overlay" x-show="palette" x-cloak @click.self="palette = false">
-    <div class="palette">
-      <input type="text" name="q" placeholder="Search memories…" autocomplete="off"
-             aria-label="search memories" x-ref="paletteInput"
-             x-effect="if (palette) $nextTick(() => $refs.paletteInput.focus())"
-             hx-get="/search" hx-trigger="keyup changed delay:250ms, search"
-             hx-target="#palette-results" hx-swap="innerHTML">
-      <ul id="palette-results" class="hits"></ul>
-      <div class="muted palette-hint">type to search · Esc to close</div>
+    <!-- State of my memory: real KbStatus, loaded async so the page never blocks. -->
+    <div hx-get="/tile/status" hx-trigger="load">
+      <div class="tile"><span class="muted">loading…</span></div>
     </div>
-  </div>
+  </aside>
+
+  <main class="main">
+    <section class="compose">
+      <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML"
+            hx-on::after-request="if(event.detail.successful) this.reset()" autocomplete="off">
+        <input class="q" type="text" name="q" placeholder="Ask the swarm…"
+               autofocus autocomplete="off" required aria-label="question">
+        <button type="submit">Ask</button>
+        <span class="htmx-indicator muted">…thinking</span>
+      </form>
+    </section>
+
+    <section id="answer" class="answer-area">
+      <p class="muted invite">Ask the swarm a question above — or pick a past conversation on the left.</p>
+    </section>
+  </main>
 </div>
+
+<footer class="site-footer">
+  <h3>What changed · open questions · needs you</h3>
+  <p class="muted">Not available yet — needs the <code>Brief</code> kernel RPC and a running
+    cognitive loop. Shown honestly rather than faked.</p>
+</footer>
 {% endblock %}

@@ -9,13 +9,19 @@
   <script src="/static/vendor/htmx.min.js" defer></script>
   <script src="/static/vendor/alpine.min.js" defer></script>
 </head>
-<body>
+<body x-data="{ palette: false }"
+      @keydown.meta.k.window.prevent="palette = true"
+      @keydown.ctrl.k.window.prevent="palette = true"
+      @keydown.escape.window="palette = false">
   <main class="shell">
     <header class="topbar">
       <span class="brand">swarm</span>
       <span class="muted">operator console</span>
+      <span class="spacer"></span>
+      {% if authed %}
+        <button class="kbd" @click="palette = true" title="Search memories (⌘K)">⌘K&nbsp;search</button>
+      {% endif %}
       {% if principal %}
-        <span class="spacer"></span>
         <span class="muted">{{ principal.display or principal.viewer }} · scopes: {{ principal.scopes|join(', ') }}</span>
         {% if principal.is_groot %}<a class="navlink" href="/admin">admin</a>{% endif %}
         <a class="navlink" href="/logout">logout</a>
@@ -23,5 +29,20 @@
     </header>
     {% block content %}{% endblock %}
   </main>
+
+  {% if authed %}
+  <!-- ⌘K command palette (opened from the header; shared across pages) -->
+  <div class="palette-overlay" x-show="palette" x-cloak @click.self="palette = false">
+    <div class="palette">
+      <input type="text" name="q" placeholder="Search memories…" autocomplete="off"
+             aria-label="search memories" x-ref="paletteInput"
+             x-effect="if (palette) $nextTick(() => $refs.paletteInput.focus())"
+             hx-get="/search" hx-trigger="keyup changed delay:250ms, search"
+             hx-target="#palette-results" hx-swap="innerHTML">
+      <ul id="palette-results" class="hits"></ul>
+      <div class="muted palette-hint">type to search · Esc to close</div>
+    </div>
+  </div>
+  {% endif %}
 </body>
 </html>
