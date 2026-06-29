@@ -25,9 +25,12 @@
 
     {% if history %}
     <div class="tile">
-      <h3>Recent questions</h3>
+      <h3>Recent conversations</h3>
       <ul class="history">
-        {% for h in history %}<li>{{ h }}</li>{% endfor %}
+        {% for h in history %}
+          <li><span class="hq">{{ h.question }}</span>
+            <span class="muted">{{ h.status }}{% if h.tier %} · {{ h.tier }}{% endif %}</span></li>
+        {% endfor %}
       </ul>
     </div>
     {% endif %}

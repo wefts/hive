@@ -163,12 +163,17 @@ services:
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-swarm-local}
       KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Durable conversation log + local credential store (private, on the volume below).
+      WEB_CHANNEL_DB: /app/data/web_channel.db
     extra_hosts:
       # Reach the host-published Keycloak port at the same hostname the browser uses,
       # so the OIDC issuer is identical server-side and browser-side (dev split-horizon).
       - "${KEYCLOAK_PUBLIC_HOST:-spark.mpl.intranet}:host-gateway"
     ports:
       - "${WEB_CHANNEL_PORT:-8080}:8080"
+    volumes:
+      # Private, persistent: conversation log + local users. Never committed.
+      - web_channel_data:/app/data
     depends_on:
       kernel:
         condition: service_started
@@ -210,3 +215,8 @@ services:
   #   build: ./plugins/k8s_tool
   #   env_file: [.env]
   #   depends_on: [postgres]
+
+volumes:
+  # web_channel's private durable store (conversation log + local users). Created
+  # owned by the non-root runtime uid (see the plugin Dockerfile). Never committed.
+  web_channel_data:

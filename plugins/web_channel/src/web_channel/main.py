@@ -23,14 +23,29 @@ import secrets
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from grpc import aio
 from starlette.middleware.sessions import SessionMiddleware
 
-from web_channel import auth, core_client, kc_admin, render
+from web_channel import auth, convlog, core_client, kc_admin, localusers, render
 from web_channel._gen import core_pb2
+
+# Friendly answer-trace: how the kernel produced the answer (from the structured
+# tier — never inferred from prose). The full consilium deliberation is a later phase.
+_TRACE_PATH = {
+    "tier0": "answered directly (no retrieval)",
+    "tier_tools": "retrieval (deterministic)",
+    "escalate": "gate → consilium (multi-model)",
+}
+
+_STATUS_STR = {
+    core_pb2.FOUND: "found",
+    core_pb2.NOT_FOUND: "not_found",
+    core_pb2.PARTIAL: "partial",
+    core_pb2.ERROR: "error",
+}
 
 logger = logging.getLogger("web_channel")
 _HERE = Path(__file__).parent
@@ -76,6 +91,9 @@ app = FastAPI(title="Swarm web_channel", docs_url=None, redoc_url=None)
 app.add_middleware(
     SessionMiddleware,
     secret_key=_session_secret(),
+    # SameSite=lax: the session cookie is NOT sent on cross-site POSTs, which
+    # mitigates CSRF on the state-changing routes (/ask, /admin/*, /login/local).
+    # Prod hardening: add explicit per-form CSRF tokens (council: codex).
     same_site="lax",
     # Bound staleness: cached groups/roles can't outlive this, so a Keycloak
     # revocation takes effect within the window (council: codex). Prod hardening:
@@ -119,6 +137,7 @@ def _answer_view(resp: core_pb2.AskResponse) -> dict:
         "status_label": label,
         "status_class": status_class,
         "tier": resp.tier,
+        "path": _TRACE_PATH.get(resp.tier, ""),  # how the answer was produced
         "show_confidence": show_conf,
         "confidence": resp.confidence,
         "confidence_class": render.confidence_class(resp.confidence),
@@ -159,22 +178,27 @@ def _status_view(s: core_pb2.StatusResponse) -> dict:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request) -> HTMLResponse:
+async def index(request: Request) -> Response:
     principal = _current_principal(request)
-    # Sign-in gate (P1) — only when OIDC is on and there's no session.
-    if auth.oidc_enabled() and principal is None:
-        return templates.TemplateResponse(
-            request, "index.html", {"oidc_enabled": True, "principal": None}
-        )
+    # Sign-in gate — when auth is configured (OIDC and/or local users) and no session,
+    # go to the unified /login (which auto-routes SSO vs local).
+    if principal is None and (auth.oidc_enabled() or localusers.has_any()):
+        return RedirectResponse("/login")
     # Cold open lands on the dashboard (brief A.1.1), not a blank box. The KbStatus
     # tile loads async (HTMX) so the page is instant and never blocks on the kernel.
+    viewer = principal.viewer if principal else _viewer()
+    try:
+        history = convlog.recent(viewer, 10)  # durable, per-viewer
+    except Exception:
+        logger.exception("convlog read failed")
+        history = []
     return templates.TemplateResponse(
         request,
         "dashboard.html",
         {
             "oidc_enabled": auth.oidc_enabled(),
             "principal": principal.to_session() if principal else None,
-            "history": request.session.get("history", []),
+            "history": history,
         },
     )
 
@@ -215,12 +239,45 @@ async def search(request: Request, q: str = "") -> HTMLResponse:
     return templates.TemplateResponse(request, "_hits.html", ctx)
 
 
-@app.get("/login")
-async def login(request: Request):
-    if not auth.oidc_enabled():
-        return RedirectResponse("/")
-    redirect_uri = _base_url(request) + "/auth/callback"
-    return await auth.oauth().kc.authorize_redirect(request, redirect_uri)
+@app.get("/login", response_class=HTMLResponse)
+async def login_form(request: Request) -> HTMLResponse:
+    """Unified entry: one identifier field. Continue auto-routes SSO vs local."""
+    return templates.TemplateResponse(request, "login.html", {})
+
+
+@app.post("/login")
+async def login_route(request: Request, identifier: str = Form(...)):
+    """Auto-route by identifier: a known LOCAL user → the local password form;
+    otherwise → Keycloak SSO (with the identifier prefilled). Local users never
+    touch Keycloak; SSO users never see a local password box."""
+    ident = identifier.strip()
+    if not ident:
+        return templates.TemplateResponse(request, "login.html", {"error": "Enter a username."})
+    if localusers.exists(ident):
+        return templates.TemplateResponse(request, "login_local.html", {"identifier": ident})
+    if auth.oidc_enabled():
+        redirect_uri = _base_url(request) + "/auth/callback"
+        return await auth.oauth().kc.authorize_redirect(request, redirect_uri, login_hint=ident)
+    return templates.TemplateResponse(
+        request, "login.html", {"error": "Unknown user, and SSO is not configured."}
+    )
+
+
+@app.post("/login/local")
+async def login_local(request: Request, identifier: str = Form(...), password: str = Form(...)):
+    """Verify a LOCAL user against the channel's own credential store."""
+    ident = identifier.strip()
+    principal = localusers.verify(ident, password)
+    if principal is None:
+        logger.warning("failed local login for %s", ident)
+        return templates.TemplateResponse(
+            request,
+            "login_local.html",
+            {"identifier": ident, "error": "Invalid credentials."},
+            status_code=401,
+        )
+    request.session["user"] = principal.to_session()
+    return RedirectResponse("/", status_code=303)
 
 
 @app.get("/auth/callback")
@@ -265,11 +322,20 @@ async def admin(request: Request) -> HTMLResponse:
             '<p class="muted">This page is groot-only.</p></article></main>',
             status_code=403,
         )
-    users = await kc_admin.list_users()
+    try:
+        users = await kc_admin.list_users()
+    except Exception:
+        logger.exception("Keycloak list_users failed")
+        users = None  # template shows an honest "Keycloak unavailable"
     return templates.TemplateResponse(
         request,
         "admin.html",
-        {"principal": principal.to_session(), "users": users, "groups": auth.known_groups()},
+        {
+            "principal": principal.to_session(),
+            "users": users,
+            "local_users": localusers.list_users(),
+            "groups": auth.known_groups(),
+        },
     )
 
 
@@ -312,6 +378,43 @@ async def admin_invite(
     return RedirectResponse("/admin", status_code=303)
 
 
+@app.post("/admin/local-invite")
+async def admin_local_invite(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    group: str = Form(""),
+):
+    """Create a LOCAL (non-SSO) user in the channel's own store. groot-gated."""
+    principal = _require_groot(request)
+    if principal is None:
+        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    uname, grp = username.strip(), group.strip()
+    if not uname or not password:
+        return RedirectResponse("/admin", status_code=303)
+    if grp and grp not in auth.known_groups():
+        return HTMLResponse(
+            '<main class="shell"><article class="card">'
+            '<span class="badge status-error">unknown group</span>'
+            '<p class="muted">That group is not in the scope map. '
+            '<a href="/admin">back</a></p></article></main>',
+            status_code=400,
+        )
+    scopes = [auth.scopes_for([grp])[-1]] if grp else []  # the mapped scope for the group
+    logger.info("groot %s creates LOCAL user=%s group=%s", principal.viewer, uname, grp or "(none)")
+    try:
+        localusers.create(uname, password, scopes, is_groot=False, created_by=principal.viewer)
+    except ValueError:
+        return HTMLResponse(
+            '<main class="shell"><article class="card">'
+            '<span class="badge status-error">exists</span>'
+            '<p class="muted">A local user with that name already exists. '
+            '<a href="/admin">back</a></p></article></main>',
+            status_code=409,
+        )
+    return RedirectResponse("/admin", status_code=303)
+
+
 @app.post("/ask", response_class=HTMLResponse)
 async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
     # The HTML `required` is client-only and bypassable; don't spend an Ask on an
@@ -332,15 +435,16 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
     else:
         viewer, scopes = _viewer(), _scopes()
 
-    # Session-scoped ask history for the dashboard (most-recent-first, deduped, capped).
     qs = q.strip()
-    request.session["history"] = (
-        [qs] + [h for h in request.session.get("history", []) if h != qs]
-    )[:8]
-
+    answer_text, tier, status_str, conf, cites = "", "error", "error", 0.0, []
     try:
         resp = await core_client.ask(q, scopes=scopes, viewer=viewer)
         ctx = _answer_view(resp)
+        answer_text, tier, conf = resp.answer, resp.tier, resp.confidence
+        status_str = _STATUS_STR.get(resp.status, "unspecified")
+        cites = [
+            {"source": c.source, "ref": c.ref, "confidence": c.confidence} for c in resp.citations
+        ]
     except aio.AioRpcError as err:
         # Unreachable / DEADLINE_EXCEEDED / etc. — honest error with the gRPC code.
         ctx = _error_view(err.code().name)
@@ -348,6 +452,13 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
         # Never crash the page or leak internals: log server-side, show a generic error.
         logger.exception("unexpected error handling /ask")
         ctx = _error_view("internal")
+
+    # Durable per-viewer conversation log (best-effort — must never break /ask).
+    try:
+        convlog.log_turn(viewer, scopes, qs, answer_text, tier, status_str, conf, cites)
+    except Exception:
+        logger.exception("convlog write failed")
+
     return templates.TemplateResponse(request, "_answer.html", ctx)
 
 

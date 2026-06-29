@@ -26,5 +26,6 @@
         tier={{ tier }} · confidence={{ "%.2f"|format(confidence) }}
       </div>
     {% endif %}
+    {% if path %}<div class="trace muted">how: {{ path }}</div>{% endif %}
   {% endif %}
 </article>

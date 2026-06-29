@@ -1,18 +1,31 @@
-/* web_channel P0 — small self-contained stylesheet (dark-mode tokens, card/badge/
-   chip). No external fonts/CDN: the page renders with no network call (brief §5/§8).
-   The full Tailwind + Basecoat design system arrives in P2 (the dashboard). */
+/* web_channel — self-contained dark stylesheet. No external fonts/CDN (renders with
+   no network call, brief §5/§8). Typography follows tmp/notes/readability.md:
+   fluid base + Major-Third modular scale, 8pt spacing, 1.6 line-height, 65ch measure
+   — tuned for comfortable reading. Colours stay dark + high-contrast. */
 
 :root {
   --bg: #0d1117;
   --panel: #161b22;
   --border: #30363d;
-  --fg: #e6edf3;
-  --muted: #8b949e;
-  --accent: #2f81f7;
+  --fg: #e9eef5;        /* primary text — ~15:1 on --bg */
+  --fg2: #c4ccd6;       /* secondary (body prose) */
+  --muted: #9aa4b2;     /* tertiary — meta/labels, still ≥4.5:1 on --bg */
+  --accent: #58a6ff;    /* lifted for contrast on dark */
   --green: #3fb950;
   --yellow: #d29922;
   --red: #f85149;
   --radius: 8px;
+
+  /* Fluid base 16→20px (≤2.5× min → WCAG 1.4.4 safe); Major Third (×1.25) scale. */
+  --base: clamp(1rem, 0.9rem + 0.45vw, 1.25rem);
+  --h4: calc(var(--base) * 1.25);
+  --h3: calc(var(--base) * 1.563);
+  --h2: calc(var(--base) * 1.953);
+  --h1: calc(var(--base) * 2.441);
+
+  /* 8pt spacing scale — all rhythm comes from here. */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 16px;
+  --space-4: 24px; --space-5: 32px; --space-6: 48px; --space-7: 64px;
 }
 
 * { box-sizing: border-box; }
@@ -20,9 +33,17 @@
 body {
   margin: 0;
   background: var(--bg);
-  color: var(--fg);
-  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--fg2);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: var(--base);
+  line-height: 1.6;
 }
+
+h1, h2, h3, h4 { color: var(--fg); line-height: 1.25; margin: 0 0 var(--space-3); }
+h1 { font-size: var(--h1); letter-spacing: -0.025em; }
+h2 { font-size: var(--h2); letter-spacing: -0.015em; }
+h3 { font-size: var(--h3); }
+h4 { font-size: var(--h4); line-height: 1.3; }
 
 .shell { max-width: 760px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
 
@@ -129,3 +150,21 @@ body {
 .hits { list-style: none; margin: 0.6rem 0 0; padding: 0; max-height: 50vh; overflow-y: auto; }
 .hits li { padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--border); display: flex; gap: 0.6rem; align-items: baseline; }
 .palette-hint { margin-top: 0.5rem; font-size: 0.78rem; }
+
+.login { max-width: 420px; }
+.login h2 { margin-top: 0; }
+.login form { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.9rem 0; }
+.login input { padding: 0.65rem 0.85rem; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: var(--radius); font-size: 1rem; }
+.login input:focus { outline: 2px solid var(--accent); }
+.login button { padding: 0.65rem 1rem; background: var(--accent); color: #fff; border: none; border-radius: var(--radius); font-weight: 600; cursor: pointer; }
+.trace { margin-top: 0.4rem; font-size: 0.8rem; }
+.hq { font-weight: 500; }
+
+/* --- Readability overrides (tmp/notes/readability.md) -------------------------
+   Keep card/tile section titles modest — the large modular sizes (--h1..--h2) are
+   for page-level headings, not in-card labels. Give answer prose a comfortable
+   reading measure (~66 chars) at the 1.6 line-height set on body. */
+.card h2, .card h3, .tile h3 {
+  font-size: var(--h4); line-height: 1.3; letter-spacing: 0; margin: 0 0 var(--space-2);
+}
+.answer { max-width: 65ch; line-height: 1.6; }

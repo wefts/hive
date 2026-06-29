@@ -46,6 +46,10 @@ RUN mkdir -p src/web_channel/_gen \
  && sed -i -E 's/^import core_pb2 as/from . import core_pb2 as/' src/web_channel/_gen/core_pb2_grpc.py \
  && uv sync --frozen --no-dev
 
+# Durable conversation-log dir — created here so the runtime COPY --chown gives the
+# volume mountpoint to the non-root uid (distroless runtime has no shell to mkdir).
+RUN mkdir -p /app/data
+
 # ---- runtime stage (DHI distroless, non-root, no shell) -----------------
 FROM ${DHI_PY_RUN} AS runtime
 LABEL org.opencontainers.image.title="web-channel" \
