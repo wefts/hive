@@ -40,6 +40,12 @@ enrich_rounds = String.to_integer(System.get_env("ENRICH_ROUNDS", "2"))
 {:ok, _} = Application.ensure_all_started(:grpc)
 {:ok, _} = Repo.start_link()
 {:ok, _} = DynamicSupervisor.start_link(strategy: :one_for_one, name: GRPC.Client.Supervisor)
+# `real` mode's enrichment generates over the ML boundary, which checks out a
+# long-lived channel from Swarm.ML.ChannelPool (the boundary-crash fix). Under
+# `mix run --no-start` the app supervisor is absent, so start the pool explicitly —
+# without it every enrich no-ops with a generation_failed error watermark (mirrors
+# hive/scripts/ingest_prod.exs).
+{:ok, _} = Swarm.ML.ChannelPool.start_link([])
 
 # Truthful DB guard (CTC-5 finding #1): check the database the Repo ACTUALLY connected
 # to, not the env-var view above. Refuses conditional-prod, and refuses a silent
