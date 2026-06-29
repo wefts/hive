@@ -5,43 +5,38 @@
      @keydown.ctrl.k.window.prevent="palette = true"
      @keydown.escape.window="palette = false">
 
-  <section class="ask-row">
-    <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML"
-          hx-disabled-elt="find button" autocomplete="off">
+  <section class="compose">
+    <form class="ask" hx-post="/ask" hx-target="#feed" hx-swap="afterbegin"
+          hx-on::after-request="if(event.detail.successful) this.reset()" autocomplete="off">
       <input class="q" type="text" name="q" placeholder="Ask the swarm…"
              autofocus autocomplete="off" required aria-label="question">
       <button type="submit">Ask</button>
       <span class="htmx-indicator muted">…thinking</span>
     </form>
-    <button class="navlink kbd" @click="palette = true" title="Search memories (⌘K)">⌘K search</button>
+    <button class="kbd" @click="palette = true" title="Search memories (⌘K)">⌘K&nbsp;search</button>
   </section>
-  <section id="answer" aria-live="polite"></section>
 
-  <div class="tiles">
-    <!-- State of my memory: real KbStatus, loaded async so the page never blocks. -->
-    <div hx-get="/tile/status" hx-trigger="load" class="tile-slot">
-      <div class="tile"><span class="muted">loading state of memory…</span></div>
-    </div>
+  <div class="layout">
+    <main class="feed" id="feed">
+      {% for post in posts %}{% include "_post.html" %}{% endfor %}
+      {% if not posts %}
+        <p class="muted empty">No conversations yet — ask the swarm something above.</p>
+      {% endif %}
+    </main>
 
-    {% if history %}
-    <div class="tile">
-      <h3>Recent conversations</h3>
-      <ul class="history">
-        {% for h in history %}
-          <li><span class="hq">{{ h.question }}</span>
-            <span class="muted">{{ h.status }}{% if h.tier %} · {{ h.tier }}{% endif %}</span></li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-
-    <!-- Honest about what isn't wired yet (brief A.1.4: absent/"not available", never faked). -->
-    <div class="tile muted-tile">
-      <h3>What changed · open questions · needs you</h3>
-      <p class="muted">Not available yet — these need the <code>Brief</code> kernel RPC and a running
-        cognitive loop. Shown here honestly rather than faked.</p>
-    </div>
+    <aside class="sidebar">
+      <!-- State of my memory: real KbStatus, loaded async so the page never blocks. -->
+      <div hx-get="/tile/status" hx-trigger="load">
+        <div class="tile"><span class="muted">loading…</span></div>
+      </div>
+    </aside>
   </div>
+
+  <footer class="site-footer">
+    <h3>What changed · open questions · needs you</h3>
+    <p class="muted">Not available yet — needs the <code>Brief</code> kernel RPC and a running
+      cognitive loop. Shown honestly rather than faked.</p>
+  </footer>
 
   <!-- ⌘K command palette -->
   <div class="palette-overlay" x-show="palette" x-cloak @click.self="palette = false">

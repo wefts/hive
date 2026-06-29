@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import secrets
+import time
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -46,6 +49,50 @@ _STATUS_STR = {
     core_pb2.PARTIAL: "partial",
     core_pb2.ERROR: "error",
 }
+
+# String status → (label, css class) for posts rendered from the conversation log.
+_STATUS_VIEW = {
+    "found": ("found", "status-found"),
+    "partial": ("partial", "status-warn"),
+    "not_found": ("not found", "status-warn"),
+    "error": ("error", "status-error"),
+    "unspecified": ("unspecified", "status-warn"),
+}
+
+
+def _split_question(q: str) -> tuple[str, str]:
+    """A microblog post: a short question is the whole post; a long one uses its
+    first sentence as the title and the rest as the body."""
+    q = q.strip()
+    parts = re.split(r"(?<=[.!?])\s+", q, maxsplit=1)
+    if len(q) > 80 and len(parts) == 2:
+        return parts[0], parts[1]
+    return q, ""
+
+
+def _post_view(turn: dict) -> dict:
+    """A conversation turn (from the log or a fresh ask) → a feed-post context."""
+    title, rest = _split_question(turn["question"])
+    label, status_class = _STATUS_VIEW.get(turn["status"], ("", "status-warn"))
+    dur = turn.get("duration_ms")
+    asked = turn.get("asked_at")
+    return {
+        "q_title": title,
+        "q_rest": rest,
+        "answer": turn["answer"],
+        "status_label": label,
+        "status_class": status_class,
+        "tier": turn["tier"],
+        "path": _TRACE_PATH.get(turn["tier"], ""),
+        "show_confidence": turn["status"] in ("found", "partial"),
+        "confidence": turn["confidence"],
+        "confidence_class": render.confidence_class(turn["confidence"] or 0.0),
+        # Never show fabricated evidence on a non-found result (honesty).
+        "citations": turn["citations"] if turn["status"] in ("found", "partial") else [],
+        "asked_at": datetime.fromtimestamp(asked).strftime("%Y-%m-%d %H:%M:%S") if asked else "",
+        "duration": f"{dur / 1000:.1f}s" if dur else None,
+    }
+
 
 logger = logging.getLogger("web_channel")
 _HERE = Path(__file__).parent
@@ -127,41 +174,6 @@ def _base_url(request: Request) -> str:
     return configured.rstrip("/") if configured else str(request.base_url).rstrip("/")
 
 
-def _answer_view(resp: core_pb2.AskResponse) -> dict:
-    """Structured AskResponse → template context. Values pass verbatim; the template
-    autoescapes them. Confidence/citations are shown only where honest."""
-    label, status_class = render.status_label(resp.status)
-    show_conf = render.show_confidence(resp.status)
-    return {
-        "answer": resp.answer,
-        "status_label": label,
-        "status_class": status_class,
-        "tier": resp.tier,
-        "path": _TRACE_PATH.get(resp.tier, ""),  # how the answer was produced
-        "show_confidence": show_conf,
-        "confidence": resp.confidence,
-        "confidence_class": render.confidence_class(resp.confidence),
-        # Never fabricate evidence on a non-found result.
-        "citations": list(resp.citations) if show_conf else [],
-    }
-
-
-def _error_view(detail: str) -> dict:
-    """Honest disconnected/error card — no fabricated answer, citation, or confidence."""
-    label, status_class = render.status_label(core_pb2.ERROR)
-    return {
-        "answer": "",
-        "status_label": label,
-        "status_class": status_class,
-        "tier": "",
-        "show_confidence": False,
-        "confidence": 0.0,
-        "confidence_class": "",
-        "citations": [],
-        "error_detail": detail,
-    }
-
-
 def _status_view(s: core_pb2.StatusResponse) -> dict:
     """KbStatus → the 'state of my memory' tile context (all from real kernel state)."""
     return {
@@ -188,17 +200,17 @@ async def index(request: Request) -> Response:
     # tile loads async (HTMX) so the page is instant and never blocks on the kernel.
     viewer = principal.viewer if principal else _viewer()
     try:
-        history = convlog.recent(viewer, 10)  # durable, per-viewer
+        posts = [_post_view(t) for t in convlog.recent(viewer, 20)]  # durable feed
     except Exception:
         logger.exception("convlog read failed")
-        history = []
+        posts = []
     return templates.TemplateResponse(
         request,
         "dashboard.html",
         {
             "oidc_enabled": auth.oidc_enabled(),
             "principal": principal.to_session() if principal else None,
-            "history": history,
+            "posts": posts,
         },
     )
 
@@ -436,10 +448,11 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
         viewer, scopes = _viewer(), _scopes()
 
     qs = q.strip()
+    asked_at = time.time()
+    started = time.monotonic()
     answer_text, tier, status_str, conf, cites = "", "error", "error", 0.0, []
     try:
         resp = await core_client.ask(q, scopes=scopes, viewer=viewer)
-        ctx = _answer_view(resp)
         answer_text, tier, conf = resp.answer, resp.tier, resp.confidence
         status_str = _STATUS_STR.get(resp.status, "unspecified")
         cites = [
@@ -447,19 +460,42 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
         ]
     except aio.AioRpcError as err:
         # Unreachable / DEADLINE_EXCEEDED / etc. — honest error with the gRPC code.
-        ctx = _error_view(err.code().name)
+        answer_text = f"Could not reach the knowledge base ({err.code().name})."
     except Exception:
         # Never crash the page or leak internals: log server-side, show a generic error.
         logger.exception("unexpected error handling /ask")
-        ctx = _error_view("internal")
+        answer_text = "Something went wrong handling this question."
+    duration_ms = int((time.monotonic() - started) * 1000)
 
     # Durable per-viewer conversation log (best-effort — must never break /ask).
     try:
-        convlog.log_turn(viewer, scopes, qs, answer_text, tier, status_str, conf, cites)
+        convlog.log_turn(
+            viewer,
+            scopes,
+            qs,
+            answer_text,
+            tier,
+            status_str,
+            conf,
+            cites,
+            asked_at=asked_at,
+            duration_ms=duration_ms,
+        )
     except Exception:
         logger.exception("convlog write failed")
 
-    return templates.TemplateResponse(request, "_answer.html", ctx)
+    turn = {
+        "question": qs,
+        "answer": answer_text,
+        "tier": tier,
+        "status": status_str,
+        "confidence": conf,
+        "citations": cites,
+        "asked_at": asked_at,
+        "duration_ms": duration_ms,
+    }
+    # A new post for the feed (HTMX prepends it).
+    return templates.TemplateResponse(request, "_post.html", {"post": _post_view(turn)})
 
 
 @app.get("/healthz", response_class=PlainTextResponse)

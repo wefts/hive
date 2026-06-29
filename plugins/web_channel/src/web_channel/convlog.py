@@ -9,6 +9,7 @@ volume — never committed — and is the channel's own, not the kernel's. No ne
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
@@ -45,9 +46,15 @@ def init() -> None:
                 tier TEXT,
                 status TEXT,
                 confidence REAL,
-                citations TEXT
+                citations TEXT,
+                asked_at REAL,
+                duration_ms INTEGER
             )"""
         )
+        # Idempotent migration for stores created before the timing columns existed.
+        for col, decl in (("asked_at", "REAL"), ("duration_ms", "INTEGER")):
+            with contextlib.suppress(sqlite3.OperationalError):  # column already present
+                conn.execute(f"ALTER TABLE conversations ADD COLUMN {col} {decl}")
         conn.execute("CREATE INDEX IF NOT EXISTS ix_conv_viewer ON conversations (viewer, id DESC)")
     _initialized = True
 
@@ -61,17 +68,21 @@ def log_turn(
     status: str,
     confidence: float,
     citations: list[dict],
+    asked_at: float | None = None,
+    duration_ms: int | None = None,
 ) -> None:
-    """Persist one Q&A turn. Best-effort: a logging failure must never break /ask."""
+    """Persist one Q&A turn. Best-effort: a logging failure must never break /ask.
+    `asked_at` is when the question was submitted; `duration_ms` how long the swarm took."""
     if not _initialized:
         init()
+    now = time.time()
     with _conn() as conn:
         conn.execute(
             "INSERT INTO conversations "
-            "(ts, viewer, scopes, question, answer, tier, status, confidence, citations) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(ts, viewer, scopes, question, answer, tier, status, confidence, citations, "
+            "asked_at, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                time.time(),
+                now,
                 viewer,
                 ",".join(scopes),
                 question,
@@ -80,6 +91,8 @@ def log_turn(
                 status,
                 confidence,
                 json.dumps(citations),
+                asked_at if asked_at is not None else now,
+                duration_ms,
             ),
         )
 
@@ -90,8 +103,8 @@ def recent(viewer: str, limit: int = 20) -> list[dict]:
         init()
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT ts, question, answer, tier, status, confidence, citations "
-            "FROM conversations WHERE viewer = ? ORDER BY id DESC LIMIT ?",
+            "SELECT ts, question, answer, tier, status, confidence, citations, "
+            "asked_at, duration_ms FROM conversations WHERE viewer = ? ORDER BY id DESC LIMIT ?",
             (viewer, limit),
         ).fetchall()
     return [
@@ -103,6 +116,8 @@ def recent(viewer: str, limit: int = 20) -> list[dict]:
             "status": r[4],
             "confidence": r[5],
             "citations": json.loads(r[6] or "[]"),
+            "asked_at": r[7] if r[7] is not None else r[0],
+            "duration_ms": r[8],
         }
         for r in rows
     ]

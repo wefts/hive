@@ -82,9 +82,9 @@ def test_a03_kernel_unreachable_renders_honest_error(monkeypatch) -> None:
     monkeypatch.setattr(core_client, "ask", failing_ask)
     r = client.post("/ask", data={"q": "anything"})
     assert r.status_code == 200  # no crash
-    assert "error — knowledge base unavailable" in r.text
-    assert "UNAVAILABLE" in r.text  # honest code surfaced
-    assert "confidence=" not in r.text
+    assert "could not reach the knowledge base" in r.text.lower()
+    assert "UNAVAILABLE" in r.text  # honest gRPC code surfaced
+    assert "confidence" not in r.text.lower()  # no fabricated certainty on error
 
 
 def test_a04_adversarial_citation_ref_renders_verbatim_escaped(monkeypatch) -> None:
@@ -144,8 +144,7 @@ def test_unexpected_exception_renders_generic_error_no_leak(monkeypatch) -> None
     monkeypatch.setattr(core_client, "ask", boom)
     r = client.post("/ask", data={"q": "anything"})
     assert r.status_code == 200  # no crash (A.0.3)
-    assert "error — knowledge base unavailable" in r.text
-    assert "internal" in r.text  # generic label
+    assert "something went wrong" in r.text.lower()  # generic message, honest
     # internals must NOT leak into the page
     assert "secret internal detail" not in r.text
     assert "ValueError" not in r.text and "Traceback" not in r.text

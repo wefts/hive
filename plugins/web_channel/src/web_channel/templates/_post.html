@@ -1,0 +1,31 @@
+{# One conversation entry (microblog-style): the question, then the swarm's reply.
+   Every value autoescaped → verbatim + HTML-safe. Status from the structured field. #}
+<article class="post">
+  <div class="post-q">
+    <div class="post-title">{{ post.q_title }}</div>
+    {% if post.q_rest %}<div class="post-rest muted">{{ post.q_rest }}</div>{% endif %}
+    <div class="post-time muted">asked {{ post.asked_at }}</div>
+  </div>
+
+  <div class="post-a">
+    <div class="post-a-head">
+      <span class="badge {{ post.status_class }}">{{ post.status_label }}</span>
+      {% if post.show_confidence %}<span class="meta {{ post.confidence_class }}">confidence {{ "%.2f"|format(post.confidence) }}</span>{% endif %}
+      {% if post.duration %}<span class="meta muted">· answered in {{ post.duration }}</span>{% endif %}
+    </div>
+
+    {% if post.answer %}<p class="answer">{{ post.answer }}</p>{% endif %}
+
+    {% if post.citations %}
+      <ul class="citations">
+        {% for c in post.citations %}
+          <li class="chip"><span class="src">{{ c.source }}</span>
+            <span class="ref">{{ c.ref }}</span>
+            <span class="cc">{{ "%.2f"|format(c.confidence) }}</span></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if post.path %}<div class="trace muted">how: {{ post.path }}{% if post.tier %} · tier={{ post.tier }}{% endif %}</div>{% endif %}
+  </div>
+</article>
