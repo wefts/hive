@@ -36,10 +36,13 @@ k = System.get_env("RECALL_K", "10") |> String.to_integer()
 
 # TITLE_WEIGHT: override the title-arm weight for an A/B. Unset → config default
 # (5.0). Set to 0 for the baseline (title arm contributes nothing → body-only).
+base_opts = [limit: k, expand: false]
+base_opts = if System.get_env("DENSE") == "false", do: [{:dense, false} | base_opts], else: base_opts
+
 search_opts =
   case System.get_env("TITLE_WEIGHT") do
-    nil -> [limit: k, expand: false]
-    tw -> [limit: k, expand: false, title_weight: String.to_float(tw)]
+    nil -> base_opts
+    tw -> [{:title_weight, String.to_float(tw)} | base_opts]
   end
 
 unless set_path && File.exists?(set_path) do
