@@ -9,12 +9,16 @@ and current state live in `../docs/`; kernel implementation rules live in
 
 ## What This Repo Owns
 
-- Instance orchestration: `docker-compose.yml` (+ `docker-compose.offline.yml`).
+- Instance orchestration: `docker-compose.yml` (+ `docker-compose.offline.yml`),
+  `Taskfile.yml` (taskfile-pillar — the canonical `task check`/`staging:up`/
+  `deploy`/`db:backup`/`db:rename` flows; see Verification below).
 - Layered, non-secret env config (ADR-0015): `env/base.env` + `env/<SWARM_ENV>.env`
   (`test`/`staging`/`prod`), all committed.
 - Secret key templates: `secrets.env.example`.
-- Private/local plugins under `plugins/`.
-- Private data roots under `data/`.
+- Committed plugin code under `plugins/` (public — see hive-publish-readiness-audit;
+  private only insofar as it may be experimental or not-yet-generalized, per
+  `docs/decisions/0011-hive-plugin-ownership.md`).
+- Private (gitignored) data roots under `data/`.
 - Hive-local helper scripts under `scripts/`, including `scripts/compose` — the
   layered-env entrypoint (`SWARM_ENV=staging scripts/compose up -d`).
 
@@ -26,6 +30,7 @@ parameterized to config, never hardcoded.
 ## Read First
 
 - `README.md` — local Hive summary.
+- `Taskfile.yml` — canonical operational flows (`task --list`).
 - `docker-compose.yml` — current instance topology.
 - `env/base.env`, `env/staging.env` — non-secret, per-stage config (ADR-0015).
 - `secrets.env.example` — secret key names only, values empty.
@@ -61,10 +66,11 @@ plugins/k8s_tool/
 
 ## Running The Hive
 
-Run from this repo root, via the layered-env wrapper (ADR-0015) — `SWARM_ENV`
-is REQUIRED (`test`/`staging`/`prod`), never guessed:
+Run from this repo root — via the Taskfile (canonical) or the layered-env wrapper
+directly; `SWARM_ENV` is REQUIRED (`test`/`staging`/`prod`), never guessed:
 
 ```bash
+task staging:up                              # == SWARM_ENV=staging scripts/compose up -d
 SWARM_ENV=staging scripts/compose up -d
 SWARM_ENV=staging scripts/compose config
 ```
@@ -87,7 +93,15 @@ unless the human explicitly asks for it.
 
 ## Verification
 
-For Hive changes, prefer:
+For Hive changes, prefer the `Taskfile.yml` (taskfile-pillar) — same gates, one command:
+
+```bash
+task check          # lint + test
+task lint           # compose config (all 3 SWARM_ENV) + shell syntax + web_channel ruff/ty
+task test           # web_channel pytest
+```
+
+Fallback — run the underlying checks directly:
 
 ```bash
 SWARM_ENV=staging scripts/compose config

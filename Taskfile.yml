@@ -1,0 +1,181 @@
+version: "3"
+
+# Operational pillar for this deployment instance (ADR-0015 / taskfile-pillar).
+# One curated set of canonical flows — bring up staging, back up the DB, run the
+# gates, deploy — readable like code so a human and a future CI/k8s pipeline run
+# the exact same thing. Guardrails are encoded as task `deps:`, not prose:
+# `deploy` and `db:rename` both depend on `db:backup`.
+#
+# Every task here is public-repo clean: no intranet hostnames/IPs in a target,
+# only variable references (real values live in env/ or the gitignored
+# secrets.env — see docker-compose.yml / hive-publish-readiness-audit).
+
+silent: true
+
+vars:
+  # The one live tier today (ADR-14). Override per-invocation for a different
+  # stage: `SWARM_ENV=test task staging:up`. Never hardcode a DB/host value here.
+  SWARM_ENV: '{{.SWARM_ENV | default "staging"}}'
+
+tasks:
+  # ---- internal guards (council: codex — CLI vars are spliced into shell
+  # commands; validate charset before use even though they're operator-supplied,
+  # not remote input) --------------------------------------------------------
+  _guard-name:
+    internal: true
+    cmds:
+      - |
+        case "{{.NAME}}" in
+          ''|*[!A-Za-z0-9_.-]*) echo "{{.LABEL}} must match [A-Za-z0-9_.-]+, got '{{.NAME}}'" >&2; exit 1;;
+        esac
+
+  _guard-db:
+    internal: true
+    cmds:
+      - |
+        case "{{.NAME}}" in
+          *[!a-z0-9_]*|'') echo "{{.LABEL}} must match [a-z0-9_]+, got '{{.NAME}}'" >&2; exit 1;;
+        esac
+        case "{{.NAME}}" in
+          swarm_*) ;;
+          *) echo "{{.LABEL}} must start with swarm_, got '{{.NAME}}'" >&2; exit 1;;
+        esac
+
+  default:
+    cmds:
+      - task: check
+
+  check:
+    desc: Run every gate (lint + test) for this repo.
+    cmds:
+      - task: lint
+      - task: test
+
+  # ---- lint -----------------------------------------------------------------
+  lint:
+    desc: Validate compose config, shell syntax, and the web_channel Python plugin.
+    cmds:
+      - task: lint:compose
+      - task: lint:sh
+      - task: lint:web_channel
+
+  lint:compose:
+    desc: Validate docker-compose.yml resolves for every SWARM_ENV (requires secrets.env).
+    cmds:
+      - |
+        for env in test staging prod; do
+          SWARM_ENV=$env ./scripts/compose config >/dev/null && echo "  $env: OK"
+        done
+
+  lint:sh:
+    desc: Shell-syntax-check every script (bash -n).
+    cmds:
+      - |
+        for f in scripts/*.sh scripts/compose; do
+          bash -n "$f" && echo "  $f: OK"
+        done
+
+  lint:web_channel:
+    desc: Ruff lint + format check + ty type check for web_channel (uv-only).
+    dir: plugins/web_channel
+    cmds:
+      - uv run ruff check .
+      - uv run ruff format --check .
+      - uv run ty check
+
+  # ---- test -------------------------------------------------------------
+  test:
+    desc: Run the web_channel test suite.
+    dir: plugins/web_channel
+    cmds:
+      - uv run pytest -q
+
+  # ---- staging lifecycle (ADR-0015 — always through scripts/compose) --------
+  staging:up:
+    desc: Bring up the full stack for SWARM_ENV (default staging).
+    cmds:
+      - SWARM_ENV={{.SWARM_ENV}} ./scripts/compose up -d
+
+  staging:down:
+    desc: Stop the stack for SWARM_ENV (default staging) — containers only, volumes untouched.
+    cmds:
+      - SWARM_ENV={{.SWARM_ENV}} ./scripts/compose down
+
+  staging:ps:
+    desc: Show stack service status for SWARM_ENV (default staging).
+    cmds:
+      - SWARM_ENV={{.SWARM_ENV}} ./scripts/compose ps
+
+  staging:logs:
+    desc: Follow logs for one service — task staging:logs SERVICE=kernel.
+    requires:
+      vars: [SERVICE]
+    cmds:
+      - task: _guard-name
+        vars: { NAME: "{{.SERVICE}}", LABEL: SERVICE }
+      - SWARM_ENV={{.SWARM_ENV}} ./scripts/compose logs -f {{.SERVICE}}
+
+  # ---- deploy (guardrail: always backs up the DB first) ---------------------
+  deploy:
+    desc: Redeploy one service — task deploy SERVICE=kernel. Backs up the DB first.
+    requires:
+      vars: [SERVICE]
+    deps: [db:backup]
+    cmds:
+      - task: _guard-name
+        vars: { NAME: "{{.SERVICE}}", LABEL: SERVICE }
+      - SWARM_ENV={{.SWARM_ENV}} ./scripts/compose up -d --no-deps {{.SERVICE}}
+
+  # ---- database (guardrails: backup is a dependency, not a suggestion) ------
+  db:backup:
+    desc: pg_dump the live DB for SWARM_ENV to tmp/snapshots/ (custom format, timestamped).
+    vars:
+      DB: 'swarm_{{.SWARM_ENV}}'
+      LABEL: '{{.LABEL | default "manual"}}'
+      STAMP:
+        sh: date +%Y%m%d-%H%M%S
+    cmds:
+      - task: _guard-name
+        vars: { NAME: "{{.LABEL}}", LABEL: LABEL }
+      - docker exec hive-postgres-1 pg_dump -U swarm -Fc -f /tmp/{{.DB}}_{{.LABEL}}_{{.STAMP}}.dump {{.DB}}
+      - docker cp hive-postgres-1:/tmp/{{.DB}}_{{.LABEL}}_{{.STAMP}}.dump ../tmp/snapshots/{{.DB}}_{{.LABEL}}_{{.STAMP}}.dump
+      - docker exec hive-postgres-1 rm -f /tmp/{{.DB}}_{{.LABEL}}_{{.STAMP}}.dump
+      - echo "  snapshot -> tmp/snapshots/{{.DB}}_{{.LABEL}}_{{.STAMP}}.dump"
+
+  db:rename:
+    desc: >-
+      Recreate-from-snapshot rename (ADR-0015 method) — task db:rename SRC=swarm_x DST=swarm_y.
+      Dumps + restores + verifies row-count parity ONLY; does NOT repoint the kernel or drop
+      SRC — those stay deliberate, separate, operator-reviewed steps (see board/done/environment-config.md).
+    requires:
+      vars: [SRC, DST]
+    deps: [db:backup]
+    cmds:
+      - task: _guard-db
+        vars: { NAME: "{{.SRC}}", LABEL: SRC }
+      - task: _guard-db
+        vars: { NAME: "{{.DST}}", LABEL: DST }
+      - docker exec hive-postgres-1 pg_dump -U swarm -Fc -f /tmp/{{.SRC}}_to_{{.DST}}.dump {{.SRC}}
+      - docker exec hive-postgres-1 createdb -U swarm -O swarm --template=template0 {{.DST}}
+      - docker exec hive-postgres-1 pg_restore -U swarm -d {{.DST}} --no-owner --exit-on-error /tmp/{{.SRC}}_to_{{.DST}}.dump
+      - docker exec hive-postgres-1 rm -f /tmp/{{.SRC}}_to_{{.DST}}.dump
+      - |
+        echo "  row-count parity ({{.SRC}} vs {{.DST}}):"
+        docker exec hive-postgres-1 psql -U swarm -d {{.SRC}} -t -c "select 'node',count(*) from node union all select 'edge',count(*) from edge;"
+        docker exec hive-postgres-1 psql -U swarm -d {{.DST}} -t -c "select 'node',count(*) from node union all select 'edge',count(*) from edge;"
+      - echo "  Verify the counts above match, THEN repoint the kernel manually (deploy SERVICE=kernel with the right SWARM_ENV — not automated)."
+
+  # ---- sync (thin wrapper — scripts/deploy.sh owns the real logic) ----------
+  sync:
+    desc: Sync repo/plugins/stack to Spark — task sync TARGET=all DIR=push.
+    requires:
+      vars: [TARGET]
+    vars:
+      DIR: '{{.DIR | default "push"}}'
+    preconditions:
+      - sh: 'case "{{.TARGET}}" in repo|plugins|stack|all) exit 0;; *) exit 1;; esac'
+        msg: "TARGET must be one of repo|plugins|stack|all, got '{{.TARGET}}' — see scripts/deploy.sh"
+      - sh: 'case "{{.DIR}}" in push|pull) exit 0;; *) exit 1;; esac'
+        msg: "DIR must be push or pull, got '{{.DIR}}'"
+    cmds:
+      - ./scripts/deploy.sh {{.TARGET}} {{.DIR}}
