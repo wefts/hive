@@ -14,7 +14,7 @@
 # clean convergence observation — for that use spike_converge.exs (deterministic, no LLM). Both
 # findings are real; this script is kept as the apparatus that surfaced them.
 #
-#   SEED_SCOPE=group MAXCALLS=8 SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=172.19.0.5:50051 \
+#   SEED_SCOPE=group MAXCALLS=8 SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=<ml-container-ip>:50051 \
 #     MIX_ENV=dev mise exec -- mix run --no-start ../../hive/scripts/spike_loop.exs
 
 require Logger

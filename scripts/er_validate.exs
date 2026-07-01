@@ -3,7 +3,7 @@
 # duplicate, reject a false pair)? PUBLIC scope only (safe to eyeball). Seeds three
 # entities, runs one real pass, prints the outcome, then WIPES the seeded state.
 #
-#   SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=172.19.0.5:50051 MIX_ENV=dev \
+#   SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=<ml-container-ip>:50051 MIX_ENV=dev \
 #     mise exec -- mix run --no-start ../../hive/scripts/er_validate.exs
 
 require Logger

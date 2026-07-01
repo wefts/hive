@@ -7,7 +7,7 @@
 # PRIVACY-SAFE metrics only (counts/timings — never titles/prose/URLs).
 #
 #   set -a; . hive/secrets.env; set +a
-#   cd swarm/kernel && SWARM_DB_NAME=swarm_prod SWARM_ML_ADDRESS=172.19.0.5:50051 \
+#   cd swarm/kernel && SWARM_DB_NAME=swarm_prod SWARM_ML_ADDRESS=<ml-container-ip>:50051 \
 #     MIX_ENV=dev mise exec -- mix run --no-start \
 #     -r ../../hive/plugins/confluence_connector/confluence_connector.ex \
 #     -r ../../hive/plugins/mediawiki_connector/mediawiki_connector.ex \

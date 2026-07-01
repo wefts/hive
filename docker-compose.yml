@@ -179,11 +179,15 @@ services:
       OIDC_ENABLED: "true"
       SWARM_VIEWER: ${WEB_CHANNEL_VIEWER:-operator}   # fallback identity only when OIDC is off
       # Browser-reachable issuer (same URL the browser and this container use, so the
-      # token `iss` is consistent). Swap to prod = https://sso.smile.eu/realms/Smile.
-      OIDC_ISSUER: ${KEYCLOAK_PUBLIC_URL:-http://spark.mpl.intranet:8081}/realms/${KEYCLOAK_REALM:-swarm-local}
+      # token `iss` is consistent). No safe generic default exists (it must be a real,
+      # externally-resolvable hostname for the split-horizon trick below to work) — set
+      # KEYCLOAK_PUBLIC_URL in secrets.env (private, gitignored; not a credential, but the
+      # one config layer that never gets committed). Swap to the org's real SSO realm via
+      # the same var + KEYCLOAK_REALM.
+      OIDC_ISSUER: ${KEYCLOAK_PUBLIC_URL:?set in secrets.env, e.g. http://<your-host>:8081}/realms/${KEYCLOAK_REALM:-swarm-local}
       OIDC_CLIENT_ID: ${WEB_CHANNEL_OIDC_CLIENT_ID:-web_channel}
       OIDC_CLIENT_SECRET: ${WEB_CHANNEL_OIDC_SECRET:-web-channel-local-dev-secret-CHANGE-IN-PROD}
-      WEB_CHANNEL_BASE_URL: ${WEB_CHANNEL_PUBLIC_URL:-http://spark.mpl.intranet:8080}
+      WEB_CHANNEL_BASE_URL: ${WEB_CHANNEL_PUBLIC_URL:?set in secrets.env, e.g. http://<your-host>:8080}
       # No committed signing key: empty ⇒ the app mints a random ephemeral key
       # (sessions reset on restart). Set WEB_CHANNEL_SESSION_SECRET (secrets.env) to persist.
       SESSION_SECRET: ${WEB_CHANNEL_SESSION_SECRET:-}
@@ -199,7 +203,11 @@ services:
     extra_hosts:
       # Reach the host-published Keycloak port at the same hostname the browser uses,
       # so the OIDC issuer is identical server-side and browser-side (dev split-horizon).
-      - "${KEYCLOAK_PUBLIC_HOST:-spark.mpl.intranet}:host-gateway"
+      # Same var as KEYCLOAK_PUBLIC_URL's host — set in secrets.env. (Verified: Docker
+      # will NOT reliably let this be "localhost" — the container's own baked-in
+      # 127.0.0.1 localhost entry wins over an extra_hosts override, so that specific
+      # value silently fails the split-horizon trick; use a real, distinct hostname.)
+      - "${KEYCLOAK_PUBLIC_HOST:?set in secrets.env, e.g. your-host.example}:host-gateway"
     ports:
       - "${WEB_CHANNEL_PORT:-8080}:8080"
     volumes:
@@ -210,22 +218,41 @@ services:
         condition: service_started
 
   # --- Identity: local Keycloak (OIDC) — P1 dev login mechanism ------------
-  # Mirrors the Smile stack (KC 26.6.1, DHI image, OIDC + groups mapper) so the
-  # channel config is swap-able to the real sso.smile.eu/realms/Smile (operator).
-  # Dev-mode (start-dev), realm imported from the committed export. Admin + client
-  # secret come from env (dev defaults here; real values via secrets.env in prod).
+  # Mirrors the org's real Keycloak (KC 26.6.1, DHI image, OIDC + groups mapper) so the
+  # channel config is swap-able to a real realm via config alone (operator; never a
+  # hardcoded realm URL here). Dev-mode (start-dev), realm imported from the committed
+  # export. Admin + client secret come from env (dev defaults here; real values via
+  # secrets.env in prod). The realm export is a .json.tpl (hive-publish-readiness-audit):
+  # its redirect-URI host is a placeholder, sed-substituted from KEYCLOAK_PUBLIC_HOST at
+  # container start (no envsubst in this DHI image — verified sed+sh are present) so the
+  # real hostname lives only in secrets.env, never in a committed file. KEYCLOAK_PUBLIC_HOST
+  # is passed via `environment:` and read as a shell var ($$-escaped from Compose's own
+  # interpolation), NOT spliced into the command string at compose-parse time — council
+  # (codex) caught that the earlier draft interpolated it directly into the shell command
+  # text, which is a real (if operator-controlled, low-likelihood) injection surface; a
+  # host-charset guard rejects anything but [A-Za-z0-9.-] before the sed runs.
   keycloak:
     image: ${DHI_REGISTRY:-dhi.smile.fr}/keycloak:26.6.1-debian13
     init: true
-    command: ["start-dev", "--import-realm"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        case "$$KEYCLOAK_PUBLIC_HOST" in
+          *[!A-Za-z0-9.-]*|'') echo "KEYCLOAK_PUBLIC_HOST must be a bare hostname (got '$$KEYCLOAK_PUBLIC_HOST')" >&2; exit 1;;
+        esac &&
+        mkdir -p /opt/keycloak/data/import &&
+        sed "s|__KEYCLOAK_PUBLIC_HOST__|$$KEYCLOAK_PUBLIC_HOST|g"
+        /tmp/realm-swarm-local.json.tpl > /opt/keycloak/data/import/realm.json &&
+        exec /opt/keycloak/bin/kc.sh start-dev --import-realm
     environment:
+      KEYCLOAK_PUBLIC_HOST: ${KEYCLOAK_PUBLIC_HOST:?set in secrets.env}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
       KC_HTTP_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"
       KC_HEALTH_ENABLED: "true"
     volumes:
-      - ./plugins/web_channel/keycloak/realm-swarm-local.json:/opt/keycloak/data/import/realm.json:ro
+      - ./plugins/web_channel/keycloak/realm-swarm-local.json.tpl:/tmp/realm-swarm-local.json.tpl:ro
     ports:
       - "${KEYCLOAK_PORT:-8081}:8080"
 

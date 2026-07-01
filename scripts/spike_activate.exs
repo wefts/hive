@@ -8,7 +8,7 @@
 # Corroboration/node.vec/traversal measurement: see spike_measure.exs (fast, over the result).
 #
 #   SAMPLE=30 SCOPE=group MODEL=qwen3:14b CAP=0.3 SWARM_DB_NAME=swarm_slice \
-#     SWARM_ML_ADDRESS=172.19.0.5:50051 MIX_ENV=dev mise exec -- mix run --no-start \
+#     SWARM_ML_ADDRESS=<ml-container-ip>:50051 MIX_ENV=dev mise exec -- mix run --no-start \
 #     ../../hive/scripts/spike_activate.exs
 
 require Logger

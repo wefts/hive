@@ -26,9 +26,9 @@
       "redirectUris": [
         "http://localhost:8080/auth/callback",
         "http://127.0.0.1:8080/auth/callback",
-        "http://spark.mpl.intranet:8080/auth/callback",
+        "http://__KEYCLOAK_PUBLIC_HOST__:8080/auth/callback",
         "http://localhost:8080/*",
-        "http://spark.mpl.intranet:8080/*"
+        "http://__KEYCLOAK_PUBLIC_HOST__:8080/*"
       ],
       "webOrigins": ["+"],
       "fullScopeAllowed": true,

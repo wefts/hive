@@ -133,7 +133,7 @@ back after; promotion to prod is a reviewed go/no-go, never automatic.
 
 **Prereqs:** `postgres`, `ollama`+GPU (qwen3:14b), and `ml` gRPC (bge-m3) up; connector creds
 loaded (`set -a; . hive/secrets.env; set +a`). All commands run from **`swarm/kernel/`** with
-`MIX_ENV=dev SWARM_ML_ADDRESS=<ml host:port>` (e.g. `172.19.0.5:50051`).
+`MIX_ENV=dev SWARM_ML_ADDRESS=<ml host:port>` (e.g. `<ml-container-ip>:50051`).
 
 **The one thing only you can produce — `qa.json`** (gate 7 lives or dies on it): real questions +
 the node keys a correct answer should cite. External, **never committed** (keys are content).
@@ -152,7 +152,7 @@ the node keys a correct answer should cite. External, **never committed** (keys 
    `*_MAXPAGES` tunables up from the smoke):
 
    ```bash
-   SWARM_DB_NAME=swarm_shadow SWARM_ML_ADDRESS=172.19.0.5:50051 MIX_ENV=dev \
+   SWARM_DB_NAME=swarm_shadow SWARM_ML_ADDRESS=<ml-container-ip>:50051 MIX_ENV=dev \
    CONF_MAXPAGES=… WIKI_MAXPAGES=… mise exec -- mix run --no-start \
      -r ../../hive/plugins/confluence_connector/confluence_connector.ex \
      -r ../../hive/plugins/mediawiki_connector/mediawiki_connector.ex \
@@ -168,7 +168,7 @@ the node keys a correct answer should cite. External, **never committed** (keys 
 3. **Control run** — proves the measure/read path is non-mutating and the DB guard passes:
 
    ```bash
-   LOOP_MODE=control SWARM_DB_NAME=swarm_shadow SWARM_ML_ADDRESS=172.19.0.5:50051 MIX_ENV=dev \
+   LOOP_MODE=control SWARM_DB_NAME=swarm_shadow SWARM_ML_ADDRESS=<ml-container-ip>:50051 MIX_ENV=dev \
      mise exec -- mix run --no-start ../../hive/scripts/cognitive_loop.exs
    ```
 
@@ -176,7 +176,7 @@ the node keys a correct answer should cite. External, **never committed** (keys 
 
    ```bash
    QUERY_SET=/abs/qa.json SCOPES=group RECALL_K=10 SWARM_DB_NAME=swarm_shadow MIX_ENV=dev \
-   SWARM_ML_ADDRESS=172.19.0.5:50051 \
+   SWARM_ML_ADDRESS=<ml-container-ip>:50051 \
      mise exec -- mix run --no-start ../../hive/scripts/answerability_lift.exs
    ```
 
@@ -190,7 +190,7 @@ the node keys a correct answer should cite. External, **never committed** (keys 
 
    ```bash
    LOOP_MODE=real CYCLES=4 ENRICH_ROUNDS=2 MAX_PER_PASS=20 \
-   SWARM_DB_NAME=swarm_shadow SWARM_ML_ADDRESS=172.19.0.5:50051 MIX_ENV=dev \
+   SWARM_DB_NAME=swarm_shadow SWARM_ML_ADDRESS=<ml-container-ip>:50051 MIX_ENV=dev \
      mise exec -- mix run --no-start ../../hive/scripts/cognitive_loop.exs
    ```
 

@@ -9,7 +9,7 @@
 # recall@k / MRR numbers are emitted. Run once per scope to compare clean-prose
 # (public/Wikipedia) vs messy-org (group/Confluence+MediaWiki).
 #
-#   RECALL_SCOPES=group SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=172.19.0.5:50051 \
+#   RECALL_SCOPES=group SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=<ml-container-ip>:50051 \
 #     MIX_ENV=dev mise exec -- mix run --no-start ../../hive/scripts/recall_by_scope.exs
 
 require Logger

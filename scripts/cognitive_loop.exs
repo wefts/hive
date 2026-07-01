@@ -9,7 +9,7 @@
 # never prints content.
 #
 #   MODE=shakedown|runaway|real CYCLES=2 SWARM_DB_NAME=swarm_shadow \
-#     SWARM_ML_ADDRESS=172.19.0.5:50051 MIX_ENV=dev \
+#     SWARM_ML_ADDRESS=<ml-container-ip>:50051 MIX_ENV=dev \
 #     mise exec -- mix run --no-start ../../hive/scripts/cognitive_loop.exs
 #
 # MODE: shakedown = fast deterministic mocks (loop should converge, no breaker);

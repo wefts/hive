@@ -3,7 +3,8 @@
 The channel owns identity→scope mapping but NOT scope enforcement: it maps the
 authenticated user's IdP groups to kernel scopes (default-deny) and passes an
 authenticated viewer+scopes to the kernel. The kernel remains the sole scope
-authority. Swap to prod = point OIDC_ISSUER at https://sso.smile.eu/realms/Smile.
+authority. Swap to a real deployment by pointing OIDC_ISSUER at the org's real
+Keycloak realm (config only — never a hardcoded realm URL here).
 """
 
 from __future__ import annotations

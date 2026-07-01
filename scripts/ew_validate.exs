@@ -2,7 +2,7 @@
 # end-to-end against the live local model? PUBLIC scope only; AGGREGATE COUNTS ONLY
 # (never prints claim content). Bounds the pass to ONE node. WIPE separately after.
 #
-#   SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=172.19.0.5:50051 MIX_ENV=dev \
+#   SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=<ml-container-ip>:50051 MIX_ENV=dev \
 #     mise exec -- mix run --no-start ../../hive/scripts/ew_validate.exs
 
 require Logger

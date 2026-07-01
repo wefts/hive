@@ -7,7 +7,7 @@
 #      upsert MISSED — soft entity-resolution candidates (feeds entity-resolution + node-vec-per-type).
 #  (C) Traversal cost on the now-denser graph (ADR-3 wall trigger) vs the ~2ms article baseline.
 #
-#   SIM=0.86 SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=172.19.0.5:50051 \
+#   SIM=0.86 SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=<ml-container-ip>:50051 \
 #     MIX_ENV=dev mise exec -- mix run --no-start ../../hive/scripts/spike_measure.exs
 
 require Logger

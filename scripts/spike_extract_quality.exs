@@ -4,7 +4,7 @@
 # Wikipedia (public) where claim text is safe to print; the group-scope activation
 # (later steps) reuses this extractor but prints aggregate numbers only.
 #
-#   SAMPLE=8 MODEL=qwen3:14b SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=172.19.0.5:50051 \
+#   SAMPLE=8 MODEL=qwen3:14b SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=<ml-container-ip>:50051 \
 #     MIX_ENV=dev mise exec -- mix run --no-start ../../hive/scripts/spike_extract_quality.exs
 
 require Logger

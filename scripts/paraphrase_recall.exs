@@ -7,7 +7,7 @@
 # noise. Privacy-safe: only aggregate numbers print.
 #
 #   RECALL_SCOPES=group PARA_SAMPLE=60 SWARM_DB_NAME=swarm_slice \
-#     SWARM_ML_ADDRESS=172.19.0.5:50051 MIX_ENV=dev mise exec -- mix run --no-start \
+#     SWARM_ML_ADDRESS=<ml-container-ip>:50051 MIX_ENV=dev mise exec -- mix run --no-start \
 #     ../../hive/scripts/paraphrase_recall.exs
 
 require Logger

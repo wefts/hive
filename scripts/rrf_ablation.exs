@@ -3,7 +3,7 @@
 # lexical hits, not chunks gone missing/mis-scoped from segmentation. Per probe,
 # compare lexical-only vs hybrid top-k membership of the source node. Privacy-safe.
 #
-#   RECALL_SCOPES=group SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=172.19.0.5:50051 \
+#   RECALL_SCOPES=group SWARM_DB_NAME=swarm_slice SWARM_ML_ADDRESS=<ml-container-ip>:50051 \
 #     MIX_ENV=dev mise exec -- mix run --no-start ../../hive/scripts/rrf_ablation.exs
 
 require Logger
