@@ -1,5 +1,7 @@
-# Fuller prod ingest — Confluence + MediaWiki → swarm_prod, embedded via the real
-# bge-m3 boundary. Adapted from conn_2source_slice.exs for the post-ML-fix world:
+# Fuller staging ingest — Confluence + MediaWiki → swarm_prod (ADR-14: this is the
+# staging role; the DB itself is renamed to swarm_staging by ADR-0015 — update the
+# SWARM_DB_NAME below once that rename has landed), embedded via the real bge-m3
+# boundary. Adapted from conn_2source_slice.exs for the post-ML-fix world:
 # starts Swarm.ML.ChannelPool (the long-lived pooled boundary) instead of the old
 # per-call GRPC.Client.Supervisor, embeds concurrently across the pool, and reports
 # PRIVACY-SAFE metrics only (counts/timings — never titles/prose/URLs).

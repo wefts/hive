@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# ADR-0015 — the layered-env compose entrypoint. Composes
+# env/base.env < env/${SWARM_ENV}.env < secrets.env < shell (Compose semantics:
+# real shell exports always win over --env-file values), then runs `docker
+# compose` with those layers explicit — so a bare `docker compose up` (which
+# would fall back to a stray top-level .env, if one exists) is never the path
+# actually used.
+#
+# SWARM_ENV is REQUIRED — refuses to guess (kills the swarm_dev/"conditional-
+# prod" footgun). The docker-compose.yml interpolation guard
+# (${SWARM_ENV:?...}) enforces this even for someone who skips this wrapper;
+# this script is the documented, convenient way to hit that guard correctly.
+#
+#   SWARM_ENV=staging scripts/compose up -d
+#   SWARM_ENV=test    scripts/compose config
+#
+# Add -f docker-compose.offline.yml yourself for the fully-offline path (this
+# wrapper only owns env layering, not the compose file list).
+set -euo pipefail
+
+: "${SWARM_ENV:?SWARM_ENV must be set to test|staging|prod (ADR-14) — refusing to guess}"
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+stage_env="${here}/env/${SWARM_ENV}.env"
+
+[ -f "$stage_env" ] || {
+  echo "compose: no env/${SWARM_ENV}.env — unknown SWARM_ENV=${SWARM_ENV}" >&2
+  exit 2
+}
+
+env_files=(--env-file "${here}/env/base.env" --env-file "$stage_env")
+[ -f "${here}/secrets.env" ] && env_files+=(--env-file "${here}/secrets.env")
+
+exec docker compose --project-directory "$here" -f "${here}/docker-compose.yml" \
+  "${env_files[@]}" "$@"

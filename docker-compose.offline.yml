@@ -10,10 +10,14 @@
 #
 # `build: !reset null` drops the build section so compose never reaches out to a
 # base image or build context — it can only use the local-registry image.
+#
+# postgres is deliberately NOT overridden here (ADR-0015): its base
+# docker-compose.yml image already defaults to the local registry
+# (${LOCAL_REGISTRY:-localhost:5000}/paradedb-pg16:0.24.1) — it is a
+# custom-built image that only ever lived there. Re-adding an override to the
+# old localhost:5000/pgvector:pg16 here would silently drop the pg_search
+# extension on an offline bring-up.
 services:
-  postgres:
-    image: localhost:5000/pgvector:pg16
-
   ollama:
     image: localhost:5000/ollama:0.30.6
 

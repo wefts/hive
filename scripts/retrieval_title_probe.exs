@@ -6,6 +6,11 @@
 # diff the aggregate blocks (the probe itself is branch-independent; only
 # Swarm.Graph.Retrieval differs between checkouts).
 #
+# NB: MIX_ENV=prod below is Elixir's own compile-mode env (release-shaped build),
+# NOT the app-level SWARM_ENV stage (ADR-0015) — orthogonal axes, same word.
+# SWARM_DB_NAME=swarm_prod is today's staging DB (ADR-14); update to
+# swarm_staging once the ADR-0015 rename has landed.
+#
 #   QUERY_SET=/path/to/qa.json SCOPES=group RECALL_K=10 \
 #     SWARM_DB_NAME=swarm_prod MIX_ENV=prod \
 #     mise exec -- mix run --no-start ../../hive/scripts/retrieval_title_probe.exs

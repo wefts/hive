@@ -38,10 +38,14 @@ sync_stack() {
   [ "$1" = push ] || { echo "stack: push only" >&2; exit 2; }
   ssh "${SPARK}" "mkdir -p '${hive_remote}'"
   echo ">> stack push -> ${SPARK}:${hive_remote}/ (orchestration + templates)"
-  # Explicit file list + SECURITY_EXCLUDES backstop: real secrets/.env/data never go.
+  # Explicit file list + SECURITY_EXCLUDES backstop: real secrets/data never go.
+  # env/*.env (ADR-0015) are committed, non-secret per-stage config — they travel;
+  # secrets.env stays local per machine (SECURITY_EXCLUDES backstop).
   rsync -az "${SECURITY_EXCLUDES[@]}" \
     "${HIVE_LOCAL}/docker-compose.yml" \
-    "${HIVE_LOCAL}/.env.example" \
+    "${HIVE_LOCAL}/docker-compose.offline.yml" \
+    "${HIVE_LOCAL}/scripts/compose" \
+    "${HIVE_LOCAL}/env" \
     "${HIVE_LOCAL}/secrets.env.example" \
     "${SPARK}:${hive_remote}/"
 }

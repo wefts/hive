@@ -8,12 +8,14 @@ and current state live in `../docs/`; kernel implementation rules live in
 
 ## What This Repo Owns
 
-- Instance orchestration: `docker-compose.yml`.
-- Non-secret env examples: `.env.example`.
+- Instance orchestration: `docker-compose.yml` (+ `docker-compose.offline.yml`).
+- Layered, non-secret env config (ADR-0015): `env/base.env` + `env/<SWARM_ENV>.env`
+  (`test`/`staging`/`prod`), all committed.
 - Secret key templates: `secrets.env.example`.
 - Private/local plugins under `plugins/`.
 - Private data roots under `data/`.
-- Hive-local helper scripts under `scripts/`.
+- Hive-local helper scripts under `scripts/`, including `scripts/compose` — the
+  layered-env entrypoint (`SWARM_ENV=staging scripts/compose up -d`).
 
 This repo may contain private integration code and local deployment choices. It
 must not leak secrets or private runtime data into committed files.
@@ -22,10 +24,11 @@ must not leak secrets or private runtime data into committed files.
 
 - `README.md` — local Hive summary.
 - `docker-compose.yml` — current instance topology.
-- `.env.example` — non-secret machine config.
+- `env/base.env`, `env/staging.env` — non-secret, per-stage config (ADR-0015).
 - `secrets.env.example` — secret key names only, values empty.
 - `../docs/architecture/ports.md` — plugin kinds, manifests, naming rule.
 - `../docs/decisions/0011-hive-plugin-ownership.md` — why early plugins live here.
+- `../docs/decisions/0015-environment-configuration-architecture.md` — env mechanism.
 - `../docs/standards/guardrails.md` — hard boundaries.
 
 ## Boundaries
@@ -33,7 +36,9 @@ must not leak secrets or private runtime data into committed files.
 - Never write real secrets into committed files.
 - Never edit or fabricate `secrets.env` through the agent.
 - Never hand-edit `data/`; it is runtime/private state.
-- Keep `.env` per machine and uncommitted.
+- `env/*.env` are committed and non-secret (ADR-0015) — real credentials stay in
+  `secrets.env`; a machine-specific path (e.g. `OLLAMA_MODELS_DIR`) or a sandbox
+  `SWARM_DB_NAME` override is a real shell export, never committed to `env/`.
 - Plugin code may live here while it is private or experimental.
 - Mature reusable plugins may move to standalone repos later; the kernel
   contract must not change when they do.
@@ -53,17 +58,21 @@ plugins/k8s_tool/
 
 ## Running The Hive
 
-Run from this repo root:
+Run from this repo root, via the layered-env wrapper (ADR-0015) — `SWARM_ENV`
+is REQUIRED (`test`/`staging`/`prod`), never guessed:
 
 ```bash
-docker compose up -d
-docker compose config
+SWARM_ENV=staging scripts/compose up -d
+SWARM_ENV=staging scripts/compose config
 ```
 
-The full stack (postgres + GPU ollama + ml + kernel) is documented in
+The full stack (postgres/pg_search + GPU ollama + ml + kernel) is documented in
 [`docs/operations.md`](docs/operations.md) — topology, prerequisites, registry
 tiers, offline run/build, scaling/HA, troubleshooting. `docker-compose.yml`
-includes the generic Swarm substrate from `../swarm/dev/docker-compose.yml`.
+defines `postgres` directly (a from-source ParadeDB image, pinned to the local
+registry) — it no longer includes `../swarm/dev/docker-compose.yml`, which is a
+standalone local-dev/test helper only (`swarm_test`, plain pgvector), unrelated
+to this deployment.
 
 ## Sync And Deployment
 
@@ -78,9 +87,10 @@ unless the human explicitly asks for it.
 For Hive changes, prefer:
 
 ```bash
-docker compose config
+SWARM_ENV=staging scripts/compose config
 bash -n scripts/env.sh
 bash -n scripts/deploy.sh
+bash -n scripts/compose
 ```
 
 If Docker or shell tooling is unavailable, report that honestly.

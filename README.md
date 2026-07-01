@@ -10,10 +10,10 @@ swarm/
   hive/       private instance repo
 ```
 
-Run from this directory:
+Run from this directory (ADR-0015 — `SWARM_ENV` required, `test`/`staging`/`prod`):
 
 ```bash
-docker compose up -d
+SWARM_ENV=staging scripts/compose up -d
 ```
 
 Full operational guide (topology, GPU/Ollama, registry tiers, offline, HA):

@@ -2,22 +2,51 @@
 # plus private/local plugin adapters.
 #
 # This repo lives next to the public `swarm/` repo. The public repo ships only
-# generic substrate (`../swarm/dev/docker-compose.yml`) + the service Dockerfiles
+# generic substrate (`../swarm/dev/docker-compose.yml`, the STANDALONE local-dev
+# helper — not used by this file, see ADR-0015) + the service Dockerfiles
 # (packaging); THIS file is the instance orchestrator and stays private.
 #
-# Run from the hive root: `docker compose up -d`
-# Reads `.env` from this dir; plugins load secrets via `env_file`.
+# Run via the layered-env wrapper (ADR-0015 — REQUIRED, not `docker compose`
+# directly, though the compose file itself also hard-errors on an unset
+# SWARM_ENV as a backstop): `SWARM_ENV=staging scripts/compose up -d`.
+# Plugins load secrets via `env_file`.
 #
 # Topology (single node): Postgres, the Elixir kernel, and the Python ML service
-# are all containerized here; Ollama runs on the HOST (reached via
-# host.docker.internal). Grow this file spawn -> compose -> k8s without touching
-# the kernel (the gRPC port ABI is invariant — see system_architecture §9/§10).
-
-include:
-  # Postgres + pgvector — the one stateful dependency, owned by the kernel.
-  - ../swarm/dev/docker-compose.yml
+# are all containerized here; Ollama runs IN the stack (GPU). Grow this file
+# spawn -> compose -> k8s without touching the kernel (the gRPC port ABI is
+# invariant — see system_architecture §9/§10).
 
 services:
+  # --- Postgres + pg_search (ParadeDB) + pgvector — the one stateful
+  # dependency, owned by the kernel. Defined HERE directly (not via the
+  # swarm/dev include) so a recreate can never silently revert to the plain
+  # pgvector image (board/done/fix-compose-postgres-drift, ADR-0015): ParadeDB
+  # only writes its preload libraries into a FRESH datadir's postgresql.conf,
+  # so the `command:` below is required on every recreate, not optional.
+  postgres:
+    # Custom-built from source (ADR-0016, swarm), pushed ONLY to the local
+    # registry — it is not on the dockerhub.smile.fr mirror, unlike the other
+    # images here (air-gap: rebuild + repush if this box ever needs re-mirroring).
+    image: ${LOCAL_REGISTRY:-localhost:5000}/paradedb-pg16:0.24.1
+    init: true
+    command: ["postgres", "-c", "shared_preload_libraries=pg_search,pg_cron,pg_stat_statements"]
+    environment:
+      POSTGRES_USER: ${SWARM_DB_USER:-swarm}
+      POSTGRES_PASSWORD: ${SWARM_DB_PASSWORD:-swarm}
+      # Derived from SWARM_ENV (ADR-0015) — no hardcoded/defaulted name. An
+      # explicit SWARM_DB_NAME still wins outright for a sandbox clone.
+      POSTGRES_DB: ${SWARM_DB_NAME:-swarm_${SWARM_ENV:?SWARM_ENV must be set to test|staging|prod}}
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "${SWARM_DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SWARM_DB_USER:-swarm}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - hive_pgdata:/var/lib/postgresql/data
+
   # --- Schema migration (one-shot) ----------------------------------------
   # A release has no `mix ecto.migrate`; run migrations via the release `eval`
   # (Swarm.Release.migrate/0), then exit. The kernel waits for this to succeed.
@@ -35,7 +64,7 @@ services:
       SWARM_DB_PORT: "5432"
       SWARM_DB_USER: ${SWARM_DB_USER:-swarm}
       SWARM_DB_PASSWORD: ${SWARM_DB_PASSWORD:-swarm}
-      SWARM_DB_NAME: ${SWARM_DB_NAME:-swarm_dev}
+      SWARM_DB_NAME: ${SWARM_DB_NAME:-swarm_${SWARM_ENV:?SWARM_ENV must be set to test|staging|prod}}
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,7 +135,7 @@ services:
       SWARM_DB_PORT: "5432"
       SWARM_DB_USER: ${SWARM_DB_USER:-swarm}
       SWARM_DB_PASSWORD: ${SWARM_DB_PASSWORD:-swarm}
-      SWARM_DB_NAME: ${SWARM_DB_NAME:-swarm_dev}
+      SWARM_DB_NAME: ${SWARM_DB_NAME:-swarm_${SWARM_ENV:?SWARM_ENV must be set to test|staging|prod}}
       SWARM_ML_ADDRESS: ml:50051
       # Dev consilium fleet: small GPU-resident models so an escalated answer
       # returns in seconds, not minutes (this single-GPU box can't swap the heavy
@@ -203,7 +232,7 @@ services:
   # confluence_connector:
   #   build: ./plugins/confluence_connector
   #   env_file:
-  #     - .env
+  #     - env/base.env
   #     - secrets.env            # creds; never committed, never synced
   #   environment:
   #     OLLAMA_BASE_URL: http://host.docker.internal:11434
@@ -215,10 +244,15 @@ services:
   #
   # k8s_tool:                    # Go; connect-mode (runs as its own daemon)
   #   build: ./plugins/k8s_tool
-  #   env_file: [.env]
+  #   env_file: [env/base.env]
   #   depends_on: [postgres]
 
 volumes:
+  # The Postgres datadir — pre-existing (ADR-0015: named explicitly, not left to
+  # compose's default `<project>_pgdata` naming, so a differently-invoked project
+  # name can never cause a fresh, empty volume to be created by accident).
+  hive_pgdata:
+    external: true
   # web_channel's private durable store (conversation log + local users). Created
   # owned by the non-root runtime uid (see the plugin Dockerfile). Never committed.
   web_channel_data:

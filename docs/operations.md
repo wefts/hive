@@ -16,7 +16,7 @@ The whole instance runs in Docker, orchestrated from this repo's
 
 | Service | Role | Scale |
 | --- | --- | --- |
-| `postgres` | pgvector store (included from `../swarm/dev/`) | singleton (state) |
+| `postgres` | pg_search (ParadeDB) + pgvector store, defined directly here (ADR-0015) | singleton (state) |
 | `ollama` | model runtime, **GPU** | singleton (one GPU) |
 | `ml` | Python embed/generate gRPC service | **horizontal** (`deploy.replicas`) |
 | `kernel` | Elixir/OTP control-plane (Core API :50061) | singleton (cluster later) |
@@ -32,18 +32,21 @@ kernel starts; `ml` waits on `ollama` healthy. Each long-lived service runs with
   (`nvidia` runtime) for GPU passthrough to `ollama`.
 - Ollama models on disk, bind-mounted read-only (not re-downloaded):
   `OLLAMA_MODELS_DIR` (default `/usr/share/ollama/.ollama/models`).
-- Copy `.env.example` → `.env` and adjust. Key vars: DB creds, `OLLAMA_MODELS_DIR`,
-  `HUB_REGISTRY` / `DHI_REGISTRY` (registry tier), `SWARM_CORE_API_PORT`.
+- `SWARM_ENV` set to `test`/`staging`/`prod` (ADR-0015 — REQUIRED, no default).
+  `env/base.env` + `env/<SWARM_ENV>.env` are committed and cover most cases; a
+  machine-specific value (`OLLAMA_MODELS_DIR`, a registry mirror) is a real
+  shell export before invoking `scripts/compose`, and real credentials live in
+  `secrets.env` (copy from `secrets.env.example`, never committed).
 
 ## Run
 
 ```bash
-docker compose up -d            # build (first time) + start the full stack
-docker compose ps               # all healthy?
-docker compose logs -f kernel   # follow
+SWARM_ENV=staging scripts/compose up -d            # build (first time) + start the full stack
+SWARM_ENV=staging scripts/compose ps               # all healthy?
+SWARM_ENV=staging scripts/compose logs -f kernel   # follow
 
 # end-to-end smoke (kernel → ml → ollama → 1024-d vector):
-docker compose exec -T kernel /app/bin/swarm rpc \
+SWARM_ENV=staging scripts/compose exec -T kernel /app/bin/swarm rpc \
   'Swarm.ML.Embeddings.embed(["hello"]) |> elem(1) |> Map.get(:dim) |> IO.inspect'
 ```
 
@@ -70,14 +73,14 @@ While online, mirror everything into the local registry once:
 Then run with no internet — images from `localhost:5000`, models from disk:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.offline.yml up -d
+SWARM_ENV=staging scripts/compose -f docker-compose.offline.yml up -d
 ```
 
 Offline **build** (rebuild from local bases) also works:
 
 ```bash
 HUB_REGISTRY=localhost:5000 DHI_REGISTRY=localhost:5000 UV_REGISTRY=localhost:5000 \
-  docker compose build
+  SWARM_ENV=staging scripts/compose build
 ```
 
 Portable artifacts to carry to an air-gapped host: the `swarm_registry_data`
@@ -119,10 +122,13 @@ How to test the cognitive layer (reward-gated enrichment → entity-resolution �
 accounting → relaxation) end-to-end on a **clone of the real corpus**, measure whether it
 **improves answers** (gate 7), and calibrate — without risking production.
 
-**The guard (non-negotiable).** The loop *mutates* state, so it runs **only on an isolated
-persistent shadow DB**, never `swarm_dev` (conditional-prod). The harness asserts
-`current_database()` and refuses `swarm_dev` or any env↔connected mismatch — so always set
-`SWARM_DB_NAME` explicitly (there is no safe default in `MIX_ENV=dev`). Snapshot before, wipe/roll
+**The guard (non-negotiable).** The loop *mutates* state, so by default it runs **only on an
+isolated persistent shadow DB**. The harness asserts `current_database()`, refuses the retired
+`swarm_dev` silent-default name, and refuses any env↔connected mismatch — so always set
+`SWARM_DB_NAME` explicitly (ADR-0015: there is no safe default outside `:test`). It does **not**
+code-block the live staging DB (today `swarm_prod`, renamed to `swarm_staging` by ADR-0015) —
+an operator-authorized, snapshot-protected hot run against it is a deliberate, documented
+exception (`docs/STATE.md` "Operational notes"), not the default path. Snapshot before, wipe/roll
 back after; promotion to prod is a reviewed go/no-go, never automatic.
 
 **Prereqs:** `postgres`, `ollama`+GPU (qwen3:14b), and `ml` gRPC (bge-m3) up; connector creds
