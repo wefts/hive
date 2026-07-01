@@ -45,6 +45,12 @@ search_opts =
     tw -> [{:title_weight, String.to_float(tw)} | base_opts]
   end
 
+# LEXICAL_ENGINE=bm25 flips the config flag for this run (native vs bm25 A/B, ADR-0016).
+if eng = System.get_env("LEXICAL_ENGINE") do
+  prev = Application.get_env(:swarm, :retrieval, [])
+  Application.put_env(:swarm, :retrieval, Keyword.put(prev, :lexical_engine, String.to_atom(eng)))
+end
+
 unless set_path && File.exists?(set_path) do
   IO.puts("retrieval-title-probe: set QUERY_SET to a JSON labeled set [{\"q\":..,\"gold\":[key,..]}]")
   System.halt(0)
