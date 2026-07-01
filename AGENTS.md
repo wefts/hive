@@ -1,6 +1,7 @@
 # AGENTS.md — Hive Instance Repo
 
-This is a **Hive** repo: a private deployment instance for Swarm.
+This is a **Hive** repo: a **public** deployment-instance repo for Swarm — it holds
+deployment scaffold, not private data.
 
 Read the workspace guide first: `../AGENTS.md`. Shared architecture, standards,
 and current state live in `../docs/`; kernel implementation rules live in
@@ -17,8 +18,10 @@ and current state live in `../docs/`; kernel implementation rules live in
 - Hive-local helper scripts under `scripts/`, including `scripts/compose` — the
   layered-env entrypoint (`SWARM_ENV=staging scripts/compose up -d`).
 
-This repo may contain private integration code and local deployment choices. It
-must not leak secrets or private runtime data into committed files.
+This repo is **public**; it holds deployment scaffold, plugin code, and env *structure*.
+It must not commit secrets, intranet hostnames/IPs, or private runtime data — those live
+only in gitignored `secrets.env`, `data/`, and Docker volumes; intranet specifics are
+parameterized to config, never hardcoded.
 
 ## Read First
 

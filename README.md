@@ -1,13 +1,13 @@
 # Swarm Hive
 
-Private instance/deployment repo for a local Swarm setup.
+Public instance/deployment repo for a local Swarm setup (deployment scaffold, not private data).
 
 This repo sits next to the public `swarm/` repo:
 
 ```text
 swarm/
   swarm/      public kernel/control-plane repo
-  hive/       private instance repo
+  hive/       public instance repo
 ```
 
 Run from this directory (ADR-0015 — `SWARM_ENV` required, `test`/`staging`/`prod`):
