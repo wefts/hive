@@ -50,7 +50,8 @@ unless set_path && File.exists?(set_path) do
   System.halt(0)
 end
 
-queries = set_path |> File.read!() |> Jason.decode!()
+queries =
+  set_path |> File.read!() |> Jason.decode!() |> Enum.reject(&(&1["excluded"] == true))
 
 tw_label = System.get_env("TITLE_WEIGHT") || "config-default"
 IO.puts("== retrieval title-arm probe — #{length(queries)} queries, scopes=#{inspect(scopes)}, recall@#{k}, title_weight=#{tw_label} ==")
