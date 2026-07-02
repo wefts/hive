@@ -71,5 +71,77 @@
       mapped scope (default-deny otherwise). SSO users authenticate against Keycloak.</p>
   </section>
 </div>
+
+<div class="card">
+  <header>
+    <h2 class="card-title">Kernel-backed admin <span class="badge status-warn">ADR-16</span></h2>
+  </header>
+  <section>
+    <p class="muted">These actions call the kernel directly (ManageUser / ManageAccess /
+      AdminReadConversation) — the kernel is the sole authority and audits every one.
+      {% if not principal.uuid %}<span class="badge status-warn">kernel identity not resolved
+      yet</span> — actions below will be rejected until signing is configured and this account
+      is migrated into the kernel identity store.{% endif %}</p>
+  </section>
+  <section>
+    <h3 class="section-label">Invite (kernel identity + local credential)</h3>
+    <form class="invite" method="post" action="/admin/kernel/user" autocomplete="off">
+      <input type="hidden" name="op" value="invite">
+      <input class="input" type="text" name="login" placeholder="login" required aria-label="login">
+      <input class="input" type="password" name="password" placeholder="temporary password" required aria-label="temporary password">
+      <input class="input" type="text" name="first_name" placeholder="first name" aria-label="first name">
+      <input class="input" type="text" name="last_name" placeholder="last name" aria-label="last name">
+      <select class="input" name="group" aria-label="group">
+        <option value="">no group (public only)</option>
+        {% for g in groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+      </select>
+      <button class="btn" type="submit">Invite</button>
+    </form>
+    <p class="muted">Known gap (<code>jit-provision-rpc</code>): the kernel record starts
+      <code>status=invited</code>; there is no wire path yet to promote it to
+      <code>active</code> other than this local credential resolving on first login.</p>
+  </section>
+  <section>
+    <h3 class="section-label">Deactivate / delete</h3>
+    <form class="invite" method="post" action="/admin/kernel/user" autocomplete="off">
+      <input class="input" type="text" name="target_user_id" placeholder="target user uuid" required aria-label="target user uuid">
+      <select class="input" name="op" aria-label="operation">
+        <option value="deactivate">deactivate</option>
+        <option value="delete">delete</option>
+      </select>
+      <button class="btn" data-variant="destructive" type="submit">Apply</button>
+    </form>
+    <p class="muted">Kills login (creds/sessions/grants) immediately; learned content persists (D11).</p>
+  </section>
+  <section>
+    <h3 class="section-label">Access grants</h3>
+    <form class="invite" method="post" action="/admin/kernel/access" autocomplete="off">
+      <select class="input" name="op" aria-label="operation">
+        <option value="grant_role">grant role</option>
+        <option value="revoke_role">revoke role</option>
+        <option value="grant_group">grant group</option>
+        <option value="revoke_group">revoke group</option>
+        <option value="set_group_scopes">set group scopes</option>
+      </select>
+      <input class="input" type="text" name="target_user_id" placeholder="target user uuid" aria-label="target user uuid">
+      <input class="input" type="text" name="role" placeholder="role (admin|superadmin)" aria-label="role">
+      <input class="input" type="text" name="group_id" placeholder="group id" aria-label="group id">
+      <input class="input" type="text" name="scopes" placeholder="scopes (comma-separated)" aria-label="scopes">
+      <button class="btn" type="submit">Apply</button>
+    </form>
+    <p class="muted">Role grants are superadmin-only; group ops need <code>manage_access</code>
+      (kernel-enforced — this form doesn't pre-check).</p>
+  </section>
+  <section>
+    <h3 class="section-label">Break-glass conversation read</h3>
+    <form class="invite" method="post" action="/admin/kernel/read-conversation" autocomplete="off">
+      <input class="input" type="text" name="conversation_id" placeholder="conversation id" required aria-label="conversation id">
+      <input class="input" type="text" name="reason" placeholder="reason (required, audited)" required aria-label="reason">
+      <button class="btn" data-variant="outline" type="submit">Read</button>
+    </form>
+    <p class="muted">superadmin + <code>read_any_conversation</code> only; audited BEFORE the
+      data is returned (D6) — the next page shows exactly what was logged.</p>
+  </section>
+</div>
 </div>
 {% endblock %}

@@ -808,6 +808,187 @@ async def admin_local_invite(
     return RedirectResponse("/admin", status_code=303)
 
 
+# --- Kernel-backed admin (ADR-16 D9/D10/D11, step 6b.4) --------------------
+# The kernel is the sole authority: every call below is capability-gated and
+# audited SERVER-SIDE (Swarm.Admin/Swarm.Conversations); the channel only signs
+# the assertion and renders the typed CallStatus honestly. Fixed-label error
+# pages only (never interpolate a form value into a raw HTML string — autoescape
+# via Jinja is used wherever kernel/user content is actually rendered, below).
+
+_CALL_STATUS_LABEL = {
+    core_pb2.CALL_NOT_FOUND: ("not found", "status-warn"),
+    core_pb2.CALL_UNAUTHENTICATED: ("not signed in to the kernel", "status-error"),
+    core_pb2.CALL_NOT_AUTHORIZED: ("not authorized", "status-error"),
+    core_pb2.CALL_BAD_REQUEST: ("bad request", "status-error"),
+}
+
+
+def _admin_outcome_page(status_code: int, label: str, css_class: str) -> HTMLResponse:
+    return HTMLResponse(
+        '<main class="shell"><article class="card">'
+        f'<span class="badge {css_class}">{label}</span>'
+        '<p class="muted">The kernel rejected this action — see above.</p>'
+        '<p><a class="navlink" href="/admin">back to admin</a></p></article></main>',
+        status_code=status_code,
+    )
+
+
+def _admin_assertion(principal: auth.Principal) -> str:
+    """The signed assertion for a kernel-backed admin action, or "" when signing
+    isn't configured — callers then render an honest 'kernel identity not
+    resolved' outcome (CALL_UNAUTHENTICATED) rather than attempting the call."""
+    return _actor_assertion(principal)
+
+
+@app.post("/admin/kernel/user")
+async def admin_kernel_user(
+    request: Request,
+    op: str = Form(...),
+    target_user_id: str = Form(""),
+    login: str = Form(""),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
+    nickname: str = Form(""),
+    password: str = Form(""),
+    group: str = Form(""),
+):
+    """ManageUser (invite/deactivate/delete). INVITE also provisions a channel-local
+    credential in the SAME action, so the invited user can sign in immediately
+    (`Swarm.Identity.invite_user` alone leaves `status='invited'`, and no gRPC path
+    yet promotes it to 'active' — `board/todo/jit-provision-rpc` — so the FIRST
+    local login must already resolve; that gap is tracked, not silently papered over)."""
+    principal = _require_groot(request)
+    if principal is None:
+        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    assertion = _admin_assertion(principal)
+    op_map = {
+        "invite": core_pb2.INVITE,
+        "deactivate": core_pb2.DEACTIVATE,
+        "delete": core_pb2.DELETE,
+    }
+    if op not in op_map:
+        return _admin_outcome_page(400, "bad request", "status-error")
+    try:
+        resp = await core_client.manage_user(
+            assertion,
+            op_map[op],
+            target_user_id=target_user_id.strip(),
+            login=login.strip(),
+            first_name=first_name.strip(),
+            last_name=last_name.strip(),
+            nickname=nickname.strip(),
+        )
+    except Exception:
+        logger.exception("ManageUser failed")
+        return _admin_outcome_page(502, "kernel unreachable", "status-error")
+    if resp.status != core_pb2.CALL_OK:
+        label, css_class = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
+        return _admin_outcome_page(409, label, css_class)
+    if op == "invite" and login.strip() and password:
+        # Pair the kernel identity with a channel-local credential (best-effort —
+        # the kernel record already exists even if this half fails; groot can
+        # retry via the plain local-invite form above).
+        try:
+            grp = group.strip()
+            scopes = [auth.scopes_for([grp])[-1]] if grp else []
+            localusers.create(
+                login.strip(), password, scopes, is_groot=False, created_by=principal.viewer
+            )
+        except ValueError:
+            logger.warning("kernel-invited login=%s already has a local credential", login)
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/kernel/access")
+async def admin_kernel_access(
+    request: Request,
+    op: str = Form(...),
+    target_user_id: str = Form(""),
+    role: str = Form(""),
+    group_id: str = Form(""),
+    scopes: str = Form(""),
+):
+    """ManageAccess (grant/revoke role or group; set a group's scopes) — superadmin
+    for role ops, `manage_access` cap for group ops (kernel-enforced, not here)."""
+    principal = _require_groot(request)
+    if principal is None:
+        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    assertion = _admin_assertion(principal)
+    op_map = {
+        "grant_role": core_pb2.GRANT_ROLE,
+        "revoke_role": core_pb2.REVOKE_ROLE,
+        "grant_group": core_pb2.GRANT_GROUP,
+        "revoke_group": core_pb2.REVOKE_GROUP,
+        "set_group_scopes": core_pb2.SET_GROUP_SCOPES,
+    }
+    if op not in op_map:
+        return _admin_outcome_page(400, "bad request", "status-error")
+    scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
+    try:
+        resp = await core_client.manage_access(
+            assertion,
+            op_map[op],
+            target_user_id=target_user_id.strip(),
+            role=role.strip(),
+            group_id=group_id.strip(),
+            scopes=scope_list,
+        )
+    except Exception:
+        logger.exception("ManageAccess failed")
+        return _admin_outcome_page(502, "kernel unreachable", "status-error")
+    if resp.status != core_pb2.CALL_OK:
+        label, css_class = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
+        return _admin_outcome_page(409, label, css_class)
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/kernel/read-conversation", response_class=HTMLResponse)
+async def admin_kernel_read_conversation(
+    request: Request, conversation_id: str = Form(...), reason: str = Form(...)
+) -> HTMLResponse:
+    """Break-glass (AdminReadConversation, D6): superadmin + `read_any_conversation`
+    only; the kernel audits BEFORE returning (Swarm.Audit) — reason is required at
+    the wire boundary (an empty reason is CALL_BAD_REQUEST, not an unlogged read).
+    Renders the audited fact visibly: the channel itself sent `reason` on this
+    exact request, and the kernel's contract guarantees it logged it first."""
+    principal = _require_groot(request)
+    if principal is None:
+        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    if not reason.strip():
+        return _admin_outcome_page(400, "reason is required", "status-error")
+    assertion = _admin_assertion(principal)
+    try:
+        resp = await core_client.admin_read_conversation(
+            assertion, conversation_id.strip(), reason.strip()
+        )
+    except Exception:
+        logger.exception("AdminReadConversation failed")
+        return _admin_outcome_page(502, "kernel unreachable", "status-error")
+    if resp.status != core_pb2.CALL_OK:
+        label, css_class = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
+        return _admin_outcome_page(
+            404 if resp.status == core_pb2.CALL_NOT_FOUND else 409, label, css_class
+        )
+    return templates.TemplateResponse(
+        request,
+        "admin_read_conversation.html",
+        {
+            "authed": True,
+            "principal": principal.to_session(),
+            "actor_login": principal.viewer,
+            "reason": reason.strip(),
+            "conversation": {
+                "title": resp.conversation.title,
+                "owner_id": resp.conversation.owner_id,
+            },
+            "messages": [
+                {"role": m.role, "body": m.body, "ask_ref": m.ask_ref, "created_at": m.created_at}
+                for m in resp.messages
+            ],
+        },
+    )
+
+
 @app.post("/ask", response_class=HTMLResponse)
 async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
     # The HTML `required` is client-only and bypassable; don't spend an Ask on an
