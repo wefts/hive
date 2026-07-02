@@ -9,7 +9,7 @@
   var STYLE = [
     { selector: "node", style: {
         "background-color": "#1c222c", "border-color": "#262d38", "border-width": 1,
-        label: "data(label)", color: "#e9eef5", "font-size": 11,
+        label: "data(label)", color: "#e9eef5", "font-size": 13,
         "text-valign": "center", "text-halign": "center", "text-wrap": "wrap",
         "text-max-width": 90, width: 26, height: 26, "text-margin-y": 0 } },
     { selector: "node.center", style: {
@@ -19,7 +19,7 @@
     { selector: "edge", style: {
         width: 1.5, "line-color": "#3a4452", "target-arrow-color": "#3a4452",
         "target-arrow-shape": "triangle", "curve-style": "bezier",
-        label: "data(relation)", "font-size": 9, color: "#8b95a4",
+        label: "data(relation)", "font-size": 11, color: "#8b95a4",
         "text-rotation": "autorotate", "text-background-color": "#0b0e14",
         "text-background-opacity": 0.7, "text-background-padding": 2 } },
   ];
