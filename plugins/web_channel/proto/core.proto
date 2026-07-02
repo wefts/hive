@@ -29,6 +29,158 @@ service Core {
   // cursor (ADR-15). Poll, not stream; no raw sequence on the wire — the kernel
   // skips out-of-scope events server-side so hidden volume/timing is not inferable.
   rpc ActivityFeed(ActivityFeedRequest) returns (ActivityFeedResponse);
+
+  // --- Identity / privacy (workspace ADR-16) -------------------------------
+  // These carry a SIGNED actor assertion (the Swarm.Actor HS256 wire contract),
+  // NOT a plaintext viewer: the kernel verifies it and DERIVES {uuid,scopes,caps}
+  // from its own records (Decision 9). They are strict — an absent/invalid
+  // assertion is UNAUTHENTICATED — even while the older RPCs above still dual-accept
+  // a legacy plaintext `viewer` during the channel migration (step 6b).
+
+  // Verify a signed assertion and return the derived actor. The channel calls this
+  // once at login to learn its {uuid,scopes,caps}; also the auth self-test.
+  rpc ResolveActor(ResolveActorRequest) returns (ResolveActorResponse);
+  // Log one conversation turn (creates the conversation if conversation_id is empty;
+  // otherwise appends to one the actor owns). Owner = the verified subject.
+  rpc LogConversation(LogConversationRequest) returns (LogConversationResponse);
+  // The actor's own conversations (owner-private; never another user's).
+  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
+  // One conversation the actor owns, with its messages; NOT_FOUND otherwise
+  // (404-not-403: not-owned and non-existent are indistinguishable).
+  rpc GetConversation(GetConversationRequest) returns (GetConversationResponse);
+  // Break-glass: a superadmin reads another user's conversation by impersonating the
+  // owner through the same predicate, audited-before-return (Decision 6). Superadmin
+  // + read_any_conversation only; NOT_AUTHORIZED otherwise.
+  rpc AdminReadConversation(AdminReadConversationRequest) returns (GetConversationResponse);
+  // Admin-mutable access management (grant/revoke role or group, set group scopes),
+  // capability-gated + audited (Decision 10). Role grants are superadmin-only.
+  rpc ManageAccess(ManageAccessRequest) returns (AdminActionResponse);
+  // User lifecycle: invite / deactivate / delete, capability-gated + audited
+  // (Decision 11). Deactivate/delete kill the login; learned content persists.
+  rpc ManageUser(ManageUserRequest) returns (AdminActionResponse);
+}
+
+// Outcome of an identity/privacy call. UNAUTHENTICATED (no/invalid assertion) is
+// distinct from NOT_AUTHORIZED (valid actor, lacks the capability) and NOT_FOUND
+// (404-not-403 — no existence oracle).
+enum CallStatus {
+  CALL_STATUS_UNSPECIFIED = 0;
+  CALL_OK = 1;
+  CALL_NOT_FOUND = 2;
+  CALL_UNAUTHENTICATED = 3;
+  CALL_NOT_AUTHORIZED = 4;
+  CALL_BAD_REQUEST = 5; // malformed input (bad role, empty/dup login, missing reason)
+}
+
+message ResolveActorRequest {
+  string assertion = 1; // signed HS256 actor assertion (Swarm.Actor wire contract)
+}
+
+message ResolveActorResponse {
+  CallStatus status = 1;         // OK | UNAUTHENTICATED
+  string uuid = 2;               // the derived, verified subject uuid
+  repeated string scopes = 3;    // DERIVED from the store (never the token)
+  repeated string caps = 4;      // DERIVED capabilities (default-deny)
+  string login = 5;
+}
+
+message ConversationView {
+  string id = 1;
+  string owner_id = 2;
+  string scope = 3;       // usually empty (owner-private)
+  string title = 4;
+  string created_at = 5;  // ISO-8601
+  string updated_at = 6;
+}
+
+message MessageView {
+  string id = 1;
+  string role = 2;              // "user" | "assistant"
+  string body = 3;
+  string author_user_id = 4;    // may be empty
+  string ask_ref = 5;           // link to a retained deliberation; may be empty
+  string created_at = 6;        // ISO-8601
+}
+
+message LogConversationRequest {
+  string assertion = 1;
+  string conversation_id = 2;   // empty ⇒ create a new conversation (using title)
+  string title = 3;
+  string role = 4;              // "user" | "assistant"
+  string body = 5;
+  string ask_ref = 6;
+}
+
+message LogConversationResponse {
+  CallStatus status = 1;        // OK | NOT_FOUND (conversation not owned) | UNAUTHENTICATED
+  string conversation_id = 2;
+  string message_id = 3;
+}
+
+message ListConversationsRequest {
+  string assertion = 1;
+}
+
+message ListConversationsResponse {
+  CallStatus status = 1;                       // OK | UNAUTHENTICATED
+  repeated ConversationView conversations = 2; // the actor's own, newest first
+}
+
+message GetConversationRequest {
+  string assertion = 1;
+  string conversation_id = 2;
+}
+
+message GetConversationResponse {
+  CallStatus status = 1;                 // OK | NOT_FOUND | UNAUTHENTICATED | NOT_AUTHORIZED
+  ConversationView conversation = 2;
+  repeated MessageView messages = 3;
+}
+
+message AdminReadConversationRequest {
+  string assertion = 1;
+  string conversation_id = 2;
+  string reason = 3;             // recorded in the audit trail
+}
+
+enum AccessOp {
+  ACCESS_OP_UNSPECIFIED = 0;
+  GRANT_ROLE = 1;       // superadmin-only
+  REVOKE_ROLE = 2;      // superadmin-only
+  GRANT_GROUP = 3;      // manage_access
+  REVOKE_GROUP = 4;     // manage_access
+  SET_GROUP_SCOPES = 5; // manage_access
+}
+
+message ManageAccessRequest {
+  string assertion = 1;
+  AccessOp op = 2;
+  string target_user_id = 3;     // role/group ops
+  string role = 4;               // "admin" | "superadmin"
+  string group_id = 5;
+  repeated string scopes = 6;    // SET_GROUP_SCOPES
+}
+
+enum UserOp {
+  USER_OP_UNSPECIFIED = 0;
+  INVITE = 1;      // invite_users
+  DEACTIVATE = 2;  // manage_users
+  DELETE = 3;      // manage_users
+}
+
+message ManageUserRequest {
+  string assertion = 1;
+  UserOp op = 2;
+  string target_user_id = 3;     // deactivate / delete
+  string login = 4;              // invite
+  string first_name = 5;
+  string last_name = 6;
+  string nickname = 7;
+}
+
+message AdminActionResponse {
+  CallStatus status = 1;         // OK | NOT_AUTHORIZED | UNAUTHENTICATED
+  string user_id = 2;            // set on INVITE (the created user's uuid)
 }
 
 message AskRequest {
@@ -100,6 +252,10 @@ message SearchRequest {
   string query = 1;
   repeated string scopes = 2;
   uint32 limit = 3;
+  // Optional signed actor assertion (ADR-16 D9). When present it is verified and the
+  // scopes DERIVED (wire scopes ignored); when absent the wire scopes are used
+  // (the legacy dual-accept path — lets the channel start signing before 6b's cutover).
+  string assertion = 4;
 }
 
 message SearchHit {
