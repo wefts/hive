@@ -100,7 +100,7 @@ def test_admin_forbidden_for_non_groot(monkeypatch) -> None:
     monkeypatch.setattr(kc_admin, "list_users", must_not_list)
     r = client.get("/admin")
     assert r.status_code == 403
-    assert "groot" in r.text.lower()
+    assert "forbidden" in r.text.lower()
 
 
 def test_admin_forbidden_for_anonymous(monkeypatch) -> None:

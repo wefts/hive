@@ -710,8 +710,7 @@ async def admin(request: Request) -> HTMLResponse:
     if principal is None:
         return HTMLResponse(
             '<main class="shell"><article class="card">'
-            '<span class="badge status-error">forbidden</span>'
-            '<p class="muted">This page is groot-only.</p></article></main>',
+            '<span class="badge status-error">forbidden</span></article></main>',
             status_code=403,
         )
     try:
