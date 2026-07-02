@@ -202,7 +202,7 @@ def test_dashboard_search_json_scoped(monkeypatch) -> None:
     )
     seen: dict = {}
 
-    async def fake_search(query, scopes, limit=10):
+    async def fake_search(query, scopes, limit=10, assertion=""):
         seen["scopes"] = scopes
         return core_pb2.SearchResponse(
             hits=[core_pb2.SearchHit(id=7, type="article", key="LDAP", score=0.9)]

@@ -63,6 +63,16 @@ class Principal:
     groups: list[str] = field(default_factory=list)
     is_groot: bool = False
     display: str = ""
+    # ADR-16 D9 — the identity the channel SIGNS an actor assertion for
+    # (`sub`+`provider`), and the kernel-DERIVED result of that assertion once
+    # `ResolveActor` has verified it (`uuid`/`caps`; never trusted from elsewhere).
+    # `sid` is a per-login opaque session id (not the cookie itself), minted at
+    # login and carried in every assertion so a replay is at least bound to it.
+    sub: str = ""
+    provider: str = ""
+    sid: str = ""
+    uuid: str = ""
+    caps: list[str] = field(default_factory=list)
 
     def to_session(self) -> dict:
         return asdict(self)
@@ -75,13 +85,19 @@ class Principal:
             groups=list(data.get("groups", [])),
             is_groot=bool(data.get("is_groot", False)),
             display=data.get("display", ""),
+            sub=data.get("sub", ""),
+            provider=data.get("provider", ""),
+            sid=data.get("sid", ""),
+            uuid=data.get("uuid", ""),
+            caps=list(data.get("caps", [])),
         )
 
 
 def principal_from_claims(claims: dict) -> Principal:
     """Build a Principal from verified OIDC id-token claims. Scopes are DERIVED from
     groups here (never taken from the client/token directly), so the channel decides
-    scope from identity, deterministically."""
+    scope from identity, deterministically. `sub` is the IdP's stable subject (never
+    the display name) — the identity the actor assertion is signed for (ADR-16 D9)."""
     # Normalize: strip whitespace and a leading "/" (Keycloak emits "/confluence"
     # when the groups mapper uses full paths) so map lookups are robust.
     groups = [str(g).strip().lstrip("/") for g in (claims.get("groups") or [])]
@@ -95,6 +111,8 @@ def principal_from_claims(claims: dict) -> Principal:
         groups=groups,
         is_groot=GROOT_ROLE in roles,
         display=display,
+        sub=claims.get("sub") or viewer,
+        provider="keycloak",
     )
 
 

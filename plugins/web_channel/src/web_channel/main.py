@@ -25,6 +25,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import grpc
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import (
     HTMLResponse,
@@ -38,7 +39,7 @@ from fastapi.templating import Jinja2Templates
 from grpc import aio
 from starlette.middleware.sessions import SessionMiddleware
 
-from web_channel import auth, convlog, core_client, kc_admin, localusers, render
+from web_channel import actor, auth, convlog, core_client, kc_admin, localusers, render
 from web_channel._gen import core_pb2
 
 # Friendly answer-trace: how the kernel produced the answer (from the structured
@@ -198,14 +199,79 @@ def _status_view(s: core_pb2.StatusResponse) -> dict:
     }
 
 
-def _session_ctx(request: Request) -> tuple[str, list[str]] | None:
-    """(viewer, scopes) for this request, or None when OIDC is on but there is no
-    session — the caller then renders an honest 'session ended', never querying the
-    kernel anonymously. When OIDC is off, the fixed operator at public scope."""
+def _actor_assertion(principal: auth.Principal) -> str:
+    """A fresh, short-lived signed actor assertion for this principal (ADR-16 D9),
+    or "" when signing isn't possible (no `SWARM_ACTOR_SECRET` configured, or an
+    incomplete identity) — callers then fall back to the legacy plaintext viewer,
+    which the kernel's dual-accept mode still honors during the migration window."""
+    if not principal.sub or not principal.provider:
+        return ""
+    return actor.sign(principal.sub, principal.provider, principal.sid or "") or ""
+
+
+def _session_ctx(request: Request) -> tuple[str, list[str], str] | None:
+    """(viewer, scopes, assertion) for this request, or None when OIDC is on but
+    there is no session — the caller then renders an honest 'session ended', never
+    querying the kernel anonymously. When OIDC is off, the fixed operator at public
+    scope with no assertion (no identity to sign for in pre-auth P0 mode)."""
     if auth.oidc_enabled():
         principal = _current_principal(request)
-        return (principal.viewer, principal.scopes) if principal else None
-    return _viewer(), _scopes()
+        if principal is None:
+            return None
+        return (principal.viewer, principal.scopes, _actor_assertion(principal))
+    return _viewer(), _scopes(), ""
+
+
+async def _resolve_and_gate(
+    request: Request, principal: auth.Principal
+) -> tuple[auth.Principal, HTMLResponse | None]:
+    """Mint this login's session id, then — when signing is configured — verify the
+    actor with the kernel (ADR-16 D9) and cache its DERIVED {uuid, caps}. An honest
+    'not provisioned' page blocks the session on a clean UNAUTHENTICATED verdict (no
+    identity_link on record yet); a transient transport error does NOT lock the user
+    out (fail open to the legacy dual-accept path — self-heals once the kernel is
+    reachable, since every later call re-signs a fresh assertion locally, no RPC
+    needed). When no secret is configured yet, this is a no-op (pre-6a-rollout dev)."""
+    principal.sid = secrets.token_urlsafe(16)
+    if not actor.secret_configured():
+        return principal, None
+    token = actor.sign(principal.sub, principal.provider, principal.sid)
+    if token is None:
+        return principal, None
+    try:
+        resp = await core_client.resolve_actor(token)
+    except aio.AioRpcError as err:
+        # Fail open ONLY on a transport-level outage (kernel down / slow) — never on
+        # a code the kernel used to actively REJECT the call (council: codex+gemini,
+        # both independently flagged a blanket `except` as the one fix needed here).
+        if err.code() in (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED):
+            logger.warning(
+                "ResolveActor unreachable at login (sub=%s provider=%s, %s) — proceeding "
+                "unverified; the kernel's dual-accept mode still applies",
+                principal.sub,
+                principal.provider,
+                err.code().name,
+            )
+            return principal, None
+        logger.exception(
+            "ResolveActor rejected the call (sub=%s provider=%s)", principal.sub, principal.provider
+        )
+        return principal, HTMLResponse(
+            '<article class="card"><span class="badge status-error">verification failed</span>'
+            f'<p class="muted">Could not verify your identity ({err.code().name}). '
+            "Try again, or contact an administrator if this persists.</p></article>",
+            status_code=502,
+        )
+    if resp.status != core_pb2.CALL_OK:
+        logger.warning(
+            "ResolveActor: not provisioned (sub=%s provider=%s)", principal.sub, principal.provider
+        )
+        return principal, templates.TemplateResponse(
+            request, "not_provisioned.html", {}, status_code=403
+        )
+    principal.uuid = resp.uuid
+    principal.caps = list(resp.caps)
+    return principal, None
 
 
 def _deliberation_view(d: core_pb2.DeliberationResponse) -> dict | None:
@@ -340,11 +406,11 @@ async def search(request: Request, q: str = "") -> HTMLResponse:
             return HTMLResponse(
                 '<li class="muted">session ended — <a href="/login">log in</a></li>'
             )
-        scopes = principal.scopes
+        scopes, assertion = principal.scopes, _actor_assertion(principal)
     else:
-        scopes = _scopes()
+        scopes, assertion = _scopes(), ""
     try:
-        resp = await core_client.kb_search(q, scopes=scopes, limit=10)
+        resp = await core_client.kb_search(q, scopes=scopes, limit=10, assertion=assertion)
         # id is the bridge search → graph: a hit opens its Neighborhood (ADR-15).
         hits = [{"id": h.id, "type": h.type, "key": h.key, "score": h.score} for h in resp.hits]
         ctx = {"hits": hits, "q": q}
@@ -361,9 +427,9 @@ async def deliberation(request: Request, ask_ref: str) -> HTMLResponse:
     ctx = _session_ctx(request)
     if ctx is None:
         return HTMLResponse('<p class="muted">Session ended — <a href="/login">log in</a>.</p>')
-    viewer, scopes = ctx
+    viewer, scopes, assertion = ctx
     try:
-        resp = await core_client.deliberation(ask_ref, scopes=scopes, viewer=viewer)
+        resp = await core_client.deliberation(ask_ref, scopes=scopes, viewer=assertion or viewer)
         delib = _deliberation_view(resp)
     except Exception:
         logger.exception("Deliberation failed")
@@ -378,11 +444,15 @@ async def neighborhood(request: Request, node_id: int, rel: str = "") -> HTMLRes
     ctx = _session_ctx(request)
     if ctx is None:
         return HTMLResponse('<p class="muted">Session ended — <a href="/login">log in</a>.</p>')
-    viewer, scopes = ctx
+    viewer, scopes, assertion = ctx
     relation_types = [r for r in (rel.split(",") if rel else []) if r.strip()]
     try:
         resp = await core_client.neighborhood(
-            node_id, scopes=scopes, viewer=viewer, depth=1, relation_types=relation_types
+            node_id,
+            scopes=scopes,
+            viewer=assertion or viewer,
+            depth=1,
+            relation_types=relation_types,
         )
         view = _neighborhood_view(resp)
     except Exception:
@@ -407,12 +477,12 @@ async def activity(request: Request, cursor: str = "") -> HTMLResponse:
             '<li class="muted">Session ended — <a href="/login">log in</a>.</li>'
             '<span id="activity-poller" hx-swap-oob="true"></span>'
         )
-    viewer, scopes = ctx
+    viewer, scopes, assertion = ctx
     events: list[dict] = []
     next_cursor = cursor
     try:
         resp = await core_client.activity_feed(
-            scopes=scopes, viewer=viewer, cursor=cursor, limit=25
+            scopes=scopes, viewer=assertion or viewer, cursor=cursor, limit=25
         )
         events = [_activity_event_view(e) for e in resp.events]
         next_cursor = resp.next_cursor
@@ -448,9 +518,9 @@ async def dashboard_search(request: Request, q: str = "") -> JSONResponse:
     ctx = _session_ctx(request)
     if not q or ctx is None:
         return JSONResponse({"hits": []})
-    _viewer_id, scopes = ctx
+    _viewer_id, scopes, assertion = ctx
     try:
-        resp = await core_client.kb_search(q, scopes=scopes, limit=10)
+        resp = await core_client.kb_search(q, scopes=scopes, limit=10, assertion=assertion)
         hits = [{"id": h.id, "type": h.type, "key": h.key, "score": h.score} for h in resp.hits]
     except Exception:
         logger.exception("dashboard KbSearch failed")
@@ -465,11 +535,15 @@ async def dashboard_graph(request: Request, node_id: int, rel: str = "") -> JSON
     ctx = _session_ctx(request)
     if ctx is None:
         return JSONResponse({"status": "not_found", "nodes": [], "edges": []}, status_code=401)
-    viewer, scopes = ctx
+    viewer, scopes, assertion = ctx
     relation_types = [r for r in (rel.split(",") if rel else []) if r.strip()]
     try:
         resp = await core_client.neighborhood(
-            node_id, scopes=scopes, viewer=viewer, depth=1, relation_types=relation_types
+            node_id,
+            scopes=scopes,
+            viewer=assertion or viewer,
+            depth=1,
+            relation_types=relation_types,
         )
         view = _neighborhood_view(resp)
     except Exception:
@@ -517,6 +591,9 @@ async def login_local(request: Request, identifier: str = Form(...), password: s
             {"identifier": ident, "error": "Invalid credentials."},
             status_code=401,
         )
+    principal, blocked = await _resolve_and_gate(request, principal)
+    if blocked is not None:
+        return blocked
     request.session["user"] = principal.to_session()
     return RedirectResponse("/", status_code=303)
 
@@ -535,6 +612,9 @@ async def auth_callback(request: Request):
         logger.warning("OIDC callback returned no usable identity claims")
         return RedirectResponse("/?auth=failed")
     principal = auth.principal_from_claims(claims)
+    principal, blocked = await _resolve_and_gate(request, principal)
+    if blocked is not None:
+        return blocked
     request.session["user"] = principal.to_session()
     return RedirectResponse("/")
 
@@ -673,16 +753,16 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
                 '<p class="muted">Your session ended. '
                 '<a href="/login">Log in</a> to ask.</p></article>'
             )
-        viewer, scopes = principal.viewer, principal.scopes
+        viewer, scopes, assertion = principal.viewer, principal.scopes, _actor_assertion(principal)
     else:
-        viewer, scopes = _viewer(), _scopes()
+        viewer, scopes, assertion = _viewer(), _scopes(), ""
 
     qs = q.strip()
     asked_at = time.time()
     started = time.monotonic()
     answer_text, tier, status_str, conf, cites, ask_ref = "", "error", "error", 0.0, [], ""
     try:
-        resp = await core_client.ask(q, scopes=scopes, viewer=viewer)
+        resp = await core_client.ask(q, scopes=scopes, viewer=assertion or viewer)
         answer_text, tier, conf = resp.answer, resp.tier, resp.confidence
         status_str = _STATUS_STR.get(resp.status, "unspecified")
         ask_ref = resp.ask_ref  # opaque deliberation handle; "" unless escalated (ADR-15)

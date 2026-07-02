@@ -157,6 +157,11 @@ def verify(username: str, password: str) -> Principal | None:
         groups=[],
         is_groot=bool(is_groot),
         display=username,
+        # A local account resolves kernel-side via the SAME identity_link path as
+        # SSO (`Swarm.Identity.seed_superadmin`/migration): provider "local",
+        # subject = the username (ADR-16 D9).
+        sub=username,
+        provider="local",
     )
 
 

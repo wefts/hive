@@ -51,12 +51,16 @@ async def kb_status() -> core_pb2.StatusResponse:
         return await stub.KbStatus(core_pb2.StatusRequest(), timeout=read_timeout_s())
 
 
-async def kb_search(query: str, scopes: list[str], limit: int = 10) -> core_pb2.SearchResponse:
-    """Scope-filtered retrieval over the graph (the ⌘K palette). Fast, no LLM."""
+async def kb_search(
+    query: str, scopes: list[str], limit: int = 10, assertion: str = ""
+) -> core_pb2.SearchResponse:
+    """Scope-filtered retrieval over the graph (the ⌘K palette). Fast, no LLM.
+    `assertion` (ADR-16 D9): a signed actor assertion, verified + DERIVED
+    kernel-side when present (wire `scopes` is then a legacy fallback only)."""
     async with aio.insecure_channel(core_addr()) as channel:
         stub = core_pb2_grpc.CoreStub(channel)
         return await stub.KbSearch(
-            core_pb2.SearchRequest(query=query, scopes=scopes, limit=limit),
+            core_pb2.SearchRequest(query=query, scopes=scopes, limit=limit, assertion=assertion),
             timeout=read_timeout_s(),
         )
 
@@ -113,6 +117,139 @@ async def activity_feed(
         return await stub.ActivityFeed(
             core_pb2.ActivityFeedRequest(
                 cursor=cursor, limit=limit, kinds=kinds or [], scopes=scopes, viewer=viewer
+            ),
+            timeout=read_timeout_s(),
+        )
+
+
+# --- Identity / privacy (workspace ADR-16, step 6b) ------------------------
+# These RPCs are ALWAYS strict (no legacy plaintext fallback): every call takes a
+# signed actor assertion (`web_channel.actor.sign`); the kernel verifies it and
+# derives the effective actor from its own records.
+
+
+async def resolve_actor(assertion: str) -> core_pb2.ResolveActorResponse:
+    """Verify a signed assertion and return the derived {uuid,scopes,caps,login}.
+    Called once at login (the auth self-test / provisioning gate)."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ResolveActor(
+            core_pb2.ResolveActorRequest(assertion=assertion), timeout=read_timeout_s()
+        )
+
+
+async def log_conversation(
+    assertion: str,
+    conversation_id: str = "",
+    title: str = "",
+    role: str = "",
+    body: str = "",
+    ask_ref: str = "",
+) -> core_pb2.LogConversationResponse:
+    """Log one turn (creates the conversation when `conversation_id` is empty;
+    else appends to one the actor owns — NOT_FOUND if it is not theirs)."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.LogConversation(
+            core_pb2.LogConversationRequest(
+                assertion=assertion,
+                conversation_id=conversation_id,
+                title=title,
+                role=role,
+                body=body,
+                ask_ref=ask_ref,
+            ),
+            timeout=read_timeout_s(),
+        )
+
+
+async def list_conversations(assertion: str) -> core_pb2.ListConversationsResponse:
+    """The actor's own conversations (owner-private), newest first."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ListConversations(
+            core_pb2.ListConversationsRequest(assertion=assertion), timeout=read_timeout_s()
+        )
+
+
+async def get_conversation(
+    assertion: str, conversation_id: str
+) -> core_pb2.GetConversationResponse:
+    """One conversation the actor owns, with its messages; NOT_FOUND otherwise
+    (404-not-403 — not-owned and non-existent are indistinguishable)."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.GetConversation(
+            core_pb2.GetConversationRequest(assertion=assertion, conversation_id=conversation_id),
+            timeout=read_timeout_s(),
+        )
+
+
+async def admin_read_conversation(
+    assertion: str, conversation_id: str, reason: str
+) -> core_pb2.GetConversationResponse:
+    """Break-glass: a superadmin reads another user's conversation by impersonating
+    the owner through the same predicate, audited BEFORE return (ADR-16 D6).
+    `reason` is required — an empty reason is a bad request, not an unlogged read."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.AdminReadConversation(
+            core_pb2.AdminReadConversationRequest(
+                assertion=assertion, conversation_id=conversation_id, reason=reason
+            ),
+            timeout=read_timeout_s(),
+        )
+
+
+async def manage_access(
+    assertion: str,
+    op: core_pb2.AccessOp,
+    target_user_id: str = "",
+    role: str = "",
+    group_id: str = "",
+    scopes: list[str] | None = None,
+) -> core_pb2.AdminActionResponse:
+    """Grant/revoke a role or group, or set a group's scopes (ADR-16 D10) —
+    capability-gated + audited kernel-side. `op` is a `core_pb2.AccessOp` value
+    (GRANT_ROLE/REVOKE_ROLE/GRANT_GROUP/REVOKE_GROUP/SET_GROUP_SCOPES)."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ManageAccess(
+            core_pb2.ManageAccessRequest(
+                assertion=assertion,
+                op=op,
+                target_user_id=target_user_id,
+                role=role,
+                group_id=group_id,
+                scopes=scopes or [],
+            ),
+            timeout=read_timeout_s(),
+        )
+
+
+async def manage_user(
+    assertion: str,
+    op: core_pb2.UserOp,
+    target_user_id: str = "",
+    login: str = "",
+    first_name: str = "",
+    last_name: str = "",
+    nickname: str = "",
+) -> core_pb2.AdminActionResponse:
+    """User lifecycle: invite / deactivate / delete (ADR-16 D11) — capability-gated
+    + audited. `op` is a `core_pb2.UserOp` value (INVITE/DEACTIVATE/DELETE).
+    Deactivate/delete kill the login immediately; learned content persists."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ManageUser(
+            core_pb2.ManageUserRequest(
+                assertion=assertion,
+                op=op,
+                target_user_id=target_user_id,
+                login=login,
+                first_name=first_name,
+                last_name=last_name,
+                nickname=nickname,
             ),
             timeout=read_timeout_s(),
         )

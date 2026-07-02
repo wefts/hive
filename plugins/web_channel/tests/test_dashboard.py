@@ -57,7 +57,7 @@ def test_search_renders_hits(monkeypatch) -> None:
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
 
     async def fake_search(
-        query: str, scopes: list[str], limit: int = 10
+        query: str, scopes: list[str], limit: int = 10, assertion: str = ""
     ) -> core_pb2.SearchResponse:
         return core_pb2.SearchResponse(
             hits=[core_pb2.SearchHit(id=1, type="article", key="AllMusic", score=0.9)]
@@ -79,7 +79,7 @@ def test_search_scopes_locked_when_oidc_off(monkeypatch) -> None:
     captured: dict = {}
 
     async def fake_search(
-        query: str, scopes: list[str], limit: int = 10
+        query: str, scopes: list[str], limit: int = 10, assertion: str = ""
     ) -> core_pb2.SearchResponse:
         captured["scopes"] = scopes
         return core_pb2.SearchResponse()
@@ -99,7 +99,7 @@ def test_search_uses_principal_scopes_no_leak(monkeypatch) -> None:
     captured: dict = {}
 
     async def fake_search(
-        query: str, scopes: list[str], limit: int = 10
+        query: str, scopes: list[str], limit: int = 10, assertion: str = ""
     ) -> core_pb2.SearchResponse:
         captured["scopes"] = scopes
         return core_pb2.SearchResponse()

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <header>
+    <h2 class="card-title">Not provisioned <span class="badge status-warn">no access yet</span></h2>
+  </header>
+  <section>
+    <p class="muted">Your account authenticated, but the kernel has no record of it yet.
+      Ask an administrator to invite you.</p>
+    <p><a class="navlink" href="/login">Back to sign in</a></p>
+  </section>
+</article>
+{% endblock %}
