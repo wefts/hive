@@ -2,6 +2,14 @@
 secrets.env
 *.local
 
+# staging.env carries real (non-secret) intranet facts — a hostname both the
+# browser and a container must resolve identically (KEYCLOAK_PUBLIC_URL etc.,
+# docker-compose.yml). Not a credential, but intranet-specific, so it's
+# gitignored like secrets.env rather than committed like the other stage
+# envs; env/staging.env.example is the committed template. base/test/prod
+# stay committed — they carry no such facts today.
+env/staging.env
+
 # Local/private runtime state.
 data/*
 !data/.gitkeep

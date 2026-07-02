@@ -188,13 +188,13 @@ services:
       # Browser-reachable issuer (same URL the browser and this container use, so the
       # token `iss` is consistent). No safe generic default exists (it must be a real,
       # externally-resolvable hostname for the split-horizon trick below to work) — set
-      # KEYCLOAK_PUBLIC_URL in secrets.env (private, gitignored; not a credential, but the
-      # one config layer that never gets committed). Swap to the org's real SSO realm via
-      # the same var + KEYCLOAK_REALM.
-      OIDC_ISSUER: ${KEYCLOAK_PUBLIC_URL:?set in secrets.env, e.g. http://<your-host>:8081}/realms/${KEYCLOAK_REALM:-swarm-local}
+      # KEYCLOAK_PUBLIC_URL in env/staging.env (gitignored; not a credential, but
+      # intranet-specific, so it never gets committed). Swap to the org's real SSO
+      # realm via the same var + KEYCLOAK_REALM.
+      OIDC_ISSUER: ${KEYCLOAK_PUBLIC_URL:?set in env/staging.env, e.g. http://<your-host>:8081}/realms/${KEYCLOAK_REALM:-swarm-local}
       OIDC_CLIENT_ID: ${WEB_CHANNEL_OIDC_CLIENT_ID:-web_channel}
       OIDC_CLIENT_SECRET: ${WEB_CHANNEL_OIDC_SECRET:-web-channel-local-dev-secret-CHANGE-IN-PROD}
-      WEB_CHANNEL_BASE_URL: ${WEB_CHANNEL_PUBLIC_URL:?set in secrets.env, e.g. http://<your-host>:8080}
+      WEB_CHANNEL_BASE_URL: ${WEB_CHANNEL_PUBLIC_URL:?set in env/staging.env, e.g. http://<your-host>:8080}
       # No committed signing key: empty ⇒ the app mints a random ephemeral key
       # (sessions reset on restart). Set WEB_CHANNEL_SESSION_SECRET (secrets.env) to persist.
       SESSION_SECRET: ${WEB_CHANNEL_SESSION_SECRET:-}
@@ -215,11 +215,11 @@ services:
     extra_hosts:
       # Reach the host-published Keycloak port at the same hostname the browser uses,
       # so the OIDC issuer is identical server-side and browser-side (dev split-horizon).
-      # Same var as KEYCLOAK_PUBLIC_URL's host — set in secrets.env. (Verified: Docker
+      # Same var as KEYCLOAK_PUBLIC_URL's host — set in env/staging.env. (Verified: Docker
       # will NOT reliably let this be "localhost" — the container's own baked-in
       # 127.0.0.1 localhost entry wins over an extra_hosts override, so that specific
       # value silently fails the split-horizon trick; use a real, distinct hostname.)
-      - "${KEYCLOAK_PUBLIC_HOST:?set in secrets.env, e.g. your-host.example}:host-gateway"
+      - "${KEYCLOAK_PUBLIC_HOST:?set in env/staging.env, e.g. your-host.example}:host-gateway"
     ports:
       - "${WEB_CHANNEL_PORT:-8080}:8080"
     volumes:
@@ -237,7 +237,8 @@ services:
   # secrets.env in prod). The realm export is a .json.tpl (hive-publish-readiness-audit):
   # its redirect-URI host is a placeholder, sed-substituted from KEYCLOAK_PUBLIC_HOST at
   # container start (no envsubst in this DHI image — verified sed+sh are present) so the
-  # real hostname lives only in secrets.env, never in a committed file. KEYCLOAK_PUBLIC_HOST
+  # real hostname lives only in the gitignored env/staging.env, never in a committed
+  # file. KEYCLOAK_PUBLIC_HOST
   # is passed via `environment:` and read as a shell var ($$-escaped from Compose's own
   # interpolation), NOT spliced into the command string at compose-parse time — council
   # (codex) caught that the earlier draft interpolated it directly into the shell command
@@ -257,7 +258,7 @@ services:
         /tmp/realm-swarm-local.json.tpl > /opt/keycloak/data/import/realm.json &&
         exec /opt/keycloak/bin/kc.sh start-dev --import-realm
     environment:
-      KEYCLOAK_PUBLIC_HOST: ${KEYCLOAK_PUBLIC_HOST:?set in secrets.env}
+      KEYCLOAK_PUBLIC_HOST: ${KEYCLOAK_PUBLIC_HOST:?set in env/staging.env}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
       KC_HTTP_ENABLED: "true"

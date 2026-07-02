@@ -13,7 +13,9 @@ and current state live in `../docs/`; kernel implementation rules live in
   `Taskfile.yml` (taskfile-pillar — the canonical `task check`/`staging:up`/
   `deploy`/`db:backup`/`db:rename` flows; see Verification below).
 - Layered, non-secret env config (ADR-0015): `env/base.env` + `env/<SWARM_ENV>.env`
-  (`test`/`staging`/`prod`), all committed.
+  (`test`/`staging`/`prod`), committed — EXCEPT `env/staging.env`, which is
+  gitignored (`env/staging.env.example` is its committed template): it carries
+  real intranet facts (e.g. `KEYCLOAK_PUBLIC_URL`), not just generic config.
 - Secret key templates: `secrets.env.example`.
 - Committed plugin code under `plugins/` (public — see hive-publish-readiness-audit;
   private only insofar as it may be experimental or not-yet-generalized, per
@@ -32,7 +34,7 @@ parameterized to config, never hardcoded.
 - `README.md` — local Hive summary.
 - `Taskfile.yml` — canonical operational flows (`task --list`).
 - `docker-compose.yml` — current instance topology.
-- `env/base.env`, `env/staging.env` — non-secret, per-stage config (ADR-0015).
+- `env/base.env`, `env/staging.env.example` — non-secret, per-stage config (ADR-0015).
 - `secrets.env.example` — secret key names only, values empty.
 - `../docs/architecture/ports.md` — plugin kinds, manifests, naming rule.
 - `../docs/decisions/0011-hive-plugin-ownership.md` — why early plugins live here.
@@ -44,9 +46,11 @@ parameterized to config, never hardcoded.
 - Never write real secrets into committed files.
 - Never edit or fabricate `secrets.env` through the agent.
 - Never hand-edit `data/`; it is runtime/private state.
-- `env/*.env` are committed and non-secret (ADR-0015) — real credentials stay in
-  `secrets.env`; a machine-specific path (e.g. `OLLAMA_MODELS_DIR`) or a sandbox
-  `SWARM_DB_NAME` override is a real shell export, never committed to `env/`.
+- `env/*.env` are committed and non-secret (ADR-0015) — EXCEPT `env/staging.env`
+  (gitignored: real intranet facts, not a credential — see `.gitignore`). Real
+  credentials stay in `secrets.env`; a machine-specific path (e.g.
+  `OLLAMA_MODELS_DIR`) or a sandbox `SWARM_DB_NAME` override is a real shell
+  export, never committed to `env/`.
 - Plugin code may live here while it is private or experimental.
 - Mature reusable plugins may move to standalone repos later; the kernel
   contract must not change when they do.
