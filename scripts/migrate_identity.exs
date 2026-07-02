@@ -76,7 +76,13 @@ for %{"username" => login, "is_groot" => is_groot} <- local_users, login != "gro
 end
 
 # --- optional: known SSO users, pre-linked so their FIRST post-cutover login
-# resolves (see the header note on jit-provision-rpc). -----------------------
+# resolves (see the header note on jit-provision-rpc). `login != "groot"`:
+# `app_user.login` is GLOBALLY unique (not just per-(provider,subject)) — a
+# Keycloak account also named "groot" would collide with the local vanity
+# superadmin seeded above (real incident, 2026-07-02: this crashed a live run
+# mid-loop; alice/bob/carol before it in iteration order were already
+# committed since each upsert is its own transaction, so no partial-user
+# damage — but re-running blind on the SAME list would hit the same crash).
 sso_users_path = System.argv() |> Enum.at(1)
 
 sso_users =
@@ -85,7 +91,7 @@ sso_users =
     _ -> []
   end
 
-for %{"login" => login, "sub" => sub} = entry <- sso_users do
+for %{"login" => login, "sub" => sub} = entry <- sso_users, login != "groot" do
   {:ok, u} = Identity.upsert_from_claims(%{provider: "keycloak", subject: sub, login: login})
 
   if Map.get(entry, "is_groot", false) do
