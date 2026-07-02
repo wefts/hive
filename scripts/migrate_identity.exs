@@ -26,6 +26,18 @@
 #   SWARM_ENV=staging mise exec -- mix run --no-start \
 #     ../../hive/scripts/migrate_identity.exs /tmp/local_users.json
 #
+# ⚠️ REAL INCIDENT (2026-07-02): `login != "groot"` guards this script from CRASHING
+# on a collision, but a skipped SSO entry can be a REAL, actually-used account
+# hiding behind the same login as a different provider's identity — silently
+# skipping it left the genuine Keycloak `groot` unprovisioned, and it locked
+# out the moment :strict shipped (nobody noticed until the operator asked
+# "is groot in Keycloak or local?" after the cutover). Before skipping ANY
+# collision here, check by hand which identity is the one people actually log
+# in with (`docker exec <web_channel> python -c "...localusers.list_users()"`
+# tells you the LOCAL side) and resolve the conflict explicitly (rename one,
+# delete the unused one, or use a different login) — never let a skip ride
+# quietly into a cutover.
+#
 # Verify (the no-lockout check): after running, every migrated login must still
 # resolve via ResolveActor (the channel signs {sub: login, provider: "local"| \
 # "keycloak"} and gets back CALL_OK, not CALL_UNAUTHENTICATED).
