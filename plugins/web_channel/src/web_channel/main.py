@@ -493,6 +493,77 @@ async def activity(request: Request, cursor: str = "") -> HTMLResponse:
     )
 
 
+@app.get("/history", response_class=HTMLResponse)
+async def history(request: Request) -> Response:
+    """Self-serve kernel-owned conversation list (ADR-16 D9) — List over the actor's
+    OWN conversations, the kernel-authoritative record (the same one the admin
+    break-glass path reads). The richer per-turn trace (tier/confidence/citations)
+    still lives in the local convlog (home's Recent) — the kernel's Conversation
+    model doesn't carry it; this view is honest about that, not a replacement."""
+    principal = _current_principal(request)
+    if principal is None and (auth.oidc_enabled() or localusers.has_any()):
+        return RedirectResponse("/login")
+    assertion = _actor_assertion(principal) if principal else ""
+    conversations: list[dict] | None = None
+    if assertion:
+        try:
+            resp = await core_client.list_conversations(assertion)
+            if resp.status == core_pb2.CALL_OK:
+                conversations = [
+                    {"id": c.id, "title": c.title, "created_at": c.created_at}
+                    for c in resp.conversations
+                ]
+        except Exception:
+            logger.exception("ListConversations failed")
+    return templates.TemplateResponse(
+        request,
+        "history.html",
+        {
+            "authed": True,
+            "principal": principal.to_session() if principal else None,
+            "conversations": conversations,
+            "signed": bool(assertion),
+        },
+    )
+
+
+@app.get("/history/{conv_id}", response_class=HTMLResponse)
+async def history_thread(request: Request, conv_id: str) -> Response:
+    """One kernel-owned conversation's raw turns (owner-gated; 404-not-403)."""
+    principal = _current_principal(request)
+    if principal is None and (auth.oidc_enabled() or localusers.has_any()):
+        return RedirectResponse("/login")
+    assertion = _actor_assertion(principal) if principal else ""
+    conversation: dict | None = None
+    messages: list[dict] | None = None
+    if assertion:
+        try:
+            resp = await core_client.get_conversation(assertion, conv_id)
+            if resp.status == core_pb2.CALL_OK:
+                conversation = {"title": resp.conversation.title}
+                messages = [
+                    {
+                        "role": m.role,
+                        "body": m.body,
+                        "ask_ref": m.ask_ref,
+                        "created_at": m.created_at,
+                    }
+                    for m in resp.messages
+                ]
+        except Exception:
+            logger.exception("GetConversation failed")
+    return templates.TemplateResponse(
+        request,
+        "history_thread.html",
+        {
+            "authed": True,
+            "principal": principal.to_session() if principal else None,
+            "conversation": conversation,
+            "messages": messages,
+        },
+    )
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request) -> Response:
     """The observability page: full stats + activity + the connections graph.
@@ -795,6 +866,29 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
         )
     except Exception:
         logger.exception("convlog write failed")
+
+    # Dual-write to the kernel-owned, owner-enforced conversation store (ADR-16
+    # D9/step 6b) — best-effort, must never break /ask. The LOCAL convlog above
+    # remains the primary read path (it carries the answer trace — tier/confidence/
+    # citations — the kernel's Conversation model doesn't); this is what makes the
+    # per-user privacy invariant load-bearing end-to-end rather than dormant. Only
+    # possible once a signed identity exists (assertion non-empty).
+    if assertion:
+        try:
+            title, _ = _split_question(qs)
+            user_msg = await core_client.log_conversation(
+                assertion, title=title, role="user", body=qs
+            )
+            if user_msg.status == core_pb2.CALL_OK:
+                await core_client.log_conversation(
+                    assertion,
+                    conversation_id=user_msg.conversation_id,
+                    role="assistant",
+                    body=answer_text,
+                    ask_ref=ask_ref,
+                )
+        except Exception:
+            logger.exception("kernel LogConversation failed (convlog remains the record)")
 
     turn = {
         "question": qs,

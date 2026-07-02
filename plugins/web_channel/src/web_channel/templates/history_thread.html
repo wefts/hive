@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <header>
+    <h2 class="card-title">{{ conversation.title if conversation else 'Conversation' }}</h2>
+  </header>
+  <section>
+    {% if messages is none %}
+      <p class="muted">Not found — not yours, or it doesn't exist (404-not-403: we don't distinguish).</p>
+    {% else %}
+      <ul class="recent">
+        {% for m in messages %}
+          <li>
+            <span class="badge">{{ m.role }}</span>
+            <span class="meta">{{ m.created_at }}</span>
+            <p class="answer">{{ m.body }}</p>
+            {% if m.ask_ref %}
+              <a class="navlink" href="/deliberation/{{ m.ask_ref }}">see how it decided</a>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    <p><a class="navlink" href="/history">back to history</a></p>
+  </section>
+</article>
+{% endblock %}

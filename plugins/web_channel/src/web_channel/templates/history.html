@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <header>
+    <h2 class="card-title">Conversation history <span class="badge status-warn">kernel-owned</span></h2>
+  </header>
+  <section>
+    <p class="muted">The kernel's own owner-enforced record of your turns (ADR-16). Your recent answer
+      trace on the home page is a separate, richer local log — this is the authoritative one.</p>
+    {% if not signed %}
+      <p class="muted">Not available yet — your session has no verified kernel identity
+        (actor signing isn't configured, or you signed in before it was).</p>
+    {% elif conversations is none %}
+      <p class="muted"><span class="badge status-warn">unavailable</span>
+        Could not reach the kernel right now.</p>
+    {% elif conversations %}
+      <ul class="recent">
+        {% for c in conversations %}
+          <li><a class="recent-link" href="/history/{{ c.id }}">{{ c.title or '(untitled)' }}</a>
+            <span class="meta">{{ c.created_at }}</span></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No kernel-logged conversations yet — ask something first.</p>
+    {% endif %}
+  </section>
+</article>
+{% endblock %}
