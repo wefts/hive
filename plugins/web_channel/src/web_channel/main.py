@@ -717,11 +717,47 @@ async def auth_callback(request: Request):
         logger.warning("OIDC callback returned no usable identity claims")
         return RedirectResponse("/?auth=failed")
     principal = auth.principal_from_claims(claims)
+    # JIT-provision / re-sync BEFORE resolve (ADR-16 D3): a NEW SSO subject gets a
+    # kernel identity on first login; an existing one gets their groups re-synced
+    # (an IdP group removal must propagate — council gemini). Best-effort: the
+    # resolve gate right after remains the access decision.
+    await _provision_kernel_identity(claims, principal)
     principal, blocked = await _resolve_and_gate(request, principal)
     if blocked is not None:
         return blocked
     request.session["user"] = principal.to_session()
     return RedirectResponse("/")
+
+
+async def _provision_kernel_identity(claims: dict, principal: auth.Principal) -> None:
+    """Sign a provision token from the verified OIDC claims and call
+    `ProvisionActor`. No-op when signing isn't configured. A login collision
+    (CALL_BAD_REQUEST) or a disabled account (CALL_UNAUTHENTICATED) is logged and
+    left to the resolve gate to render honestly — never a 500 at login."""
+    token = actor.sign_provision(
+        sub=principal.sub,
+        provider=principal.provider,
+        login=principal.viewer,
+        groups=principal.groups,
+        first_name=str(claims.get("given_name") or ""),
+        last_name=str(claims.get("family_name") or ""),
+        nickname=str(claims.get("nickname") or ""),
+        email=str(claims.get("email") or ""),
+    )
+    if not token:
+        return
+    try:
+        resp = await core_client.provision_actor(token)
+    except Exception:
+        logger.warning("ProvisionActor unreachable — proceeding to the resolve gate")
+        return
+    if resp.status == core_pb2.CALL_BAD_REQUEST:
+        logger.warning(
+            "ProvisionActor: login collision for sub=%s (admin must link/rename)",
+            principal.sub,
+        )
+    elif resp.status == core_pb2.CALL_UNAUTHENTICATED:
+        logger.info("ProvisionActor: refused (disabled account or signing mismatch)")
 
 
 @app.get("/logout")

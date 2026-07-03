@@ -20,6 +20,9 @@ import os
 import time
 
 AUDIENCE = "swarm.actor.v1"
+# ADR-16 D3: the JIT-provision token. Distinct audience so an actor assertion
+# cannot provision and a provision token cannot act (the kernel binds both ways).
+PROVISION_AUDIENCE = "swarm.provision.v1"
 _HEADER = {"alg": "HS256", "typ": "JWT"}
 _MAX_EXP_S = 300  # council (codex+llama3.3:70b) accepted-MVP posture: <= 5 min,
 # bounding the replay/logout-lag window (no session-revocation mechanism yet).
@@ -47,18 +50,55 @@ def sign(sub: str, provider: str, sid: str) -> str | None:
     possible (no secret configured, or an incomplete identity) — callers fall
     back to the legacy dual-accept plaintext viewer (`Auth.legacy_context/2`
     on the kernel side tolerates this during the migration window)."""
+    if not sub or not provider:
+        return None
+    return _sign_payload(
+        {
+            "aud": AUDIENCE,
+            "sub": sub,
+            "provider": provider,
+            "sid": sid,
+        }
+    )
+
+
+def sign_provision(
+    sub: str,
+    provider: str,
+    login: str,
+    groups: list[str],
+    first_name: str = "",
+    last_name: str = "",
+    nickname: str = "",
+    email: str = "",
+) -> str | None:
+    """Sign a JIT-provision token (ADR-16 D3): the ENTIRE claim set rides inside
+    the signed payload — the kernel refuses unsigned authority (groups drive scope
+    derivation, so they must be bound to the signature; council codex+gemini).
+    None when signing isn't possible or the identity is incomplete."""
+    if not sub or not provider or not login:
+        return None
+    return _sign_payload(
+        {
+            "aud": PROVISION_AUDIENCE,
+            "sub": sub,
+            "provider": provider,
+            "login": login,
+            "first_name": first_name,
+            "last_name": last_name,
+            "nickname": nickname,
+            "email": email,
+            "groups": [g for g in groups if g],
+        }
+    )
+
+
+def _sign_payload(payload: dict) -> str | None:
     secret = _secret()
-    if not secret or not sub or not provider:
+    if not secret:
         return None
     now = int(time.time())
-    payload = {
-        "aud": AUDIENCE,
-        "sub": sub,
-        "provider": provider,
-        "sid": sid,
-        "iat": now,
-        "exp": now + _exp_s(),
-    }
+    payload = {**payload, "iat": now, "exp": now + _exp_s()}
     signing_input = (
         f"{_b64(json.dumps(_HEADER, separators=(',', ':')).encode())}."
         f"{_b64(json.dumps(payload, separators=(',', ':')).encode())}"

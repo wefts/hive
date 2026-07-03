@@ -40,6 +40,11 @@ service Core {
   // Verify a signed assertion and return the derived actor. The channel calls this
   // once at login to learn its {uuid,scopes,caps}; also the auth self-test.
   rpc ResolveActor(ResolveActorRequest) returns (ResolveActorResponse);
+  // JIT-provision a NEW (or re-syncing) SSO subject (ADR-16 D3). The ENTIRE claim
+  // set (login/names/email/groups) rides INSIDE the signed provision token
+  // (aud "swarm.provision.v1") — nothing authority-bearing is a plain request
+  // field (council: codex+gemini — unsigned groups would be self-asserted scopes).
+  rpc ProvisionActor(ProvisionActorRequest) returns (ResolveActorResponse);
   // Log one conversation turn (creates the conversation if conversation_id is empty;
   // otherwise appends to one the actor owns). Owner = the verified subject.
   rpc LogConversation(LogConversationRequest) returns (LogConversationResponse);
@@ -74,6 +79,15 @@ enum CallStatus {
 
 message ResolveActorRequest {
   string assertion = 1; // signed HS256 actor assertion (Swarm.Actor wire contract)
+}
+
+message ProvisionActorRequest {
+  // A signed HS256 provision token: aud "swarm.provision.v1", payload
+  // {sub, provider, login, first_name?, last_name?, nickname?, email?,
+  //  groups[], iat, exp<=300s}. Same shared secret as the actor assertion;
+  // the distinct audience prevents cross-use (an actor assertion cannot
+  // provision, a provision token cannot act).
+  string provision = 1;
 }
 
 message ResolveActorResponse {

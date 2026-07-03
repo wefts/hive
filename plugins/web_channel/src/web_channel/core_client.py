@@ -138,6 +138,19 @@ async def resolve_actor(assertion: str) -> core_pb2.ResolveActorResponse:
         )
 
 
+async def provision_actor(provision: str) -> core_pb2.ResolveActorResponse:
+    """JIT-provision (or re-sync) an SSO subject (ADR-16 D3): the whole claim set
+    rides inside the signed provision token (`actor.sign_provision`). Called on
+    every SSO login BEFORE resolve — creates the account for a new subject and
+    re-syncs group membership for an existing one (an IdP group removal must
+    propagate). The kernel guards resurrect/collision server-side."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ProvisionActor(
+            core_pb2.ProvisionActorRequest(provision=provision), timeout=read_timeout_s()
+        )
+
+
 async def log_conversation(
     assertion: str,
     conversation_id: str = "",

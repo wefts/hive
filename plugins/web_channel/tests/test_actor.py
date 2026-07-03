@@ -68,3 +68,35 @@ def test_sign_exp_is_clamped_to_5_minutes(monkeypatch) -> None:
     assert tok is not None
     payload = json.loads(_b64url_decode(tok.split(".")[1]))
     assert payload["exp"] - payload["iat"] <= 300
+
+
+# --- sign_provision (ADR-16 D3 — JIT-provision token) ------------------------
+
+
+def test_sign_provision_binds_the_whole_claim_set(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    tok = actor.sign_provision(
+        sub="sub-new",
+        provider="keycloak",
+        login="newbie",
+        groups=["staff", ""],
+        first_name="New",
+        email="new@example.test",
+    )
+    assert tok is not None
+    payload = json.loads(_b64url_decode(tok.split(".")[1]))
+    assert payload["aud"] == actor.PROVISION_AUDIENCE
+    assert payload["sub"] == "sub-new"
+    assert payload["provider"] == "keycloak"
+    assert payload["login"] == "newbie"
+    assert payload["groups"] == ["staff"]  # blank entries dropped
+    assert payload["email"] == "new@example.test"
+    assert payload["exp"] - payload["iat"] <= 300
+
+
+def test_sign_provision_fails_closed_on_incomplete_identity(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    assert actor.sign_provision(sub="", provider="keycloak", login="x", groups=[]) is None
+    assert actor.sign_provision(sub="s", provider="keycloak", login="", groups=[]) is None
+    monkeypatch.delenv("SWARM_ACTOR_SECRET", raising=False)
+    assert actor.sign_provision(sub="s", provider="keycloak", login="x", groups=[]) is None

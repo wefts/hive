@@ -138,3 +138,60 @@ def test_complete_session_still_resolves() -> None:
     p = web._current_principal(_req(good))
     assert p is not None and p.sub == "sub-alice"
     assert "user" in good  # untouched
+
+
+# --- JIT provisioning at SSO login (ADR-16 D3) --------------------------------
+
+
+def test_provision_kernel_identity_signs_and_calls_the_rpc(monkeypatch) -> None:
+    import anyio
+
+    from web_channel import core_client
+    from web_channel._gen import core_pb2
+
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    captured: dict = {}
+
+    async def fake_provision(token: str):
+        captured["token"] = token
+        return core_pb2.ResolveActorResponse(status=core_pb2.CALL_OK)
+
+    monkeypatch.setattr(core_client, "provision_actor", fake_provision)
+    principal = auth.Principal(
+        viewer="carol",
+        scopes=["group"],
+        groups=["staff"],
+        display="carol",
+        sub="sub-carol",
+        provider="keycloak",
+    )
+    claims = {"given_name": "Carol", "email": "carol@example.test"}
+    anyio.run(web._provision_kernel_identity, claims, principal)
+
+    import base64
+    import json as _json
+
+    seg = captured["token"].split(".")[1]
+    payload = _json.loads(base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4)))
+    assert payload["aud"] == "swarm.provision.v1"
+    assert payload["sub"] == "sub-carol"
+    assert payload["login"] == "carol"
+    assert payload["groups"] == ["staff"]
+    assert payload["first_name"] == "Carol"
+
+
+def test_provision_kernel_identity_is_noop_without_secret(monkeypatch) -> None:
+    import anyio
+
+    from web_channel import core_client
+
+    monkeypatch.delenv("SWARM_ACTOR_SECRET", raising=False)
+
+    async def must_not_call(token: str):
+        raise AssertionError("ProvisionActor must not fire without a signing secret")
+
+    monkeypatch.setattr(core_client, "provision_actor", must_not_call)
+    principal = auth.Principal(
+        viewer="carol", scopes=[], groups=[], display="carol", sub="s", provider="keycloak"
+    )
+    anyio.run(web._provision_kernel_identity, {}, principal)
