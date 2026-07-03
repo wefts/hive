@@ -12,10 +12,11 @@ and current state live in `../docs/`; kernel implementation rules live in
 - Instance orchestration: `docker-compose.yml` (+ `docker-compose.offline.yml`),
   `Taskfile.yml` (taskfile-pillar — the canonical `task check`/`staging:up`/
   `deploy`/`db:backup`/`db:rename` flows; see Verification below).
-- Layered, non-secret env config (ADR-0015): `env/base.env` + `env/<SWARM_ENV>.env`
-  (`test`/`staging`/`prod`), committed — EXCEPT `env/staging.env`, which is
-  gitignored (`env/staging.env.example` is its committed template): it carries
-  real intranet facts (e.g. `KEYCLOAK_PUBLIC_URL`), not just generic config.
+- Layered, non-secret env config (ADR-0015): `env/base.env` (committed,
+  stage-independent) + `env/<SWARM_ENV>.env` (`test`/`staging`/`prod`) — the
+  per-stage files are ALL gitignored (`env/environment.env.example` is the single
+  committed template): they carry real instance facts (e.g. `KEYCLOAK_PUBLIC_URL`),
+  not just generic config.
 - Secret key templates: `secrets.env.example`.
 - Committed plugin code under `plugins/` (public — see hive-publish-readiness-audit;
   private only insofar as it may be experimental or not-yet-generalized, per
@@ -34,7 +35,7 @@ parameterized to config, never hardcoded.
 - `README.md` — local Hive summary.
 - `Taskfile.yml` — canonical operational flows (`task --list`).
 - `docker-compose.yml` — current instance topology.
-- `env/base.env`, `env/staging.env.example` — non-secret, per-stage config (ADR-0015).
+- `env/base.env`, `env/environment.env.example` — non-secret, per-stage config (ADR-0015).
 - `secrets.env.example` — secret key names only, values empty.
 - `../docs/architecture/ports.md` — plugin kinds, manifests, naming rule.
 - `../docs/decisions/0011-hive-plugin-ownership.md` — why early plugins live here.
