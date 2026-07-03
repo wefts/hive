@@ -195,3 +195,43 @@ def test_provision_kernel_identity_is_noop_without_secret(monkeypatch) -> None:
         viewer="carol", scopes=[], groups=[], display="carol", sub="s", provider="keycloak"
     )
     anyio.run(web._provision_kernel_identity, {}, principal)
+
+
+# --- RP-initiated logout (the Keycloak SSO session must die too) ---------------
+
+
+def test_logout_redirects_to_keycloak_end_session(monkeypatch) -> None:
+    """Channel-only logout left the Keycloak SSO cookie alive: the next /login
+    silently re-authenticated the SAME user (observed live: every callback carried
+    the same session_state — bob could never log in after alice). /logout must
+    end the IdP session too."""
+    monkeypatch.setenv("OIDC_ENABLED", "true")
+    monkeypatch.setenv("OIDC_ISSUER", "http://kc.test:8081/realms/swarm-local")
+    monkeypatch.setenv("OIDC_CLIENT_ID", "swarm-web")
+
+    with TestClient(web.app) as c:
+        # seed a session carrying an id_token (as the OIDC callback now stores)
+        c.get("/healthz")  # boot
+        # simulate the session by hitting logout with a crafted session cookie is
+        # awkward; instead call the URL builder directly + the route without session
+        url = web._end_session_url({"id_token": "idtok-123"}, "http://app.test")
+        assert url.startswith(
+            "http://kc.test:8081/realms/swarm-local/protocol/openid-connect/logout?"
+        )
+        assert "id_token_hint=idtok-123" in url
+        assert "post_logout_redirect_uri=http%3A%2F%2Fapp.test" in url
+        assert "client_id=swarm-web" in url
+
+        r = c.get("/logout", follow_redirects=False)
+        # no session/id_token → still redirects to Keycloak (client_id flow) so the
+        # SSO cookie dies even for a stale channel session
+        assert r.status_code == 307
+        assert "/protocol/openid-connect/logout" in r.headers["location"]
+
+
+def test_logout_stays_local_when_oidc_off(monkeypatch) -> None:
+    monkeypatch.setenv("OIDC_ENABLED", "false")
+    with TestClient(web.app) as c:
+        r = c.get("/logout", follow_redirects=False)
+        assert r.status_code == 307
+        assert r.headers["location"] == "/"

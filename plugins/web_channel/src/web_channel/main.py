@@ -726,6 +726,9 @@ async def auth_callback(request: Request):
     if blocked is not None:
         return blocked
     request.session["user"] = principal.to_session()
+    # Kept for RP-initiated logout (id_token_hint) — without ending the Keycloak
+    # SSO session, the next /login silently re-authenticates the SAME user.
+    request.session["id_token"] = token.get("id_token") or ""
     return RedirectResponse("/")
 
 
@@ -760,9 +763,34 @@ async def _provision_kernel_identity(claims: dict, principal: auth.Principal) ->
         logger.info("ProvisionActor: refused (disabled account or signing mismatch)")
 
 
+def _end_session_url(session: dict, base_url: str) -> str:
+    """The Keycloak RP-initiated-logout URL: ends the IdP's SSO session, not just
+    ours. With an `id_token_hint` the logout is silent; without one Keycloak may
+    show a confirm screen (still correct — the SSO cookie dies either way).
+    Observed live before this fix: every /auth/callback carried the SAME
+    session_state, so 'logging in as bob' silently returned alice."""
+    issuer = os.environ.get("OIDC_ISSUER", "").rstrip("/")
+    from urllib.parse import urlencode
+
+    params = {
+        "post_logout_redirect_uri": base_url,
+        "client_id": os.environ.get("OIDC_CLIENT_ID", ""),
+    }
+    id_token = session.get("id_token") or ""
+    if id_token:
+        params["id_token_hint"] = id_token
+    return f"{issuer}/protocol/openid-connect/logout?{urlencode(params)}"
+
+
 @app.get("/logout")
 async def logout(request: Request):
+    session_snapshot = dict(request.session)
     request.session.pop("user", None)
+    request.session.pop("id_token", None)
+    if auth.oidc_enabled():
+        # End the Keycloak SSO session too — else the next /login silently
+        # re-authenticates the same IdP user regardless of intent.
+        return RedirectResponse(_end_session_url(session_snapshot, _base_url(request)))
     return RedirectResponse("/")
 
 

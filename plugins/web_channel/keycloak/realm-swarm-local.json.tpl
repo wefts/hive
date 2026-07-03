@@ -31,6 +31,9 @@
         "http://__KEYCLOAK_PUBLIC_HOST__:8080/*"
       ],
       "webOrigins": ["+"],
+      "attributes": {
+        "post.logout.redirect.uris": "+"
+      },
       "fullScopeAllowed": true,
       "protocolMappers": [
         {
