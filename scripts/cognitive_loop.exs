@@ -8,11 +8,13 @@
 # with TOP-K CONCENTRATION as the primary signal (codex). Aggregate metrics only —
 # never prints content.
 #
-#   MODE=shakedown|runaway|real CYCLES=2 SWARM_DB_NAME=swarm_shadow \
+#   LOOP_MODE=shakedown|runaway|real CYCLES=2 SWARM_DB_NAME=swarm_shadow \
 #     SWARM_ML_ADDRESS=<ml-container-ip>:50051 MIX_ENV=dev \
 #     mise exec -- mix run --no-start ../../hive/scripts/cognitive_loop.exs
 #
-# MODE: shakedown = fast deterministic mocks (loop should converge, no breaker);
+# LOOP_MODE (NOT `MODE` — that collides with an ambient MODE=cli in this shell;
+# a bare MODE=real is silently IGNORED and you get mocks — bit us 2026-07-03):
+#       shakedown = fast deterministic mocks (loop should converge, no breaker);
 #       runaway   = mocks that funnel every claim into one super-node (breaker MUST fire + roll back);
 #       real      = the live local model (operator; ~120 s/source).
 
