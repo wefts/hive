@@ -13,6 +13,15 @@ from web_channel._gen import core_pb2
 client = TestClient(web.app)
 
 
+def _p1_csrf() -> str:
+    import re as _re
+
+    r = client.get("/admin")
+    m = _re.search(r'name="csrf" value="([^"]+)"', r.text)
+    assert m, "admin page must embed the csrf token"
+    return m.group(1)
+
+
 def _capture_ask(captured: dict):
     async def ask(query: str, scopes: list[str], viewer: str) -> core_pb2.AskResponse:
         captured.update(query=query, scopes=scopes, viewer=viewer)
@@ -159,7 +168,12 @@ def test_invite_provisions_for_groot(monkeypatch) -> None:
     monkeypatch.setattr(kc_admin, "invite_user", fake_invite)
     r = client.post(
         "/admin/invite",
-        data={"username": "carol", "password": "TempPass1", "group": "confluence"},
+        data={
+            "csrf": _p1_csrf(),
+            "username": "carol",
+            "password": "TempPass1",
+            "group": "confluence",
+        },
         follow_redirects=False,
     )
     assert r.status_code == 303  # redirect back to /admin
@@ -182,7 +196,12 @@ def test_invite_rejects_group_not_in_scope_map(monkeypatch) -> None:
     monkeypatch.setattr(kc_admin, "invite_user", must_not_invite)
     r = client.post(
         "/admin/invite",
-        data={"username": "x", "password": "y", "group": "admins-of-everything"},
+        data={
+            "csrf": _p1_csrf(),
+            "username": "x",
+            "password": "y",
+            "group": "admins-of-everything",
+        },
         follow_redirects=False,
     )
     assert r.status_code == 400

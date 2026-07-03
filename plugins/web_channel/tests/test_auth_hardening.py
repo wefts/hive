@@ -1,0 +1,140 @@
+"""Auth hardening (board/todo/web-channel-auth-hardening): per-form CSRF tokens on
+the admin POST routes, and stale pre-6b sessions (no sub/provider) forced to
+re-auth instead of silently degrading to anonymous under the kernel's :strict
+mode. The CSRF token is session-bound (synchronizer pattern) and compared
+constant-time; a forged cross-origin POST carries no (or a wrong) token and is
+rejected before any kernel RPC fires."""
+
+from __future__ import annotations
+
+import re
+from typing import Any, cast
+
+from fastapi.testclient import TestClient
+
+from web_channel import auth, core_client
+from web_channel import main as web
+
+client = TestClient(web.app)
+
+
+def _principal(viewer: str = "groot", is_groot: bool = True) -> auth.Principal:
+    return auth.Principal(
+        viewer=viewer,
+        scopes=["public"],
+        groups=[],
+        is_groot=is_groot,
+        display=viewer,
+        sub=viewer,
+        provider="local",
+    )
+
+
+def _as_groot(monkeypatch) -> None:
+    monkeypatch.setattr(web, "_current_principal", lambda request: _principal())
+
+
+def _csrf_token() -> str:
+    """GET /admin as groot and scrape the session-bound token from a form."""
+    r = client.get("/admin")
+    assert r.status_code == 200
+    m = re.search(r'name="csrf" value="([^"]+)"', r.text)
+    assert m, "admin forms must embed the csrf token"
+    return m.group(1)
+
+
+# --- CSRF on the admin POST routes -------------------------------------------
+
+
+def test_admin_post_without_csrf_is_rejected_and_rpc_never_fires(monkeypatch) -> None:
+    _as_groot(monkeypatch)
+
+    async def must_not_call(*a, **kw):
+        raise AssertionError("kernel RPC must not fire on a forged POST")
+
+    monkeypatch.setattr(core_client, "manage_user", must_not_call)
+    monkeypatch.setattr(core_client, "manage_access", must_not_call)
+    monkeypatch.setattr(core_client, "admin_read_conversation", must_not_call)
+
+    # no token at all (the forged cross-origin shape — an attacker page can't read it)
+    for path, data in [
+        ("/admin/kernel/user", {"op": "invite", "login": "x"}),
+        ("/admin/kernel/access", {"op": "grant_role", "role": "admin"}),
+        ("/admin/kernel/read-conversation", {"conversation_id": "c", "reason": "r"}),
+        ("/admin/invite", {"username": "x", "password": "p"}),
+        ("/admin/local-invite", {"username": "x", "password": "p"}),
+    ]:
+        r = client.post(path, data=data)
+        assert r.status_code == 403, path
+
+    # a wrong token is equally rejected
+    r = client.post(
+        "/admin/kernel/user",
+        data={"op": "invite", "login": "x", "csrf": "forged-token"},
+    )
+    assert r.status_code == 403
+
+
+def test_admin_post_with_session_token_passes_the_csrf_gate(monkeypatch) -> None:
+    _as_groot(monkeypatch)
+    token = _csrf_token()
+    called: dict = {}
+
+    async def fake_manage_access(assertion, op, **kw):
+        called["op"] = op
+        from web_channel._gen import core_pb2
+
+        return core_pb2.AdminActionResponse(status=core_pb2.CALL_OK)
+
+    monkeypatch.setattr(core_client, "manage_access", fake_manage_access)
+    r = client.post(
+        "/admin/kernel/access",
+        data={"op": "grant_group", "target_user_id": "u", "group_id": "g", "csrf": token},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "op" in called
+
+
+def test_admin_page_embeds_the_token_in_every_form(monkeypatch) -> None:
+    _as_groot(monkeypatch)
+    r = client.get("/admin")
+    assert r.status_code == 200
+    forms = r.text.count("<form")
+    tokens = r.text.count('name="csrf"')
+    assert forms > 0 and tokens == forms
+
+
+# --- stale pre-6b sessions are forced to re-auth ------------------------------
+
+
+class _Req:
+    """A Request stand-in exposing only `.session` (all _current_principal touches)."""
+
+    def __init__(self, session: dict) -> None:
+        self.session = session
+
+
+def _req(session: dict) -> Any:
+    return cast(Any, _Req(session))
+
+
+def test_session_without_sub_provider_is_cleared_and_forces_reauth() -> None:
+    stale = {"user": {"viewer": "alice", "scopes": ["public"], "groups": []}}
+    assert web._current_principal(_req(stale)) is None
+    assert "user" not in stale  # cleared — the next request lands on /login
+
+
+def test_complete_session_still_resolves() -> None:
+    good = {
+        "user": {
+            "viewer": "alice",
+            "scopes": ["public"],
+            "groups": [],
+            "sub": "sub-alice",
+            "provider": "keycloak",
+        }
+    }
+    p = web._current_principal(_req(good))
+    assert p is not None and p.sub == "sub-alice"
+    assert "user" in good  # untouched

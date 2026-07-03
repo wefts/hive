@@ -56,6 +56,7 @@ def test_sign_never_carries_scopes_or_roles(monkeypatch) -> None:
     # kernel would (incorrectly) trust; this asserts the signer itself never emits any.
     monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
     tok = actor.sign("alice", "local", "sess-1")
+    assert tok is not None
     payload = json.loads(_b64url_decode(tok.split(".")[1]))
     assert set(payload.keys()) == {"aud", "sub", "provider", "sid", "iat", "exp"}
 
@@ -64,5 +65,6 @@ def test_sign_exp_is_clamped_to_5_minutes(monkeypatch) -> None:
     monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
     monkeypatch.setenv("SWARM_ACTOR_EXP_S", "3600")  # an operator misconfiguration
     tok = actor.sign("alice", "local", "sess-1")
+    assert tok is not None
     payload = json.loads(_b64url_decode(tok.split(".")[1]))
     assert payload["exp"] - payload["iat"] <= 300

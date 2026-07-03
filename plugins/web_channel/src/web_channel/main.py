@@ -175,7 +175,41 @@ def _scopes() -> list[str]:
 
 def _current_principal(request: Request) -> auth.Principal | None:
     data = request.session.get("user")
-    return auth.Principal.from_session(data) if data else None
+    if not data:
+        return None
+    # A pre-6b session lacks sub/provider: it cannot sign an actor assertion, so
+    # under the kernel's :strict mode it silently degrades to anonymous/public.
+    # Force re-auth instead (auth-hardening card) — clear it and land on /login.
+    if not (data.get("sub") and data.get("provider")):
+        request.session.pop("user", None)
+        return None
+    return auth.Principal.from_session(data)
+
+
+def _csrf_token(request: Request) -> str:
+    """The session-bound CSRF token (synchronizer pattern), minted on first use.
+    Embedded as a hidden `csrf` field in every admin form; an attacker page can
+    submit a cross-origin POST but cannot READ this token."""
+    token = request.session.get("csrf")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        request.session["csrf"] = token
+    return token
+
+
+def _csrf_ok(request: Request, token: str) -> bool:
+    expected = request.session.get("csrf", "")
+    return bool(expected) and bool(token) and secrets.compare_digest(expected, token)
+
+
+def _csrf_reject() -> HTMLResponse:
+    return HTMLResponse(
+        '<main class="shell"><article class="card">'
+        '<span class="badge status-error">rejected</span>'
+        '<p class="muted">Missing or stale form token — reload '
+        '<a href="/admin">the admin page</a> and retry.</p></article></main>',
+        status_code=403,
+    )
 
 
 def _base_url(request: Request) -> str:
@@ -727,6 +761,7 @@ async def admin(request: Request) -> HTMLResponse:
             "users": users,
             "local_users": localusers.list_users(),
             "groups": auth.known_groups(),
+            "csrf_token": _csrf_token(request),
         },
     )
 
@@ -737,10 +772,13 @@ async def admin_invite(
     username: str = Form(...),
     password: str = Form(...),
     group: str = Form(""),
+    csrf: str = Form(""),
 ):
     principal = _require_groot(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
     uname, grp = username.strip(), group.strip()
     if not uname or not password:
         return RedirectResponse("/admin", status_code=303)
@@ -776,11 +814,14 @@ async def admin_local_invite(
     username: str = Form(...),
     password: str = Form(...),
     group: str = Form(""),
+    csrf: str = Form(""),
 ):
     """Create a LOCAL (non-SSO) user in the channel's own store. groot-gated."""
     principal = _require_groot(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
     uname, grp = username.strip(), group.strip()
     if not uname or not password:
         return RedirectResponse("/admin", status_code=303)
@@ -850,6 +891,7 @@ async def admin_kernel_user(
     nickname: str = Form(""),
     password: str = Form(""),
     group: str = Form(""),
+    csrf: str = Form(""),
 ):
     """ManageUser (invite/deactivate/delete). INVITE also provisions a channel-local
     credential in the SAME action, so the invited user can sign in immediately
@@ -859,6 +901,8 @@ async def admin_kernel_user(
     principal = _require_groot(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
     assertion = _admin_assertion(principal)
     op_map = {
         "invite": core_pb2.INVITE,
@@ -906,12 +950,15 @@ async def admin_kernel_access(
     role: str = Form(""),
     group_id: str = Form(""),
     scopes: str = Form(""),
+    csrf: str = Form(""),
 ):
     """ManageAccess (grant/revoke role or group; set a group's scopes) — superadmin
     for role ops, `manage_access` cap for group ops (kernel-enforced, not here)."""
     principal = _require_groot(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
     assertion = _admin_assertion(principal)
     op_map = {
         "grant_role": core_pb2.GRANT_ROLE,
@@ -943,7 +990,10 @@ async def admin_kernel_access(
 
 @app.post("/admin/kernel/read-conversation", response_class=HTMLResponse)
 async def admin_kernel_read_conversation(
-    request: Request, conversation_id: str = Form(...), reason: str = Form(...)
+    request: Request,
+    conversation_id: str = Form(...),
+    reason: str = Form(...),
+    csrf: str = Form(""),
 ) -> HTMLResponse:
     """Break-glass (AdminReadConversation, D6): superadmin + `read_any_conversation`
     only; the kernel audits BEFORE returning (Swarm.Audit) — reason is required at
@@ -953,6 +1003,8 @@ async def admin_kernel_read_conversation(
     principal = _require_groot(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
     if not reason.strip():
         return _admin_outcome_page(400, "reason is required", "status-error")
     assertion = _admin_assertion(principal)

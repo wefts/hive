@@ -4,6 +4,8 @@ kernel is the real authority and is exercised through mocked RPCs here."""
 
 from __future__ import annotations
 
+import re
+
 from fastapi.testclient import TestClient
 
 from web_channel import auth, core_client, localusers
@@ -21,6 +23,14 @@ def _principal(viewer: str = "groot", is_groot: bool = True) -> auth.Principal:
 
 def _as_groot(monkeypatch) -> None:
     monkeypatch.setattr(web, "_current_principal", lambda request: _principal())
+
+
+def _csrf() -> str:
+    """The session-bound admin CSRF token (the groot principal is already patched)."""
+    r = client.get("/admin")
+    m = re.search(r'name="csrf" value="([^"]+)"', r.text)
+    assert m, "admin page must embed the csrf token"
+    return m.group(1)
 
 
 # --- ManageUser --------------------------------------------------------------
@@ -49,7 +59,7 @@ def test_kernel_user_invite_ok_creates_local_credential(monkeypatch) -> None:
     monkeypatch.setattr(core_client, "manage_user", fake_manage_user)
     r = client.post(
         "/admin/kernel/user",
-        data={"op": "invite", "login": "uma", "password": "pw", "group": ""},
+        data={"csrf": _csrf(), "op": "invite", "login": "uma", "password": "pw", "group": ""},
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -65,7 +75,10 @@ def test_kernel_user_invite_rejected_by_kernel_shows_label(monkeypatch) -> None:
         return core_pb2.AdminActionResponse(status=core_pb2.CALL_NOT_AUTHORIZED)
 
     monkeypatch.setattr(core_client, "manage_user", fake_manage_user)
-    r = client.post("/admin/kernel/user", data={"op": "invite", "login": "vic", "password": "pw"})
+    r = client.post(
+        "/admin/kernel/user",
+        data={"csrf": _csrf(), "op": "invite", "login": "vic", "password": "pw"},
+    )
     assert r.status_code == 409
     assert "not authorized" in r.text.lower()
     assert not localusers.exists("vic")  # local credential NOT created on kernel rejection
@@ -73,7 +86,7 @@ def test_kernel_user_invite_rejected_by_kernel_shows_label(monkeypatch) -> None:
 
 def test_kernel_user_bad_op_is_400(monkeypatch) -> None:
     _as_groot(monkeypatch)
-    r = client.post("/admin/kernel/user", data={"op": "not-a-real-op"})
+    r = client.post("/admin/kernel/user", data={"csrf": _csrf(), "op": "not-a-real-op"})
     assert r.status_code == 400
 
 
@@ -89,7 +102,7 @@ def test_kernel_user_deactivate_calls_manage_user_with_target(monkeypatch) -> No
     monkeypatch.setattr(core_client, "manage_user", fake_manage_user)
     r = client.post(
         "/admin/kernel/user",
-        data={"op": "deactivate", "target_user_id": "u-target"},
+        data={"csrf": _csrf(), "op": "deactivate", "target_user_id": "u-target"},
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -123,7 +136,7 @@ def test_kernel_access_grant_role_ok_redirects(monkeypatch) -> None:
     monkeypatch.setattr(core_client, "manage_access", fake_manage_access)
     r = client.post(
         "/admin/kernel/access",
-        data={"op": "grant_role", "target_user_id": "u-1", "role": "admin"},
+        data={"csrf": _csrf(), "op": "grant_role", "target_user_id": "u-1", "role": "admin"},
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -142,14 +155,19 @@ def test_kernel_access_set_group_scopes_splits_comma_list(monkeypatch) -> None:
     monkeypatch.setattr(core_client, "manage_access", fake_manage_access)
     client.post(
         "/admin/kernel/access",
-        data={"op": "set_group_scopes", "group_id": "confluence", "scopes": "public, group"},
+        data={
+            "csrf": _csrf(),
+            "op": "set_group_scopes",
+            "group_id": "confluence",
+            "scopes": "public, group",
+        },
     )
     assert captured["scopes"] == ["public", "group"]
 
 
 def test_kernel_access_bad_op_is_400(monkeypatch) -> None:
     _as_groot(monkeypatch)
-    r = client.post("/admin/kernel/access", data={"op": "nonsense"})
+    r = client.post("/admin/kernel/access", data={"csrf": _csrf(), "op": "nonsense"})
     assert r.status_code == 400
 
 
@@ -189,7 +207,11 @@ def test_read_conversation_renders_audit_banner_and_messages(monkeypatch) -> Non
     monkeypatch.setattr(core_client, "admin_read_conversation", fake_read)
     r = client.post(
         "/admin/kernel/read-conversation",
-        data={"conversation_id": "c-1", "reason": "user requested support escalation"},
+        data={
+            "csrf": _csrf(),
+            "conversation_id": "c-1",
+            "reason": "user requested support escalation",
+        },
     )
     assert r.status_code == 200
     assert "user requested support escalation" in r.text  # the audited reason is shown
@@ -206,7 +228,8 @@ def test_read_conversation_not_found_is_honest_404(monkeypatch) -> None:
 
     monkeypatch.setattr(core_client, "admin_read_conversation", fake_read)
     r = client.post(
-        "/admin/kernel/read-conversation", data={"conversation_id": "missing", "reason": "audit"}
+        "/admin/kernel/read-conversation",
+        data={"csrf": _csrf(), "conversation_id": "missing", "reason": "audit"},
     )
     assert r.status_code == 404
 
@@ -219,6 +242,7 @@ def test_read_conversation_empty_reason_rejected_before_any_rpc(monkeypatch) -> 
 
     monkeypatch.setattr(core_client, "admin_read_conversation", must_not_call)
     r = client.post(
-        "/admin/kernel/read-conversation", data={"conversation_id": "c-1", "reason": "   "}
+        "/admin/kernel/read-conversation",
+        data={"csrf": _csrf(), "conversation_id": "c-1", "reason": "   "},
     )
     assert r.status_code == 400
