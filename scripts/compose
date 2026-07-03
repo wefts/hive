@@ -21,7 +21,10 @@ set -euo pipefail
 : "${SWARM_ENV:?SWARM_ENV must be set to test|staging|prod (ADR-14) — refusing to guess}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-stage_env="${here}/env/${SWARM_ENV}.env"
+# SWARM_STAGE_ENV_FILE overrides the stage layer's PATH (not its precedence) —
+# used by `task lint:compose` to validate an unconfigured stage against a
+# template-bootstrapped file without writing into env/. Deploys never set it.
+stage_env="${SWARM_STAGE_ENV_FILE:-${here}/env/${SWARM_ENV}.env}"
 
 [ -f "$stage_env" ] || {
   echo "compose: no env/${SWARM_ENV}.env — unknown SWARM_ENV=${SWARM_ENV}" >&2

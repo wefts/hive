@@ -60,11 +60,27 @@ tasks:
       - task: lint:web_channel
 
   lint:compose:
-    desc: Validate docker-compose.yml resolves for every SWARM_ENV (requires secrets.env).
+    desc: >-
+      Validate docker-compose.yml resolves for every SWARM_ENV. A CONFIGURED stage
+      (env/<stage>.env has real assignments) validates as-is — a missing required
+      value still fails loudly. An absent or placeholder-empty stage file is
+      bootstrapped from env/environment.env.example (empty keys filled with a lint
+      placeholder) into a temp dir so the compose config is validated for every
+      stage even on a clean checkout — never written into env/.
     cmds:
       - |
+        tmpdir=$(mktemp -d)
+        trap 'rm -rf "$tmpdir"' EXIT
         for env in test staging prod; do
-          SWARM_ENV=$env ./scripts/compose config >/dev/null && echo "  $env: OK"
+          f="env/$env.env"
+          if [ -s "$f" ] && grep -qE '^[A-Za-z_][A-Za-z0-9_]*=' "$f"; then
+            SWARM_ENV=$env ./scripts/compose config >/dev/null && echo "  $env: OK (env/$env.env)"
+          else
+            sed -E 's/^([A-Za-z_][A-Za-z0-9_]*)=$/\1=lint-placeholder/' \
+              env/environment.env.example > "$tmpdir/$env.env"
+            SWARM_ENV=$env SWARM_STAGE_ENV_FILE="$tmpdir/$env.env" \
+              ./scripts/compose config >/dev/null && echo "  $env: OK (bootstrapped template)"
+          fi
         done
 
   lint:sh:
