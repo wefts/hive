@@ -86,6 +86,33 @@ HUB_REGISTRY=localhost:5000 DHI_REGISTRY=localhost:5000 UV_REGISTRY=localhost:50
 Portable artifacts to carry to an air-gapped host: the `swarm_registry_data`
 volume (all images) + the models directory.
 
+## RLS app role (kernel as a non-superuser — the belt goes live)
+
+The kernel migration `rls_app_role` creates a `swarm_app` role (`NOSUPERUSER
+NOBYPASSRLS NOLOGIN`), grants it runtime DML (tables + sequences; `UPDATE/DELETE/
+TRUNCATE` on `admin_action_audit` revoked — the audit trail is append-only at the
+DB), and installs the hardened `SECURITY DEFINER conversation_owner_lookup` the
+break-glass path uses. Applying the migration alone changes nothing at runtime.
+
+To flip the kernel onto the role (operator action, per stage):
+
+1. Enable login — deliberately NEVER done by a migration (a password in migration
+   code would leak into deploy logs; council 2026-07-03):
+
+   ```sh
+   docker exec -it hive-postgres-1 psql -U swarm -d postgres \
+     -c "ALTER ROLE swarm_app LOGIN PASSWORD '<generated>'"
+   ```
+
+2. Set `SWARM_KERNEL_DB_USER=swarm_app` + `SWARM_KERNEL_DB_PASSWORD=<generated>`
+   in `secrets.env` (structure in `secrets.env.example`).
+3. Redeploy the kernel only: `SWARM_ENV=<stage> scripts/compose up -d --no-deps kernel`.
+4. Smoke: login, ask, history, no-leak (public vs group), a break-glass read
+   (verifies the SECURITY DEFINER lookup), and an audit row landing.
+
+Rollback: unset the two vars, redeploy `--no-deps kernel` — the kernel is back on
+the privileged role instantly; postgres and `migrate` never moved off it.
+
 ## Scaling & HA
 
 `ml` is the horizontal pillar — set `deploy.replicas`. Compose DNS round-robins

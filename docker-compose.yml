@@ -133,8 +133,13 @@ services:
     environment:
       SWARM_DB_HOST: postgres
       SWARM_DB_PORT: "5432"
-      SWARM_DB_USER: ${SWARM_DB_USER:-swarm}
-      SWARM_DB_PASSWORD: ${SWARM_DB_PASSWORD:-swarm}
+      # rls-app-role: the RUNTIME kernel may use a dedicated non-superuser role
+      # (swarm_app) so the Postgres RLS belt is LIVE; postgres + migrate keep the
+      # privileged role. Defaults preserve today's behavior — the operator flips by
+      # setting SWARM_KERNEL_DB_USER=swarm_app + SWARM_KERNEL_DB_PASSWORD after
+      # enabling login on the role (see docs/operations.md "RLS app role").
+      SWARM_DB_USER: ${SWARM_KERNEL_DB_USER:-${SWARM_DB_USER:-swarm}}
+      SWARM_DB_PASSWORD: ${SWARM_KERNEL_DB_PASSWORD:-${SWARM_DB_PASSWORD:-swarm}}
       SWARM_DB_NAME: ${SWARM_DB_NAME:-swarm_${SWARM_ENV:?SWARM_ENV must be set to test|staging|prod}}
       SWARM_ML_ADDRESS: ml:50051
       # Dev consilium fleet: small GPU-resident models so an escalated answer
