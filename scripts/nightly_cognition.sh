@@ -21,6 +21,11 @@
 # Cron (installed on this host):  30 0 * * *  <workspace>/hive/scripts/nightly_cognition.sh
 set -euo pipefail
 
+# cron runs with a minimal PATH (no ~/.local/bin) — `mise` lives there and the
+# 00:30 run silently no-op'd on 2026-07-04 ("env: mise: No such file or directory";
+# the snapshot still ran, so it looked half-alive). Make the toolchain reachable.
+export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"   # workspace root
 LOG_DIR="${LOG_DIR:-$here/tmp/cogloop}"
 SNAP_DIR="${SNAP_DIR:-$here/tmp/snapshots}"
