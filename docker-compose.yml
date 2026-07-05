@@ -147,8 +147,13 @@ services:
       # default panel of 5 large models + a 70B judge fast enough). Unset these (or
       # override) for prod → the decorrelated heavy panel in swarm config.exs stands.
       # Capable models for real synthesis (the GB10's 128GB keeps them resident, so
-      # no swap penalty). qwen3:14b answers + a different-family judge (ADR-7 decorrelation).
-      SWARM_CONSILIUM_PANEL: ${SWARM_CONSILIUM_PANEL:-qwen3:14b,gemma4:e4b}
+      # no swap penalty). ADR-7 decorrelation (ADR-17 #1 Phase-2, consilium-latency
+      # blackboard): the panel and the judge must be from DISTINCT families so the judge
+      # doesn't share the panel's blind spots. Panel qwen3:14b (Qwen) + lfm2.5:8b (LFM);
+      # judge gemma4:31b (Gemma) — three distinct families (was gemma4:e4b in the panel,
+      # which shared a family with the gemma judge). lfm2.5:8b is small+fast (latency-neutral)
+      # and emits valid JSON (glm-4.7-flash was rejected — a thinking model, empty response).
+      SWARM_CONSILIUM_PANEL: ${SWARM_CONSILIUM_PANEL:-qwen3:14b,lfm2.5:8b}
       SWARM_CONSILIUM_JUDGE: ${SWARM_CONSILIUM_JUDGE:-gemma4:31b}
       # Verified actor assertion (ADR-16 D9, step 6b): the SAME shared secret as
       # web_channel's SWARM_ACTOR_SECRET below, from secrets.env — unset here ⇒ the
