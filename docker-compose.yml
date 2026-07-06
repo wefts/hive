@@ -168,6 +168,7 @@ services:
       # override optional (default gemma4:31b, the resident judge — fsr 0/recall 1 on the eval).
       SWARM_TIER_GATE_ENABLED: ${SWARM_TIER_GATE_ENABLED:-}
       SWARM_TIER_GATE_ENTAIL_MODEL: ${SWARM_TIER_GATE_ENTAIL_MODEL:-}
+      SWARM_TIER_GATE_NETWORK_SERVE: ${SWARM_TIER_GATE_NETWORK_SERVE:-}
     ports:
       - "${SWARM_CORE_API_PORT:-50061}:50061"
     depends_on:
