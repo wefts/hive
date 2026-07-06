@@ -69,6 +69,15 @@ run_rpc() {  # run a committed .exs inside the kernel release. NO `-i` + stdin</
   docker cp "$TMP/netmap_facts.json" "$KERNEL:/tmp/netmap_facts.json" >/dev/null
   run_rpc load_facts.exs
 
+  echo "-- wiki API dynamic pages (rendered HTML tables the ingest strips) --"
+  if bash "$NETMAP/fetch_wiki_pages.sh" >>"$LOG" 2>&1; then
+    uv run --quiet --with beautifulsoup4 python "$NETMAP/parse_wiki_html.py" "$TMP/wiki_html" > "$TMP/netmap_facts.json" 2>>"$LOG"
+    docker cp "$TMP/netmap_facts.json" "$KERNEL:/tmp/netmap_facts.json" >/dev/null
+    run_rpc load_facts.exs
+  else
+    echo "wiki-api fetch skipped (no page list / login failed) — see $LOG"
+  fi
+
   echo "-- wiki∩repo corroboration --"
   run_rpc corroborate.exs
 
