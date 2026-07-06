@@ -162,6 +162,12 @@ services:
       # default (:dual) until the step-6b.7 cutover explicitly sets :strict.
       SWARM_ACTOR_SECRET: ${SWARM_ACTOR_SECRET:-}
       SWARM_AUTH_MODE: ${SWARM_AUTH_MODE:-dual}
+      # ADR-17 tier-gate: serve covered asks from structure before the consilium. OFF unless
+      # set "true" (a false-serve breaks trust — enable only after the go/no-go shows
+      # false_serve_rate ~0; set in env/staging.env for the internal instance). Entail model
+      # override optional (default gemma4:31b, the resident judge — fsr 0/recall 1 on the eval).
+      SWARM_TIER_GATE_ENABLED: ${SWARM_TIER_GATE_ENABLED:-}
+      SWARM_TIER_GATE_ENTAIL_MODEL: ${SWARM_TIER_GATE_ENTAIL_MODEL:-}
     ports:
       - "${SWARM_CORE_API_PORT:-50061}:50061"
     depends_on:
