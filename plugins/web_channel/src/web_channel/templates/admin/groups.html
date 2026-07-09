@@ -54,23 +54,22 @@
           <div class="table-container">
             <table class="table">
               <thead>
-                <tr><th>Group</th><th>Members</th><th>Role</th><th>Connectors (scopes)</th><th></th></tr>
+                <tr><th>Group</th><th>Members</th><th>Role</th><th>Connectors (scopes)</th></tr>
               </thead>
               <tbody>
                 {% for g in kernel_groups %}
                   <tr>
                     <td>
-                      <strong>{{ g.name or g.id }}</strong>
+                      <a href="/admin/groups/{{ g.id }}">{{ g.name or g.id }}</a>
                       {% if baseline_group and g.id == baseline_group %}<span class="badge">baseline</span>{% endif %}
                       <div class="muted mono-wrap"><code>{{ g.id }}</code></div>
                     </td>
                     <td>{{ g.member_count }}</td>
                     <td>{{ g.granted_roles|join(', ') if g.granted_roles else '—' }}</td>
                     <td class="mono-wrap">{{ g.granted_scopes|join(', ') if g.granted_scopes else '—' }}</td>
-                    <td class="row-open"><a class="navlink" href="/admin/groups/{{ g.id }}">Manage →</a></td>
                   </tr>
                 {% else %}
-                  <tr><td colspan="5" class="muted">no groups yet</td></tr>
+                  <tr><td colspan="4" class="muted">no groups yet</td></tr>
                 {% endfor %}
               </tbody>
             </table>

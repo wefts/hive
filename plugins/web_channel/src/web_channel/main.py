@@ -1519,7 +1519,7 @@ def _admin_outcome_page(status_code: int, label: str, css_class: str) -> HTMLRes
         '<main class="shell"><article class="card">'
         f'<span class="badge {css_class}">{label}</span>'
         '<p class="muted">The kernel rejected this action — see above.</p>'
-        '<p><a class="navlink" href="/admin/users">back to admin</a></p></article></main>',
+        '<p><a class="navlink" href="/admin">back to admin</a></p></article></main>',
         status_code=status_code,
     )
 

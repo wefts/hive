@@ -68,9 +68,9 @@ def test_admin_users_roster_is_slim_and_links_to_detail(monkeypatch) -> None:
     assert 'id="admin-user-search"' in r.text
     assert 'hx-get="/admin/users/roster"' in r.text
     assert "alice" in r.text
-    # the roster only links to the detail page — no in-table actions/kebab/UUID
+    # the login IS the sole link to the detail page — no verb link, no kebab, no UUID col
     assert f'href="/admin/users/{uid}"' in r.text
-    assert "Manage →" in r.text
+    assert "Manage →" not in r.text
     assert 'role="menuitem"' not in r.text
     assert "grant_role" not in r.text and "grant_group" not in r.text
     assert 'value="delete"' not in r.text

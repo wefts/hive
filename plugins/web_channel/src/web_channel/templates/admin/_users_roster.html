@@ -10,7 +10,7 @@
       <thead>
         <tr>
           <th>Login</th><th>Name</th><th>Status</th><th>Roles</th><th>Groups</th>
-          <th>Providers</th><th>Last login</th><th></th>
+          <th>Providers</th><th>Last login</th>
         </tr>
       </thead>
       <tbody>
@@ -23,10 +23,9 @@
             <td>{{ u.groups|join(', ') if u.groups else '—' }}</td>
             <td>{{ u.providers|join(', ') if u.providers else '—' }}</td>
             <td>{% if u.last_login_at %}<span title="{{ u.last_login_at }}">{{ u.last_login_at[:10] }}</span>{% else %}never{% endif %}</td>
-            <td class="row-open"><a class="navlink" href="/admin/users/{{ u.id }}">Manage →</a></td>
           </tr>
         {% else %}
-          <tr><td colspan="8" class="muted">{% if q %}no users match "{{ q }}"{% else %}none yet{% endif %}</td></tr>
+          <tr><td colspan="7" class="muted">{% if q %}no users match "{{ q }}"{% else %}none yet{% endif %}</td></tr>
         {% endfor %}
       </tbody>
     </table>
