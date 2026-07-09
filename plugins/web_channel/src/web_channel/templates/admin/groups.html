@@ -18,7 +18,7 @@
           <code>private</code> is never grantable.</p>
         {% if baseline is none %}
           <p class="muted"><span class="badge status-warn">baseline group not found</span>
-            No <code>{{ baseline_group }}</code> group in the kernel yet — create it below, then set its scopes.</p>
+            No <code>{{ baseline_group }}</code> group in the kernel yet.</p>
         {% else %}
           <p>Current: {{ baseline.granted_scopes|join(', ') if baseline.granted_scopes else 'public only' }}</p>
           <form method="post" action="/admin/kernel/group" autocomplete="off">
@@ -37,104 +37,37 @@
     </div>
     {% endif %}
 
-    <div class="card admin-roster-card">
+    <div class="card">
       <header>
         <h2 class="card-title">Groups <span class="badge status-warn">kernel truth</span></h2>
-        <div class="card-action" x-data="{open:false}" @click.outside="open=false">
-          <button class="btn" type="button" data-variant="outline" @click="open=!open" aria-expanded="false" :aria-expanded="open.toString()" aria-controls="new-group">
-            New group
-          </button>
-        </div>
+        <span class="badge">fixed set</span>
       </header>
-      <section id="new-group" x-show="open" x-cloak>
-        <form class="invite" method="post" action="/admin/kernel/group" autocomplete="off">
-          <input type="hidden" name="csrf" value="{{ csrf_token }}">
-          <input type="hidden" name="op" value="create">
-          <input class="input" type="text" name="group_id" placeholder="group id (e.g. ops)" required aria-label="group id">
-          <input class="input" type="text" name="name" placeholder="display name" aria-label="display name">
-          <input class="input" type="text" name="description" placeholder="description" aria-label="description">
-          <button class="btn" type="submit">Create</button>
-        </form>
-        <p class="muted">A new group starts empty (no scopes, no role). Grant scopes and a role from its row menu.</p>
-      </section>
       <section>
+        <p class="muted">Exactly three groups: <code>Superuser</code>, <code>Admins</code>,
+          <code>Everyone</code>. Roles attach to the group (never to a person); connectors
+          (source scopes) attach to the group. Membership + per-group connectors are managed
+          on each group's page.</p>
         {% if kernel_groups is none %}
           <p class="muted"><span class="badge status-warn">kernel groups unavailable</span>
             Could not list groups right now.</p>
         {% else %}
-          <div class="table-container roster-wrap">
-            <table class="table admin-users-table">
+          <div class="table-container">
+            <table class="table">
               <thead>
-                <tr>
-                  <th>Group</th><th>Members</th><th>Granted scopes</th><th>Granted roles</th>
-                  <th class="admin-actions-col">Actions</th>
-                </tr>
+                <tr><th>Group</th><th>Members</th><th>Role</th><th>Connectors (scopes)</th><th></th></tr>
               </thead>
               <tbody>
                 {% for g in kernel_groups %}
                   <tr>
                     <td>
                       <strong>{{ g.name or g.id }}</strong>
-                      <div><code title="{{ g.id }}">{{ g.id }}</code>
-                        {% if baseline_group and g.id == baseline_group %}<span class="badge">baseline · Everyone</span>{% endif %}
-                      </div>
-                      {% if g.description %}<div class="muted">{{ g.description }}</div>{% endif %}
+                      {% if baseline_group and g.id == baseline_group %}<span class="badge">baseline</span>{% endif %}
+                      <div class="muted mono-wrap"><code>{{ g.id }}</code></div>
                     </td>
                     <td>{{ g.member_count }}</td>
-                    <td>{{ g.granted_scopes|join(', ') if g.granted_scopes else '—' }}</td>
                     <td>{{ g.granted_roles|join(', ') if g.granted_roles else '—' }}</td>
-                    <td class="admin-actions-col">
-                      <div class="dropdown-menu admin-kebab" x-data="{open:false}" @click.outside="open=false">
-                        <button class="btn" data-size="sm" data-variant="ghost" type="button" aria-label="Actions for {{ g.name or g.id }}" aria-haspopup="menu" aria-expanded="false" :aria-expanded="open.toString()" @click="open=!open">⋮</button>
-                        <div data-popover role="menu" x-show="open" x-cloak aria-hidden="true" :aria-hidden="(!open).toString()">
-                          <form method="post" action="/admin/kernel/group" autocomplete="off" class="menu-form">
-                            <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                            <input type="hidden" name="group_id" value="{{ g.id }}">
-                            <input type="hidden" name="op" value="rename">
-                            <input class="input" type="text" name="name" value="{{ g.name or '' }}" placeholder="new name" aria-label="new name for {{ g.id }}">
-                            <button type="submit" role="menuitem">Rename</button>
-                          </form>
-                          <hr role="separator">
-                          <form method="post" action="/admin/kernel/group" autocomplete="off" class="menu-form">
-                            <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                            <input type="hidden" name="group_id" value="{{ g.id }}">
-                            <input type="hidden" name="op" value="set_scopes">
-                            <span class="section-label">Scopes {% if baseline_group and g.id == baseline_group %}<span class="muted">(what Everyone sees)</span>{% endif %}</span>
-                            {% for s in scope_options %}
-                              <label class="menu-check"><input type="checkbox" name="scopes" value="{{ s }}"{% if s in g.granted_scopes %} checked{% endif %}> {{ s }}</label>
-                            {% endfor %}
-                            <button type="submit" role="menuitem">Set scopes</button>
-                          </form>
-                          <hr role="separator">
-                          {% for role in assignable_roles %}
-                            <form method="post" action="/admin/kernel/group" autocomplete="off">
-                              <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                              <input type="hidden" name="group_id" value="{{ g.id }}">
-                              <input type="hidden" name="op" value="set_role">
-                              <input type="hidden" name="role" value="{{ role }}">
-                              <button type="submit" role="menuitem">Set role {{ role }}</button>
-                            </form>
-                          {% endfor %}
-                          {% for role in assignable_roles %}
-                            <form method="post" action="/admin/kernel/group" autocomplete="off">
-                              <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                              <input type="hidden" name="group_id" value="{{ g.id }}">
-                              <input type="hidden" name="op" value="clear_role">
-                              <input type="hidden" name="role" value="{{ role }}">
-                              <button type="submit" role="menuitem">Clear role {{ role }}</button>
-                            </form>
-                          {% endfor %}
-                          <hr role="separator">
-                          <form method="post" action="/admin/kernel/group" autocomplete="off">
-                            <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                            <input type="hidden" name="group_id" value="{{ g.id }}">
-                            <input type="hidden" name="op" value="delete">
-                            <input type="hidden" name="confirm" value="1">
-                            <button type="submit" role="menuitem" data-variant="destructive" onclick="return confirm('Delete group {{ g.id }}? Members lose its access.')">Delete</button>
-                          </form>
-                        </div>
-                      </div>
-                    </td>
+                    <td class="mono-wrap">{{ g.granted_scopes|join(', ') if g.granted_scopes else '—' }}</td>
+                    <td class="row-open"><a class="navlink" href="/admin/groups/{{ g.id }}">Manage →</a></td>
                   </tr>
                 {% else %}
                   <tr><td colspan="5" class="muted">no groups yet</td></tr>
@@ -142,8 +75,6 @@
               </tbody>
             </table>
           </div>
-          <p class="muted">Roles here bind to the group (every member inherits them); the scope picker offers
-            known <code>src:*</code> sources plus <code>public</code> — never <code>private</code>.</p>
         {% endif %}
       </section>
     </div>

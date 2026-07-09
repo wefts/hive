@@ -16,15 +16,12 @@
           <input class="input" type="password" name="password" placeholder="temporary password" required aria-label="temporary password">
           <input class="input" type="text" name="first_name" placeholder="first name" aria-label="first name">
           <input class="input" type="text" name="last_name" placeholder="last name" aria-label="last name">
-          <select class="input" name="group" aria-label="group">
-            <option value="">no group (public only)</option>
-            {% for g in groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
-          </select>
           <button class="btn" type="submit">Invite a local user</button>
         </form>
-        <p class="muted">Known gap (<code>jit-provision-rpc</code>): the kernel record starts
-          <code>status=invited</code>; there is no wire path yet to promote it to
-          <code>active</code> other than this local credential resolving on first login.</p>
+        <p class="muted">Creates a local credential + a kernel <code>invited</code> record. Set the
+          user's group membership on their page afterward — invite does not assign a group.
+          Known gap (<code>jit-provision-rpc</code>): no wire path yet promotes <code>invited</code>
+          → <code>active</code> other than this local credential resolving on first login.</p>
       </section>
     </div>
 

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="layout admin-layout">
+  <aside class="aside-col">
+    {% include "admin/_nav.html" %}
+  </aside>
+
+  <main class="main stack">
+    <p><a class="navlink" href="/admin/groups">back to groups</a></p>
+
+    {% if group is none %}
+      <div class="card">
+        <header><h2 class="card-title">Group</h2></header>
+        <section>
+          <p><span class="badge status-warn">{{ detail_error }}</span></p>
+          <p class="muted">Could not render this group right now.</p>
+        </section>
+      </div>
+    {% else %}
+      <div class="admin-detail-layout">
+        <div class="card">
+          <header>
+            <h2 class="card-title">{{ group.name or group.id }}</h2>
+            {% if is_baseline %}<span class="badge">baseline · Everyone</span>{% endif %}
+          </header>
+          <section class="admin-detail-list">
+            <div><span class="section-label">Group id</span><code class="hkey">{{ group.id }}</code></div>
+            <div><span class="section-label">Role</span><span>{{ group.granted_roles|join(', ') if group.granted_roles else '—' }}</span></div>
+            <div><span class="section-label">Members</span><span>{{ group.member_count }}</span></div>
+            {% if canonical and canonical.local_only %}
+              <div><span class="section-label">Membership</span><span class="muted">local-provider users only</span></div>
+            {% endif %}
+          </section>
+        </div>
+
+        <div class="card">
+          <header><h2 class="card-title">Connectors (source scopes)</h2></header>
+          <section>
+            <p class="muted">Which sources this group can see. <code>src:*</code> + <code>public</code>;
+              <code>private</code> is never grantable.</p>
+            <form method="post" action="/admin/kernel/group" autocomplete="off">
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="group_id" value="{{ group.id }}">
+              <input type="hidden" name="op" value="set_scopes">
+              <div class="baseline-scopes">
+                {% for s in scope_options %}
+                  <label class="menu-check"><input type="checkbox" name="scopes" value="{{ s }}"{% if s in group.granted_scopes %} checked{% endif %}> {{ s }}</label>
+                {% endfor %}
+              </div>
+              <button class="btn" type="submit">Set connectors</button>
+            </form>
+          </section>
+        </div>
+      </div>
+
+      <div class="card">
+        <header><h2 class="card-title">Members</h2></header>
+        <section>
+          <p class="muted"><span class="badge status-warn">pending kernel RPC</span>
+            The member list needs the kernel group-member RPC (Track B). Add/remove a user to this
+            group from that user's page for now.</p>
+        </section>
+      </div>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}

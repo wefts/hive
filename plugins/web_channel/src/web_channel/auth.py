@@ -44,6 +44,21 @@ def known_groups() -> list[str]:
     return list(_group_scope_map().keys())
 
 
+# The decided fixed group set (ADR authz model, 2026-07-09): exactly these three,
+# roles attach to the GROUP, `superadmin` only on Superuser, and Superuser takes
+# local-provider members only. ids are key-safe/lowercase; names are for display.
+CANONICAL_GROUPS = [
+    {"id": "superuser", "name": "Superuser", "role": "superadmin", "local_only": True},
+    {"id": "admins", "name": "Admins", "role": "admin", "local_only": False},
+    {"id": "everyone", "name": "Everyone", "role": "user", "local_only": False},
+]
+
+
+def canonical_groups() -> list[dict]:
+    """The fixed Superuser/Admins/Everyone set (copies, safe to mutate)."""
+    return [dict(g) for g in CANONICAL_GROUPS]
+
+
 def baseline_group() -> str:
     """The kernel-authz baseline group whose scopes every authenticated actor
     inherits (the "Everyone" baseline; SWARM_AUTH_BASELINE_GROUP). "" ⇒ none."""

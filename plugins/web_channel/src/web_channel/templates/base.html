@@ -32,7 +32,7 @@
                 @click="palette = true" title="Search memories (⌘K)">⌘K&nbsp;search</button>
       {% endif %}
       {% if principal %}
-        <span class="muted">{{ principal.display or principal.viewer }} · scopes: {{ principal.scopes|join(', ') }}</span>
+        <span class="muted">{{ principal.display or principal.viewer }} · {{ principal.groups|join(', ') if principal.groups else 'no groups' }} · {{ principal.scopes|length }} scope{{ '' if principal.scopes|length == 1 else 's' }}</span>
         {% if principal.is_groot %}<a class="navlink" href="/admin">admin</a>{% endif %}
         <a class="navlink" href="/logout">logout</a>
       {% endif %}

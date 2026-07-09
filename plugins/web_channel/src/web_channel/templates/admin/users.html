@@ -6,36 +6,13 @@
   </aside>
 
   <main class="main stack">
-    <div class="card admin-roster-card">
+    <div class="card">
       <header>
         <h2 class="card-title">Users <span class="badge status-warn">kernel truth</span></h2>
-        <div class="card-action" x-data="{open:false}" @click.outside="open=false">
-          <button class="btn" type="button" data-variant="outline" @click="open=!open" aria-expanded="false" :aria-expanded="open.toString()" aria-controls="invite-local-user">
-            Invite a local user
-          </button>
-        </div>
       </header>
-      <section id="invite-local-user" x-show="open" x-cloak>
-        <form class="invite" method="post" action="/admin/kernel/user" autocomplete="off">
-          <input type="hidden" name="csrf" value="{{ csrf_token }}">
-          <input type="hidden" name="op" value="invite">
-          <input class="input" type="text" name="login" placeholder="login" required aria-label="login">
-          <input class="input" type="password" name="password" placeholder="temporary password" required aria-label="temporary password">
-          <input class="input" type="text" name="first_name" placeholder="first name" aria-label="first name">
-          <input class="input" type="text" name="last_name" placeholder="last name" aria-label="last name">
-          <select class="input" name="group" aria-label="group">
-            <option value="">no group (public only)</option>
-            {% for g in groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
-          </select>
-          <button class="btn" type="submit">Invite</button>
-        </form>
-        <p class="muted">Known gap (<code>jit-provision-rpc</code>): the kernel record starts
-          <code>status=invited</code>; there is no wire path yet to promote it to
-          <code>active</code> other than this local credential resolving on first login.</p>
-      </section>
       <section>
         {% if not principal.uuid %}<p class="muted"><span class="badge status-warn">kernel identity not resolved yet</span>
-          actions below will be rejected until signing is configured and this account is migrated into the kernel identity store.</p>{% endif %}
+          actions will be rejected until signing is configured and this account is migrated into the kernel identity store.</p>{% endif %}
         <div class="admin-roster-search">
           <label class="section-label" for="admin-user-search">Search users</label>
           <input id="admin-user-search" class="input" type="search" name="q" value="{{ q }}"
@@ -44,29 +21,11 @@
                  hx-get="/admin/users/roster"
                  hx-trigger="input changed delay:300ms, search"
                  hx-target="#roster-body" hx-swap="innerHTML">
-          <p class="muted">Kernel-side search over the whole roster (login + names), 50 per page.</p>
+          <p class="muted">Kernel-side search over the whole roster (login + names), 50 per page.
+            Open a user to manage groups, credentials, and lifecycle.</p>
         </div>
         <div id="roster-body">
           {% include "admin/_users_roster.html" %}
-        </div>
-      </section>
-    </div>
-
-    <div class="card">
-      <header><h3 class="card-title">Local channel credentials</h3></header>
-      <section>
-        <div class="table-container">
-          <table class="table">
-            <thead><tr><th>Username</th><th>Scopes</th><th>groot?</th></tr></thead>
-            <tbody>
-              {% for u in local_users %}
-                <tr><td>{{ u.username }}</td><td>{{ u.scopes|join(', ') }}</td>
-                  <td>{{ 'yes' if u.is_groot else '' }}</td></tr>
-              {% else %}
-                <tr><td colspan="3" class="muted">none yet</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
         </div>
       </section>
     </div>

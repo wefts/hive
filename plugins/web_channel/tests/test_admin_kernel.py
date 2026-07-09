@@ -33,7 +33,7 @@ def _as_groot(monkeypatch) -> None:
 
 def _csrf() -> str:
     """The session-bound admin CSRF token (the groot principal is already patched)."""
-    r = client.get("/admin/users")
+    r = client.get("/admin")
     m = re.search(r'name="csrf" value="([^"]+)"', r.text)
     assert m, "admin page must embed the csrf token"
     return m.group(1)
@@ -42,10 +42,10 @@ def _csrf() -> str:
 # --- ManageUser --------------------------------------------------------------
 
 
-def test_admin_page_renders_kernel_users_table_and_kebab_menus(monkeypatch) -> None:
+def test_admin_users_roster_is_slim_and_links_to_detail(monkeypatch) -> None:
     monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
-    monkeypatch.setenv("GROUP_SCOPE_MAP", '{"confluence":"group"}')
     _as_groot(monkeypatch)
+    uid = "12345678-aaaa-bbbb-cccc-123456789abc"
 
     async def fake_kernel_list(assertion, include_deleted=False, limit=0, query="", offset=0):
         assert assertion.count(".") == 2
@@ -54,15 +54,9 @@ def test_admin_page_renders_kernel_users_table_and_kebab_menus(monkeypatch) -> N
             total=1,
             users=[
                 core_pb2.UserView(
-                    id="12345678-aaaa-bbbb-cccc-123456789abc",
-                    login="alice",
-                    first_name="Alice",
-                    last_name="Admin",
-                    status="active",
-                    roles=["admin"],
-                    groups=["confluence"],
-                    providers=["local"],
-                    last_login_at="2026-07-08T10:00:00Z",
+                    id=uid, login="alice", first_name="Alice", last_name="Admin",
+                    status="active", roles=["admin"], groups=["everyone"],
+                    providers=["local"], last_login_at="2026-07-08T10:00:00Z",
                 )
             ],
         )
@@ -72,19 +66,17 @@ def test_admin_page_renders_kernel_users_table_and_kebab_menus(monkeypatch) -> N
     assert r.status_code == 200
     assert "kernel truth" in r.text
     assert 'id="admin-user-search"' in r.text
-    # server-side search wiring (not the old client-side loaded-list filter)
     assert 'hx-get="/admin/users/roster"' in r.text
-    assert "Kernel-side search over the whole roster" in r.text
     assert "alice" in r.text
-    assert 'href="/admin/users/12345678-aaaa-bbbb-cccc-123456789abc"' in r.text
-    assert 'title="12345678-aaaa-bbbb-cccc-123456789abc"' in r.text
-    assert 'value="12345678-aaaa-bbbb-cccc-123456789abc"' in r.text
-    assert 'role="menuitem"' in r.text
-    assert 'value="deactivate"' in r.text
-    assert 'value="delete"' in r.text
-    assert 'value="grant_role"' in r.text
-    assert 'value="grant_group"' in r.text
-    assert 'name="target_user_id" type="text"' not in r.text
+    # the roster only links to the detail page — no in-table actions/kebab/UUID
+    assert f'href="/admin/users/{uid}"' in r.text
+    assert "Manage →" in r.text
+    assert 'role="menuitem"' not in r.text
+    assert "grant_role" not in r.text and "grant_group" not in r.text
+    assert 'value="delete"' not in r.text
+    # the truncated-UUID column (phantom duplicates) is gone from the roster
+    assert f'title="{uid}"' not in r.text
+    assert ">UUID<" not in r.text
 
 
 def test_admin_user_detail_renders_identity_and_actions(monkeypatch) -> None:
@@ -119,23 +111,21 @@ def test_admin_user_detail_renders_identity_and_actions(monkeypatch) -> None:
     assert "alice" in r.text
     assert "Alice Admin" in r.text
     assert "active" in r.text
-    assert "admin" in r.text
-    assert "confluence" in r.text
-    assert "local" in r.text
-    assert "2026-07-08T10:00:00Z" in r.text
     assert "alice@example.org" in r.text  # emails — GetUser-only PII
-    assert f'<code class="hkey">{user_id}</code>' in r.text
-    assert 'action="/admin/kernel/user"' in r.text
+    assert f'<code class="hkey">{user_id}</code>' in r.text  # full UUID on the card
+    # group membership (not per-user roles): grant/revoke GROUP only, never a role
     assert 'action="/admin/kernel/access"' in r.text
     assert f'name="target_user_id" value="{user_id}"' in r.text
-    assert 'value="deactivate"' in r.text
-    assert 'value="delete"' in r.text
-    assert 'value="grant_role"' in r.text
-    assert 'value="revoke_role"' in r.text
-    assert 'value="grant_group"' in r.text
-    assert 'value="revoke_group"' in r.text
+    assert "grant_role" not in r.text and "revoke_role" not in r.text
+    assert 'value="grant_group"' in r.text  # alice is in none of the canonical 3 → Add
+    assert 'value="everyone"' in r.text and 'value="admins"' in r.text
+    assert 'value="superuser"' in r.text  # shown because alice is a local user
+    # lifecycle on the detail page
+    assert 'action="/admin/kernel/user"' in r.text
+    assert 'value="deactivate"' in r.text and 'value="delete"' in r.text
+    # local-credential section moved here from the Users list
+    assert "Local channel credential" in r.text
     assert "Knowledge" in r.text and "(planned)" in r.text
-    assert "LDAP" in r.text and "Confluence" in r.text
 
 
 def test_admin_user_detail_unknown_id_is_honest_404(monkeypatch) -> None:
@@ -379,7 +369,7 @@ def test_read_conversation_empty_reason_rejected_before_any_rpc(monkeypatch) -> 
 # --- Groups & Roles (FE-2: ListGroups / ListRoles / ManageGroup) -------------
 
 
-def test_admin_groups_page_lists_groups_with_kebab(monkeypatch) -> None:
+def test_admin_groups_page_is_read_only_list_plus_baseline(monkeypatch) -> None:
     monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
     monkeypatch.setenv("SWARM_AUTH_BASELINE_GROUP", "everyone")
     monkeypatch.setenv("KNOWN_SOURCE_SCOPES", "src:wiki,src:ldap,private")
@@ -407,15 +397,17 @@ def test_admin_groups_page_lists_groups_with_kebab(monkeypatch) -> None:
     r = client.get("/admin/groups")
     assert r.status_code == 200
     assert "Everyone" in r.text and "Admins" in r.text
-    assert "baseline" in r.text  # the baseline badge on the everyone row
-    assert 'action="/admin/kernel/group"' in r.text
-    assert 'value="set_scopes"' in r.text and 'value="set_role"' in r.text
-    assert 'value="delete"' in r.text and 'value="rename"' in r.text
-    # scope-picker offers known src:* + public, and NEVER private
+    assert "baseline" in r.text
+    # list is read-only + links to each group's page — no create/rename/delete/set-role in the list
+    assert 'href="/admin/groups/everyone"' in r.text
+    assert 'href="/admin/groups/admins"' in r.text
+    assert "value=\"rename\"" not in r.text and "value=\"delete\"" not in r.text
+    assert "value=\"set_role\"" not in r.text and "New group" not in r.text
+    # only the baseline (Everyone) scope control remains on this page (set_scopes for everyone)
+    assert 'value="set_scopes"' in r.text
     assert 'value="src:wiki"' in r.text and 'value="src:ldap"' in r.text
-    assert 'value="private"' not in r.text
-    # the group's held scope is pre-checked
-    assert 'value="src:wiki" checked' in r.text
+    assert 'value="private"' not in r.text  # never grantable
+    assert 'value="src:wiki" checked' in r.text  # baseline holds it → pre-checked
 
 
 def test_admin_roles_page_is_read_only(monkeypatch) -> None:
@@ -466,7 +458,7 @@ def test_kernel_group_set_scopes_calls_manage_group_dropping_private(monkeypatch
         follow_redirects=False,
     )
     assert r.status_code == 303
-    assert r.headers["location"] == "/admin/groups"
+    assert r.headers["location"] == "/admin/groups/everyone"  # back to the group detail
     assert captured["op"] == core_pb2.GROUP_SET_SCOPES
     assert captured["group_id"] == "everyone"
     assert captured["scopes"] == ["public", "src:wiki"]  # private dropped defensively
@@ -696,3 +688,42 @@ def test_admin_groups_shows_baseline_everyone_control(monkeypatch) -> None:
     assert 'value="src:ldap" checked' in r.text
     assert 'value="src:confluence"' in r.text and 'value="src:confluence" checked' not in r.text
     assert "Set baseline scopes" in r.text
+
+
+def test_admin_group_detail_renders_scopes_and_pending_members(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    monkeypatch.setenv("KNOWN_SOURCE_SCOPES", "src:wiki,src:ldap")
+    _as_groot(monkeypatch)
+
+    async def fake_list_groups(assertion):
+        return core_pb2.ListGroupsResponse(
+            status=core_pb2.CALL_OK,
+            groups=[
+                core_pb2.GroupView(
+                    id="admins", name="Admins", member_count=2,
+                    granted_roles=["admin"], granted_scopes=["public", "src:wiki"],
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(core_client, "list_groups", fake_list_groups)
+    r = client.get("/admin/groups/admins")
+    assert r.status_code == 200
+    assert "Admins" in r.text
+    assert "Connectors (source scopes)" in r.text
+    assert 'value="set_scopes"' in r.text
+    assert 'value="src:wiki" checked' in r.text and 'value="src:ldap"' in r.text
+    assert "pending kernel RPC" in r.text  # member list honest-deferred to Track B
+
+
+def test_admin_group_detail_unknown_is_404(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    _as_groot(monkeypatch)
+
+    async def fake_list_groups(assertion):
+        return core_pb2.ListGroupsResponse(status=core_pb2.CALL_OK, groups=[])
+
+    monkeypatch.setattr(core_client, "list_groups", fake_list_groups)
+    r = client.get("/admin/groups/nope")
+    assert r.status_code == 404
+    assert "group not found" in r.text

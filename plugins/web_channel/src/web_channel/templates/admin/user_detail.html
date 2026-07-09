@@ -60,7 +60,32 @@
         </div>
 
         <div class="card">
-          <header><h2 class="card-title">Actions</h2></header>
+          <header><h2 class="card-title">Group membership</h2></header>
+          <section>
+            <p class="muted">Access and role come from group membership — there are no per-user
+              role grants. Superuser (which confers <code>superadmin</code>) takes local users only.</p>
+            <div class="membership-list">
+              {% for g in canonical_groups %}
+                {% set member = g.id in user.groups %}
+                {% if g.local_only and not user_is_local %}
+                  <div class="membership-row muted">{{ g.name }} <span class="muted">· {{ g.role }} · local users only</span></div>
+                {% else %}
+                  <form method="post" action="/admin/kernel/access" autocomplete="off" class="membership-row">
+                    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                    <input type="hidden" name="target_user_id" value="{{ user.id }}">
+                    <input type="hidden" name="op" value="{{ 'revoke_group' if member else 'grant_group' }}">
+                    <input type="hidden" name="group_id" value="{{ g.id }}">
+                    <span>{{ g.name }} <span class="muted">· {{ g.role }}</span>{% if member %} <span class="badge status-found">member</span>{% endif %}</span>
+                    <button class="btn" data-size="sm" data-variant="outline" type="submit">{{ 'Remove' if member else 'Add' }}</button>
+                  </form>
+                {% endif %}
+              {% endfor %}
+            </div>
+          </section>
+        </div>
+
+        <div class="card">
+          <header><h2 class="card-title">Lifecycle</h2></header>
           <section class="admin-actions-panel">
             <form method="post" action="/admin/kernel/user" autocomplete="off">
               <input type="hidden" name="csrf" value="{{ csrf_token }}">
@@ -72,52 +97,28 @@
               <input type="hidden" name="csrf" value="{{ csrf_token }}">
               <input type="hidden" name="target_user_id" value="{{ user.id }}">
               <input type="hidden" name="op" value="delete">
-              <button class="btn" type="submit" data-variant="destructive" onclick="return confirm('Delete this user?')">Delete</button>
+              <button class="btn" type="submit" data-variant="destructive" onclick="return confirm('Delete this user? Login dies; learned content persists.')">Delete</button>
             </form>
-
-            <div class="admin-action-group">
-              <h3 class="section-label">Roles</h3>
-              {% for role in ["admin", "superadmin"] %}
-                <form method="post" action="/admin/kernel/access" autocomplete="off">
-                  <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                  <input type="hidden" name="target_user_id" value="{{ user.id }}">
-                  <input type="hidden" name="op" value="grant_role">
-                  <input type="hidden" name="role" value="{{ role }}">
-                  <button class="btn" type="submit" data-variant="outline">Grant {{ role }}</button>
-                </form>
-                <form method="post" action="/admin/kernel/access" autocomplete="off">
-                  <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                  <input type="hidden" name="target_user_id" value="{{ user.id }}">
-                  <input type="hidden" name="op" value="revoke_role">
-                  <input type="hidden" name="role" value="{{ role }}">
-                  <button class="btn" type="submit" data-variant="outline">Revoke {{ role }}</button>
-                </form>
-              {% endfor %}
-            </div>
-
-            <div class="admin-action-group">
-              <h3 class="section-label">Groups</h3>
-              {% for g in groups %}
-                <form method="post" action="/admin/kernel/access" autocomplete="off">
-                  <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                  <input type="hidden" name="target_user_id" value="{{ user.id }}">
-                  <input type="hidden" name="op" value="grant_group">
-                  <input type="hidden" name="group_id" value="{{ g }}">
-                  <button class="btn" type="submit" data-variant="outline">Grant {{ g }}</button>
-                </form>
-                <form method="post" action="/admin/kernel/access" autocomplete="off">
-                  <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                  <input type="hidden" name="target_user_id" value="{{ user.id }}">
-                  <input type="hidden" name="op" value="revoke_group">
-                  <input type="hidden" name="group_id" value="{{ g }}">
-                  <button class="btn" type="submit" data-variant="outline">Revoke {{ g }}</button>
-                </form>
-              {% else %}
-                <p class="muted">No known groups are configured.</p>
-              {% endfor %}
-            </div>
+            <p class="muted">Deactivate/delete kill the login; learned content persists (D11).</p>
           </section>
         </div>
+      </div>
+
+      <div class="card">
+        <header><h2 class="card-title">Local channel credential</h2></header>
+        <section>
+          {% if local_cred %}
+            <div class="admin-detail-list">
+              <div><span class="section-label">Username</span><span>{{ local_cred.username }}</span></div>
+              <div><span class="section-label">Scopes</span><span>{{ local_cred.scopes|join(', ') or '—' }}</span></div>
+              <div><span class="section-label">groot</span><span>{{ 'yes' if local_cred.is_groot else 'no' }}</span></div>
+            </div>
+            <p class="muted">Channel-local password login (bootstrap / invite bridge), separate from
+              the kernel identity and from the auth provider.</p>
+          {% else %}
+            <p class="muted">No local channel credential for this login — signs in via the auth provider.</p>
+          {% endif %}
+        </section>
       </div>
 
       <div class="card">

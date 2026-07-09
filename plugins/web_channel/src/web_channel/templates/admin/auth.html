@@ -55,7 +55,7 @@
           <h3 class="section-label">Incoming SSO group → our group</h3>
           <p class="muted">Provider <code>{{ sso_provider }}</code>. An incoming group maps to one of our
             groups (which carries its scopes and/or role). <strong>Default-deny</strong>: an unmapped
-            incoming group grants nothing.</p>
+            incoming group grants nothing. <code>Superuser</code> is not SSO-mappable (local users only).</p>
           {% if sso_map is none %}
             <p class="muted"><span class="badge status-warn">SSO-map RPC not available yet</span>
               This needs the kernel update (BE-1 <code>ListSsoMap</code>/<code>ManageSsoMap</code>);
@@ -90,7 +90,7 @@
               <input class="input" type="text" name="incoming_group" placeholder="incoming SSO group (e.g. DSI)" required aria-label="incoming SSO group">
               <select class="input" name="our_group_id" required aria-label="our group">
                 <option value="">map to our group…</option>
-                {% for g in our_groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+                {% for g in our_groups if g != 'superuser' %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
               </select>
               <button class="btn" type="submit">Add mapping</button>
             </form>

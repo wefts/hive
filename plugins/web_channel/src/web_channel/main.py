@@ -1177,10 +1177,7 @@ async def admin_users(request: Request, q: str = "", offset: int = 0) -> HTMLRes
     return templates.TemplateResponse(
         request,
         "admin/users.html",
-        {
-            **_roster_context(request, principal, kernel_users, total, q, offset),
-            "local_users": localusers.list_users(),
-        },
+        _roster_context(request, principal, kernel_users, total, q, offset),
     )
 
 
@@ -1228,13 +1225,22 @@ async def admin_user_detail(request: Request, user_id: str) -> HTMLResponse:
             label, _css = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
             detail_error = label
             status_code = 403 if resp.status == core_pb2.CALL_NOT_AUTHORIZED else 400
+    local_cred = None
+    user_is_local = False
+    if user is not None:
+        user_is_local = "local" in list(user.providers)
+        local_cred = next(
+            (c for c in localusers.list_users() if c["username"] == user.login), None
+        )
     return templates.TemplateResponse(
         request,
         "admin/user_detail.html",
         {
             **_admin_template_context(request, principal, "users"),
             "user": user,
-            "groups": auth.known_groups(),
+            "canonical_groups": auth.canonical_groups(),
+            "user_is_local": user_is_local,
+            "local_cred": local_cred,
             "detail_error": detail_error,
         },
         status_code=status_code,
@@ -1418,6 +1424,54 @@ async def admin_groups(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/admin/groups/{group_id}", response_class=HTMLResponse)
+async def admin_group_detail(request: Request, group_id: str) -> HTMLResponse:
+    """One group: role + connectors (source scopes) + membership. Member listing is
+    honest-pending the kernel member-list RPC (Track B). Declared after /admin/groups."""
+    principal = _require_groot(request)
+    if principal is None:
+        return _admin_forbidden()
+    assertion = _admin_assertion(principal)
+    group = None
+    scope_options = list(auth.known_source_scopes())
+    detail_error = None
+    status_code = 200
+    if not assertion:
+        detail_error, status_code = "kernel identity not resolved", 403
+    else:
+        try:
+            resp = await core_client.list_groups(assertion)
+        except Exception:
+            logger.exception("ListGroups failed for group detail")
+            resp = None
+        if resp is None or resp.status != core_pb2.CALL_OK:
+            detail_error, status_code = "kernel groups unavailable", 503
+        else:
+            for g in resp.groups:
+                for s in g.granted_scopes:
+                    if s != "private" and s not in scope_options:
+                        scope_options.append(s)
+            group = next((g for g in resp.groups if g.id == group_id), None)
+            if group is None:
+                detail_error, status_code = "group not found", 404
+    canonical = next(
+        (c for c in auth.canonical_groups() if group and c["id"] == group.id), None
+    )
+    return templates.TemplateResponse(
+        request,
+        "admin/group_detail.html",
+        {
+            **_admin_template_context(request, principal, "groups"),
+            "group": group,
+            "scope_options": scope_options,
+            "is_baseline": bool(group and group.id == auth.baseline_group()),
+            "canonical": canonical,
+            "detail_error": detail_error,
+        },
+        status_code=status_code,
+    )
+
+
 @app.get("/admin/roles", response_class=HTMLResponse)
 async def admin_roles(request: Request) -> HTMLResponse:
     """Roles list (ListRoles), READ-ONLY: the fixed user/admin/superadmin set with
@@ -1585,7 +1639,10 @@ async def admin_kernel_access(
     if resp.status != core_pb2.CALL_OK:
         label, css_class = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
         return _admin_outcome_page(409, label, css_class)
-    return RedirectResponse("/admin/users", status_code=303)
+    # group membership is managed from the user detail page — return there in context
+    tid = target_user_id.strip()
+    dest = f"/admin/users/{tid}" if tid else "/admin/users"
+    return RedirectResponse(dest, status_code=303)
 
 
 @app.post("/admin/kernel/group", response_class=HTMLResponse)
@@ -1641,7 +1698,9 @@ async def admin_kernel_group(
     if resp.status != core_pb2.CALL_OK:
         label, css_class = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
         return _admin_outcome_page(409, label, css_class)
-    return RedirectResponse("/admin/groups", status_code=303)
+    gid = group_id.strip()
+    dest = f"/admin/groups/{gid}" if gid else "/admin/groups"
+    return RedirectResponse(dest, status_code=303)
 
 
 @app.post("/admin/kernel/read-conversation", response_class=HTMLResponse)

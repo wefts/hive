@@ -16,7 +16,7 @@ client = TestClient(web.app)
 def _p1_csrf() -> str:
     import re as _re
 
-    r = client.get("/admin/users")
+    r = client.get("/admin")
     m = _re.search(r'name="csrf" value="([^"]+)"', r.text)
     assert m, "admin page must embed the csrf token"
     return m.group(1)
