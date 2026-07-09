@@ -37,6 +37,69 @@
     </div>
 
     <div class="card">
+      <header><h2 class="card-title">SSO claim mappers</h2></header>
+      <section class="stack">
+        <div>
+          <h3 class="section-label">Which claim carries groups / roles</h3>
+          <p class="muted">The channel reads these id-token claims, then maps groups → our groups below
+            and derives scope. Dotted paths allowed (e.g. <code>realm_access.roles</code>).</p>
+          <form class="invite" method="post" action="/admin/auth/claims" autocomplete="off">
+            <input type="hidden" name="csrf" value="{{ csrf_token }}">
+            <input class="input" type="text" name="groups_claim" value="{{ groups_claim }}" placeholder="groups claim" aria-label="groups claim">
+            <input class="input" type="text" name="roles_claim" value="{{ roles_claim }}" placeholder="roles claim" aria-label="roles claim">
+            <button class="btn" type="submit">Save claim keys</button>
+          </form>
+        </div>
+
+        <div>
+          <h3 class="section-label">Incoming SSO group → our group</h3>
+          <p class="muted">Provider <code>{{ sso_provider }}</code>. An incoming group maps to one of our
+            groups (which carries its scopes and/or role). <strong>Default-deny</strong>: an unmapped
+            incoming group grants nothing.</p>
+          {% if sso_map is none %}
+            <p class="muted"><span class="badge status-warn">SSO-map RPC not available yet</span>
+              This needs the kernel update (BE-1 <code>ListSsoMap</code>/<code>ManageSsoMap</code>);
+              it goes live after the staging redeploy.</p>
+          {% else %}
+            <div class="table-container">
+              <table class="table">
+                <thead><tr><th>Incoming group</th><th>Maps to our group</th><th></th></tr></thead>
+                <tbody>
+                  {% for m in sso_map %}
+                    <tr>
+                      <td>{{ m.incoming_group }}</td>
+                      <td><code>{{ m.our_group_id }}</code></td>
+                      <td>
+                        <form method="post" action="/admin/auth/sso-map" autocomplete="off">
+                          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                          <input type="hidden" name="op" value="delete">
+                          <input type="hidden" name="incoming_group" value="{{ m.incoming_group }}">
+                          <button class="btn" data-size="sm" data-variant="outline" type="submit">Remove</button>
+                        </form>
+                      </td>
+                    </tr>
+                  {% else %}
+                    <tr><td colspan="3" class="muted">no mappings yet</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <form class="invite" method="post" action="/admin/auth/sso-map" autocomplete="off">
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="op" value="put">
+              <input class="input" type="text" name="incoming_group" placeholder="incoming SSO group (e.g. DSI)" required aria-label="incoming SSO group">
+              <select class="input" name="our_group_id" required aria-label="our group">
+                <option value="">map to our group…</option>
+                {% for g in our_groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+              </select>
+              <button class="btn" type="submit">Add mapping</button>
+            </form>
+          {% endif %}
+        </div>
+      </section>
+    </div>
+
+    <div class="card">
       <header><h3 class="card-title">Keycloak realm users <span class="badge status-found">info-only</span></h3></header>
       <section>
         {% if users is none %}

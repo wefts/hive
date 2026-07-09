@@ -138,10 +138,11 @@ def test_admin_hub_renders_for_groot(monkeypatch) -> None:
     monkeypatch.setattr(web, "_current_principal", lambda request: signed_groot)
     monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
 
-    async def fake_kernel_list(assertion, include_deleted=False, limit=0):
+    async def fake_kernel_list(assertion, include_deleted=False, limit=0, query="", offset=0):
         assert assertion.count(".") == 2
         return core_pb2.ListUsersResponse(
             status=core_pb2.CALL_OK,
+            total=1,
             users=[core_pb2.UserView(id="u-1", login="alice")],
         )
 
@@ -155,8 +156,8 @@ def test_admin_hub_renders_for_groot(monkeypatch) -> None:
     assert 'href="/admin/auth"' in r.text
     assert 'href="/admin/connectors"' in r.text
     assert 'href="/admin/tools"' in r.text
-    assert "Groups" in r.text and "(planned)" in r.text
-    assert "Roles" in r.text and "(planned)" in r.text
+    assert 'href="/admin/groups"' in r.text
+    assert 'href="/admin/roles"' in r.text
     assert "1</span> kernel users" in r.text
 
 
@@ -216,8 +217,8 @@ def test_admin_nav_shows_redesigned_sections(monkeypatch) -> None:
     r = client.get("/admin/users")
     assert r.status_code == 200
     assert "Users" in r.text
-    assert "Groups" in r.text and "(planned)" in r.text
-    assert "Roles" in r.text and "(planned)" in r.text
+    assert 'href="/admin/groups"' in r.text
+    assert 'href="/admin/roles"' in r.text
     assert "Auth Provider" in r.text
     assert "Connectors" in r.text
     assert "Tools" in r.text
@@ -232,7 +233,7 @@ def test_users_page_does_not_call_keycloak(monkeypatch) -> None:
     async def must_not_list():
         raise AssertionError("users page must not call Keycloak")
 
-    async def fake_kernel_list(assertion, include_deleted=False, limit=0):
+    async def fake_kernel_list(assertion, include_deleted=False, limit=0, query="", offset=0):
         return core_pb2.ListUsersResponse(status=core_pb2.CALL_OK)
 
     monkeypatch.setattr(kc_admin, "list_users", must_not_list)

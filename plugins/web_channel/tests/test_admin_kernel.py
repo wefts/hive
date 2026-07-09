@@ -47,10 +47,11 @@ def test_admin_page_renders_kernel_users_table_and_kebab_menus(monkeypatch) -> N
     monkeypatch.setenv("GROUP_SCOPE_MAP", '{"confluence":"group"}')
     _as_groot(monkeypatch)
 
-    async def fake_kernel_list(assertion, include_deleted=False, limit=0):
+    async def fake_kernel_list(assertion, include_deleted=False, limit=0, query="", offset=0):
         assert assertion.count(".") == 2
         return core_pb2.ListUsersResponse(
             status=core_pb2.CALL_OK,
+            total=1,
             users=[
                 core_pb2.UserView(
                     id="12345678-aaaa-bbbb-cccc-123456789abc",
@@ -71,8 +72,9 @@ def test_admin_page_renders_kernel_users_table_and_kebab_menus(monkeypatch) -> N
     assert r.status_code == 200
     assert "kernel truth" in r.text
     assert 'id="admin-user-search"' in r.text
-    assert "Filter the loaded list by login, name, or UUID" in r.text
-    assert "Server-side search and pagination arrive with the kernel update" in r.text
+    # server-side search wiring (not the old client-side loaded-list filter)
+    assert 'hx-get="/admin/users/roster"' in r.text
+    assert "Kernel-side search over the whole roster" in r.text
     assert "alice" in r.text
     assert 'href="/admin/users/12345678-aaaa-bbbb-cccc-123456789abc"' in r.text
     assert 'title="12345678-aaaa-bbbb-cccc-123456789abc"' in r.text
@@ -91,27 +93,27 @@ def test_admin_user_detail_renders_identity_and_actions(monkeypatch) -> None:
     _as_groot(monkeypatch)
     user_id = "12345678-aaaa-bbbb-cccc-123456789abc"
 
-    async def fake_kernel_list(assertion, include_deleted=False, limit=0):
+    async def fake_get_user(assertion, uid):
         assert assertion.count(".") == 2
-        return core_pb2.ListUsersResponse(
+        assert uid == user_id
+        return core_pb2.GetUserResponse(
             status=core_pb2.CALL_OK,
-            users=[
-                core_pb2.UserView(
-                    id=user_id,
-                    login="alice",
-                    first_name="Alice",
-                    last_name="Admin",
-                    nickname="aa",
-                    status="active",
-                    roles=["admin"],
-                    groups=["confluence"],
-                    providers=["local"],
-                    last_login_at="2026-07-08T10:00:00Z",
-                )
-            ],
+            user=core_pb2.UserView(
+                id=user_id,
+                login="alice",
+                first_name="Alice",
+                last_name="Admin",
+                nickname="aa",
+                status="active",
+                roles=["admin"],
+                groups=["confluence"],
+                providers=["local"],
+                last_login_at="2026-07-08T10:00:00Z",
+                emails=["alice@example.org"],
+            ),
         )
 
-    monkeypatch.setattr(core_client, "list_users", fake_kernel_list)
+    monkeypatch.setattr(core_client, "get_user", fake_get_user)
     r = client.get(f"/admin/users/{user_id}")
     assert r.status_code == 200
     assert "alice" in r.text
@@ -121,6 +123,7 @@ def test_admin_user_detail_renders_identity_and_actions(monkeypatch) -> None:
     assert "confluence" in r.text
     assert "local" in r.text
     assert "2026-07-08T10:00:00Z" in r.text
+    assert "alice@example.org" in r.text  # emails — GetUser-only PII
     assert f'<code class="hkey">{user_id}</code>' in r.text
     assert 'action="/admin/kernel/user"' in r.text
     assert 'action="/admin/kernel/access"' in r.text
@@ -139,13 +142,10 @@ def test_admin_user_detail_unknown_id_is_honest_404(monkeypatch) -> None:
     monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
     _as_groot(monkeypatch)
 
-    async def fake_kernel_list(assertion, include_deleted=False, limit=0):
-        return core_pb2.ListUsersResponse(
-            status=core_pb2.CALL_OK,
-            users=[core_pb2.UserView(id="known-id", login="alice")],
-        )
+    async def fake_get_user(assertion, uid):
+        return core_pb2.GetUserResponse(status=core_pb2.CALL_NOT_FOUND)
 
-    monkeypatch.setattr(core_client, "list_users", fake_kernel_list)
+    monkeypatch.setattr(core_client, "get_user", fake_get_user)
     r = client.get("/admin/users/missing-id")
     assert r.status_code == 404
     assert "user not found" in r.text
@@ -156,9 +156,9 @@ def test_admin_user_detail_forbidden_for_non_groot(monkeypatch) -> None:
     monkeypatch.setattr(web, "_current_principal", lambda request: _principal(is_groot=False))
 
     async def must_not_call(*a, **kw):
-        raise AssertionError("detail page must not list users for a non-groot")
+        raise AssertionError("detail page must not fetch a user for a non-groot")
 
-    monkeypatch.setattr(core_client, "list_users", must_not_call)
+    monkeypatch.setattr(core_client, "get_user", must_not_call)
     for user_id in ["known-id", "missing-id"]:
         r = client.get(f"/admin/users/{user_id}")
         assert r.status_code == 403
@@ -374,3 +374,325 @@ def test_read_conversation_empty_reason_rejected_before_any_rpc(monkeypatch) -> 
         data={"csrf": _csrf(), "conversation_id": "c-1", "reason": "   "},
     )
     assert r.status_code == 400
+
+
+# --- Groups & Roles (FE-2: ListGroups / ListRoles / ManageGroup) -------------
+
+
+def test_admin_groups_page_lists_groups_with_kebab(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    monkeypatch.setenv("SWARM_AUTH_BASELINE_GROUP", "everyone")
+    monkeypatch.setenv("KNOWN_SOURCE_SCOPES", "src:wiki,src:ldap,private")
+    _as_groot(monkeypatch)
+
+    async def fake_list_groups(assertion):
+        assert assertion.count(".") == 2
+        return core_pb2.ListGroupsResponse(
+            status=core_pb2.CALL_OK,
+            groups=[
+                core_pb2.GroupView(
+                    id="everyone",
+                    name="Everyone",
+                    member_count=3,
+                    granted_scopes=["public", "src:wiki"],
+                    granted_roles=[],
+                ),
+                core_pb2.GroupView(
+                    id="admins", name="Admins", member_count=1, granted_roles=["admin"]
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(core_client, "list_groups", fake_list_groups)
+    r = client.get("/admin/groups")
+    assert r.status_code == 200
+    assert "Everyone" in r.text and "Admins" in r.text
+    assert "baseline" in r.text  # the baseline badge on the everyone row
+    assert 'action="/admin/kernel/group"' in r.text
+    assert 'value="set_scopes"' in r.text and 'value="set_role"' in r.text
+    assert 'value="delete"' in r.text and 'value="rename"' in r.text
+    # scope-picker offers known src:* + public, and NEVER private
+    assert 'value="src:wiki"' in r.text and 'value="src:ldap"' in r.text
+    assert 'value="private"' not in r.text
+    # the group's held scope is pre-checked
+    assert 'value="src:wiki" checked' in r.text
+
+
+def test_admin_roles_page_is_read_only(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    _as_groot(monkeypatch)
+
+    async def fake_list_roles(assertion):
+        return core_pb2.ListRolesResponse(
+            status=core_pb2.CALL_OK,
+            roles=[
+                core_pb2.RoleView(
+                    name="admin", capabilities=["manage_access", "invite_users"], holder_count=2
+                ),
+                core_pb2.RoleView(name="superadmin", capabilities=["all"], holder_count=1),
+            ],
+        )
+
+    monkeypatch.setattr(core_client, "list_roles", fake_list_roles)
+    r = client.get("/admin/roles")
+    assert r.status_code == 200
+    assert "admin" in r.text and "superadmin" in r.text
+    assert "manage_access" in r.text
+    assert "read-only" in r.text
+    # no mutation affordance on the roles page
+    assert 'action="/admin/kernel/group"' not in r.text
+    assert 'action="/admin/kernel/access"' not in r.text
+
+
+def test_kernel_group_set_scopes_calls_manage_group_dropping_private(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    _as_groot(monkeypatch)
+    captured = {}
+
+    async def fake_manage_group(assertion, op, **kw):
+        captured["op"] = op
+        captured.update(kw)
+        return core_pb2.AdminActionResponse(status=core_pb2.CALL_OK)
+
+    monkeypatch.setattr(core_client, "manage_group", fake_manage_group)
+    r = client.post(
+        "/admin/kernel/group",
+        data={
+            "csrf": _csrf(),
+            "op": "set_scopes",
+            "group_id": "everyone",
+            "scopes": ["public", "src:wiki", "private"],  # repeated form fields
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/admin/groups"
+    assert captured["op"] == core_pb2.GROUP_SET_SCOPES
+    assert captured["group_id"] == "everyone"
+    assert captured["scopes"] == ["public", "src:wiki"]  # private dropped defensively
+
+
+def test_kernel_group_bad_op_is_400(monkeypatch) -> None:
+    _as_groot(monkeypatch)
+
+    async def must_not_call(*a, **kw):
+        raise AssertionError("bad op must not reach the kernel")
+
+    monkeypatch.setattr(core_client, "manage_group", must_not_call)
+    r = client.post(
+        "/admin/kernel/group",
+        data={"csrf": _csrf(), "op": "nonsense", "group_id": "x"},
+    )
+    assert r.status_code == 400
+
+
+def test_kernel_group_forbidden_for_non_groot(monkeypatch) -> None:
+    monkeypatch.setattr(web, "_current_principal", lambda request: _principal(is_groot=False))
+
+    async def must_not_call(*a, **kw):
+        raise AssertionError("non-groot must not manage groups")
+
+    monkeypatch.setattr(core_client, "manage_group", must_not_call)
+    r = client.post(
+        "/admin/kernel/group",
+        data={"csrf": "x", "op": "create", "group_id": "x"},
+    )
+    assert r.status_code == 403
+
+
+def test_admin_groups_forbidden_for_non_groot(monkeypatch) -> None:
+    monkeypatch.setattr(web, "_current_principal", lambda request: _principal(is_groot=False))
+
+    async def must_not_call(*a, **kw):
+        raise AssertionError("non-groot must not list groups/roles")
+
+    monkeypatch.setattr(core_client, "list_groups", must_not_call)
+    monkeypatch.setattr(core_client, "list_roles", must_not_call)
+    assert client.get("/admin/groups").status_code == 403
+    assert client.get("/admin/roles").status_code == 403
+
+
+# --- Auth Provider SSO claim mappers (FE-3: ListSsoMap / ManageSsoMap + claims) --
+
+
+def test_auth_page_shows_claim_config_and_mapping(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    _as_groot(monkeypatch)
+
+    async def fake_kc():
+        return []
+
+    async def fake_sso_map(assertion):
+        return core_pb2.ListSsoMapResponse(
+            status=core_pb2.CALL_OK,
+            mappings=[
+                core_pb2.SsoMapView(
+                    provider="keycloak", incoming_group="DSI", our_group_id="admins"
+                )
+            ],
+        )
+
+    async def fake_groups(assertion):
+        return core_pb2.ListGroupsResponse(
+            status=core_pb2.CALL_OK,
+            groups=[core_pb2.GroupView(id="admins"), core_pb2.GroupView(id="everyone")],
+        )
+
+    from web_channel import kc_admin
+
+    monkeypatch.setattr(kc_admin, "list_users", fake_kc)
+    monkeypatch.setattr(core_client, "list_sso_map", fake_sso_map)
+    monkeypatch.setattr(core_client, "list_groups", fake_groups)
+    r = client.get("/admin/auth")
+    assert r.status_code == 200
+    assert "SSO claim mappers" in r.text
+    assert 'action="/admin/auth/claims"' in r.text
+    assert 'name="groups_claim"' in r.text and 'name="roles_claim"' in r.text
+    assert 'action="/admin/auth/sso-map"' in r.text
+    assert "DSI" in r.text and "admins" in r.text
+    assert 'value="everyone"' in r.text  # our-group dropdown option
+
+
+def test_auth_page_handles_missing_sso_map_rpc(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    _as_groot(monkeypatch)
+
+    async def fake_kc():
+        return []
+
+    async def boom(assertion):
+        raise RuntimeError("UNIMPLEMENTED: kernel predates BE-1")
+
+    from web_channel import kc_admin
+
+    monkeypatch.setattr(kc_admin, "list_users", fake_kc)
+    monkeypatch.setattr(core_client, "list_sso_map", boom)
+    monkeypatch.setattr(core_client, "list_groups", boom)
+    r = client.get("/admin/auth")
+    assert r.status_code == 200
+    assert "SSO-map RPC not available yet" in r.text
+
+
+def test_auth_sso_map_put_calls_manage_sso_map(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    _as_groot(monkeypatch)
+    captured: dict = {}
+
+    async def fake_manage(assertion, op, **kw):
+        captured["op"] = op
+        captured.update(kw)
+        return core_pb2.AdminActionResponse(status=core_pb2.CALL_OK)
+
+    monkeypatch.setattr(core_client, "manage_sso_map", fake_manage)
+    r = client.post(
+        "/admin/auth/sso-map",
+        data={"csrf": _csrf(), "op": "put", "incoming_group": "DSI", "our_group_id": "admins"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/admin/auth"
+    assert captured["op"] == core_pb2.SSO_MAP_PUT
+    assert captured["provider"] == "keycloak"
+    assert captured["incoming_group"] == "DSI"
+    assert captured["our_group_id"] == "admins"
+
+
+def test_auth_sso_map_delete_calls_manage_sso_map(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    _as_groot(monkeypatch)
+    captured: dict = {}
+
+    async def fake_manage(assertion, op, **kw):
+        captured["op"] = op
+        captured.update(kw)
+        return core_pb2.AdminActionResponse(status=core_pb2.CALL_OK)
+
+    monkeypatch.setattr(core_client, "manage_sso_map", fake_manage)
+    r = client.post(
+        "/admin/auth/sso-map",
+        data={"csrf": _csrf(), "op": "delete", "incoming_group": "DSI"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert captured["op"] == core_pb2.SSO_MAP_DELETE
+    assert captured["incoming_group"] == "DSI"
+
+
+def test_auth_claims_persist_and_are_read_back(monkeypatch) -> None:
+    _as_groot(monkeypatch)
+    r = client.post(
+        "/admin/auth/claims",
+        data={"csrf": _csrf(), "groups_claim": "my_groups", "roles_claim": "acme.roles"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert auth.groups_claim() == "my_groups"
+    assert auth.roles_claim() == "acme.roles"
+    # empty ⇒ back to the built-in default
+    client.post(
+        "/admin/auth/claims",
+        data={"csrf": _csrf(), "groups_claim": "", "roles_claim": ""},
+        follow_redirects=False,
+    )
+    assert auth.groups_claim() == auth.DEFAULT_GROUPS_CLAIM
+    assert auth.roles_claim() == auth.DEFAULT_ROLES_CLAIM
+
+
+def test_auth_sso_map_forbidden_for_non_groot(monkeypatch) -> None:
+    monkeypatch.setattr(web, "_current_principal", lambda request: _principal(is_groot=False))
+
+    async def must_not_call(*a, **kw):
+        raise AssertionError("non-groot must not manage the SSO map")
+
+    monkeypatch.setattr(core_client, "manage_sso_map", must_not_call)
+    r = client.post("/admin/auth/sso-map", data={"csrf": "x", "op": "put"})
+    assert r.status_code == 403
+    r = client.post("/admin/auth/claims", data={"csrf": "x", "groups_claim": "g"})
+    assert r.status_code == 403
+
+
+def test_principal_from_claims_honors_configured_roles_claim(monkeypatch) -> None:
+    # a non-default roles claim path resolves groot correctly
+    monkeypatch.setenv("OIDC_ROLES_CLAIM", "acme.roles")
+    monkeypatch.setenv("OIDC_GROUPS_CLAIM", "acme.groups")
+    claims = {
+        "sub": "s-1",
+        "preferred_username": "bob",
+        "acme": {"roles": ["groot"], "groups": ["/DSI"]},
+    }
+    p = auth.principal_from_claims(claims)
+    assert p.is_groot is True
+    assert p.groups == ["DSI"]  # normalized (leading slash stripped)
+
+
+# --- Baseline (Everyone) scopes control (FE-4) -------------------------------
+
+
+def test_admin_groups_shows_baseline_everyone_control(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    monkeypatch.setenv("SWARM_AUTH_BASELINE_GROUP", "everyone")
+    monkeypatch.setenv("KNOWN_SOURCE_SCOPES", "src:wiki,src:ldap,src:confluence")
+    _as_groot(monkeypatch)
+
+    async def fake_list_groups(assertion):
+        return core_pb2.ListGroupsResponse(
+            status=core_pb2.CALL_OK,
+            groups=[
+                core_pb2.GroupView(
+                    id="everyone", name="Everyone", member_count=9,
+                    granted_scopes=["public", "src:wiki", "src:ldap"],
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(core_client, "list_groups", fake_list_groups)
+    r = client.get("/admin/groups")
+    assert r.status_code == 200
+    assert "Baseline access" in r.text
+    assert "every authenticated user" in r.text
+    # the set-baseline-scopes form targets the everyone group with its scopes pre-checked
+    assert 'value="everyone"' in r.text
+    assert 'value="src:wiki" checked' in r.text
+    assert 'value="src:ldap" checked' in r.text
+    assert 'value="src:confluence"' in r.text and 'value="src:confluence" checked' not in r.text
+    assert "Set baseline scopes" in r.text

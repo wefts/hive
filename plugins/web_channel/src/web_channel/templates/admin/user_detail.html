@@ -45,6 +45,10 @@
               <span>{{ user.providers|join(', ') if user.providers else '—' }}</span>
             </div>
             <div>
+              <span class="section-label">Emails</span>
+              <span>{{ user.emails|join(', ') if user.emails else '—' }}</span>
+            </div>
+            <div>
               <span class="section-label">Last login</span>
               <span>{{ user.last_login_at or 'never' }}</span>
             </div>

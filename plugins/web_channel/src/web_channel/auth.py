@@ -44,6 +44,25 @@ def known_groups() -> list[str]:
     return list(_group_scope_map().keys())
 
 
+def baseline_group() -> str:
+    """The kernel-authz baseline group whose scopes every authenticated actor
+    inherits (the "Everyone" baseline; SWARM_AUTH_BASELINE_GROUP). "" ⇒ none."""
+    return os.environ.get("SWARM_AUTH_BASELINE_GROUP", "").strip()
+
+
+def known_source_scopes() -> list[str]:
+    """Candidate scopes for the admin Groups scope-picker (ADR-18): always
+    `public`, plus each entry in KNOWN_SOURCE_SCOPES (comma-separated, e.g.
+    `src:wiki,src:ldap`). `private` is never offered — a group cannot confer it
+    (the kernel hard-denies it at the grant boundary regardless)."""
+    raw = os.environ.get("KNOWN_SOURCE_SCOPES", "").strip()
+    out = [PUBLIC_SCOPE]
+    for candidate in (s.strip() for s in raw.split(",")):
+        if candidate and candidate != "private" and candidate not in out:
+            out.append(candidate)
+    return out
+
+
 def scopes_for(groups: list[str]) -> list[str]:
     """Map IdP groups → kernel scopes. ALWAYS includes `public`; adds a mapped scope
     per KNOWN group; an unknown group grants nothing (default-deny). Deduped, stable
@@ -95,16 +114,53 @@ class Principal:
         )
 
 
+DEFAULT_GROUPS_CLAIM = "groups"
+DEFAULT_ROLES_CLAIM = "realm_access.roles"
+
+
+def sso_provider() -> str:
+    """The provider key SSO-group mappings are stored under (must match the provider
+    the kernel provisions SSO subjects with; ADR-16 D3). Keycloak by default."""
+    return settings.get_or_env("OIDC_PROVIDER", "keycloak")
+
+
+def groups_claim() -> str:
+    """Which id-token claim carries the user's groups (dotted path allowed). The
+    operator sets this on /admin/auth; default `groups`."""
+    return settings.get_or_env("OIDC_GROUPS_CLAIM", DEFAULT_GROUPS_CLAIM) or DEFAULT_GROUPS_CLAIM
+
+
+def roles_claim() -> str:
+    """Which id-token claim carries the user's roles (dotted path allowed). Default
+    `realm_access.roles` (Keycloak's realm roles)."""
+    return settings.get_or_env("OIDC_ROLES_CLAIM", DEFAULT_ROLES_CLAIM) or DEFAULT_ROLES_CLAIM
+
+
+def _dig(claims: dict, dotted: str) -> object:
+    """Walk a dotted claim path (`realm_access.roles`); None if any segment misses."""
+    cur: object = claims
+    for part in dotted.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def _claim_list(claims: dict, dotted: str) -> list:
+    value = _dig(claims, dotted)
+    return list(value) if isinstance(value, list) else []
+
+
 def principal_from_claims(claims: dict) -> Principal:
     """Build a Principal from verified OIDC id-token claims. Scopes are DERIVED from
     groups here (never taken from the client/token directly), so the channel decides
     scope from identity, deterministically. `sub` is the IdP's stable subject (never
-    the display name) — the identity the actor assertion is signed for (ADR-16 D9)."""
+    the display name) — the identity the actor assertion is signed for (ADR-16 D9).
+    WHICH claim carries groups/roles is operator-configured (/admin/auth claim keys)."""
     # Normalize: strip whitespace and a leading "/" (Keycloak emits "/confluence"
     # when the groups mapper uses full paths) so map lookups are robust.
-    groups = [str(g).strip().lstrip("/") for g in (claims.get("groups") or [])]
-    realm_access = claims.get("realm_access") or {}
-    roles = realm_access.get("roles") or []
+    groups = [str(g).strip().lstrip("/") for g in _claim_list(claims, groups_claim())]
+    roles = _claim_list(claims, roles_claim())
     viewer = claims.get("preferred_username") or claims.get("sub") or ""
     display = claims.get("name") or viewer
     return Principal(

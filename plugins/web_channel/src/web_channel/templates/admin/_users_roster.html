@@ -1,0 +1,102 @@
+{# Server-side roster page: table + pager. Swapped into #roster-body by HTMX on
+   search / paginate (ListUsers query+offset+total). #}
+{% if kernel_users is none %}
+  <p class="muted"><span class="badge status-warn">kernel roster unavailable</span>
+    Could not list kernel users right now.</p>
+{% else %}
+  <div class="table-container roster-wrap">
+    <table class="table admin-users-table">
+      <thead>
+        <tr>
+          <th>Login</th><th>Name</th><th>Status</th><th>Roles</th><th>Groups</th>
+          <th>Providers</th><th>Last login</th><th>UUID</th><th class="admin-actions-col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in kernel_users %}
+          <tr>
+            <td><a href="/admin/users/{{ u.id }}">{{ u.login or '—' }}</a></td>
+            <td>{{ [u.first_name, u.last_name]|select|join(' ') or u.nickname or '—' }}</td>
+            <td>{{ u.status or '—' }}</td>
+            <td>{{ u.roles|join(', ') if u.roles else '—' }}</td>
+            <td>{{ u.groups|join(', ') if u.groups else '—' }}</td>
+            <td>{{ u.providers|join(', ') if u.providers else '—' }}</td>
+            <td>{% if u.last_login_at %}<span title="{{ u.last_login_at }}">{{ u.last_login_at[:10] }}</span>{% else %}never{% endif %}</td>
+            <td><code title="{{ u.id }}">{{ u.id[:8] }}</code></td>
+            <td class="admin-actions-col">
+              <div class="dropdown-menu admin-kebab" x-data="{open:false}" @click.outside="open=false">
+                <button class="btn" data-size="sm" data-variant="ghost" type="button" aria-label="Actions for {{ u.login or u.id }}" aria-haspopup="menu" aria-expanded="false" :aria-expanded="open.toString()" @click="open=!open">⋮</button>
+                <div data-popover role="menu" x-show="open" x-cloak aria-hidden="true" :aria-hidden="(!open).toString()">
+                  <form method="post" action="/admin/kernel/user" autocomplete="off">
+                    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                    <input type="hidden" name="target_user_id" value="{{ u.id }}">
+                    <input type="hidden" name="op" value="deactivate">
+                    <button type="submit" role="menuitem">Deactivate</button>
+                  </form>
+                  {% for role in ["admin", "superadmin"] %}
+                    <form method="post" action="/admin/kernel/access" autocomplete="off">
+                      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                      <input type="hidden" name="target_user_id" value="{{ u.id }}">
+                      <input type="hidden" name="op" value="grant_role">
+                      <input type="hidden" name="role" value="{{ role }}">
+                      <button type="submit" role="menuitem">Grant role {{ role }}</button>
+                    </form>
+                    <form method="post" action="/admin/kernel/access" autocomplete="off">
+                      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                      <input type="hidden" name="target_user_id" value="{{ u.id }}">
+                      <input type="hidden" name="op" value="revoke_role">
+                      <input type="hidden" name="role" value="{{ role }}">
+                      <button type="submit" role="menuitem">Revoke role {{ role }}</button>
+                    </form>
+                  {% endfor %}
+                  {% if groups %}<hr role="separator">{% endif %}
+                  {% for g in groups %}
+                    <form method="post" action="/admin/kernel/access" autocomplete="off">
+                      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                      <input type="hidden" name="target_user_id" value="{{ u.id }}">
+                      <input type="hidden" name="op" value="grant_group">
+                      <input type="hidden" name="group_id" value="{{ g }}">
+                      <button type="submit" role="menuitem">Grant group {{ g }}</button>
+                    </form>
+                    <form method="post" action="/admin/kernel/access" autocomplete="off">
+                      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                      <input type="hidden" name="target_user_id" value="{{ u.id }}">
+                      <input type="hidden" name="op" value="revoke_group">
+                      <input type="hidden" name="group_id" value="{{ g }}">
+                      <button type="submit" role="menuitem">Revoke group {{ g }}</button>
+                    </form>
+                  {% endfor %}
+                  <hr role="separator">
+                  <form method="post" action="/admin/kernel/user" autocomplete="off">
+                    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                    <input type="hidden" name="target_user_id" value="{{ u.id }}">
+                    <input type="hidden" name="op" value="delete">
+                    <button type="submit" role="menuitem" data-variant="destructive" onclick="return confirm('Delete this user?')">Delete</button>
+                  </form>
+                </div>
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" class="muted">{% if q %}no users match "{{ q }}"{% else %}none yet{% endif %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if total %}
+    <nav class="roster-pager" aria-label="Roster pagination">
+      {% if offset > 0 %}
+        <button class="btn" data-variant="outline" type="button"
+                hx-get="/admin/users/roster?q={{ q|urlencode }}&offset={{ [offset - limit, 0]|max }}"
+                hx-target="#roster-body" hx-swap="innerHTML">← Prev</button>
+      {% endif %}
+      <span class="muted">{{ offset + 1 }}–{{ [offset + limit, total]|min }} of {{ total }}</span>
+      {% if offset + limit < total %}
+        <button class="btn" data-variant="outline" type="button"
+                hx-get="/admin/users/roster?q={{ q|urlencode }}&offset={{ offset + limit }}"
+                hx-target="#roster-body" hx-swap="innerHTML">Next →</button>
+      {% endif %}
+    </nav>
+  {% endif %}
+{% endif %}

@@ -1127,29 +1127,77 @@ def _admin_template_context(request: Request, principal: auth.Principal, section
     }
 
 
+_ROSTER_PAGE = 50
+
+
+async def _load_roster(assertion: str, q: str, offset: int) -> tuple[list | None, int]:
+    """(users, total). users is None ⇒ kernel identity unresolved, roster
+    unavailable, or a non-OK status — the template renders that honestly. `total`
+    is the pre-page match count (kernel-side) for the pager."""
+    if not assertion:
+        return None, 0
+    try:
+        resp = await core_client.list_users(
+            assertion, query=q, offset=max(offset, 0), limit=_ROSTER_PAGE
+        )
+    except Exception:
+        logger.exception("ListUsers failed")
+        return None, 0
+    if resp.status != core_pb2.CALL_OK:
+        return None, 0
+    return list(resp.users), resp.total
+
+
+def _roster_context(
+    request: Request,
+    principal: auth.Principal,
+    kernel_users: list | None,
+    total: int,
+    q: str,
+    offset: int,
+) -> dict:
+    return {
+        **_admin_template_context(request, principal, "users"),
+        "kernel_users": kernel_users,
+        "total": total,
+        "q": q,
+        "offset": max(offset, 0),
+        "limit": _ROSTER_PAGE,
+        "groups": auth.known_groups(),
+    }
+
+
 @app.get("/admin/users", response_class=HTMLResponse)
-async def admin_users(request: Request) -> HTMLResponse:
+async def admin_users(request: Request, q: str = "", offset: int = 0) -> HTMLResponse:
     principal = _require_groot(request)
     if principal is None:
         return _admin_forbidden()
-    kernel_users = None
     assertion = _admin_assertion(principal)
-    if assertion:
-        try:
-            resp = await core_client.list_users(assertion)
-            kernel_users = list(resp.users) if resp.status == core_pb2.CALL_OK else None
-        except Exception:
-            logger.exception("ListUsers failed")
-            kernel_users = None
+    kernel_users, total = await _load_roster(assertion, q, offset)
     return templates.TemplateResponse(
         request,
         "admin/users.html",
         {
-            **_admin_template_context(request, principal, "users"),
-            "kernel_users": kernel_users,
+            **_roster_context(request, principal, kernel_users, total, q, offset),
             "local_users": localusers.list_users(),
-            "groups": auth.known_groups(),
         },
+    )
+
+
+@app.get("/admin/users/roster", response_class=HTMLResponse)
+async def admin_users_roster(request: Request, q: str = "", offset: int = 0) -> HTMLResponse:
+    """HTMX partial: the roster table + pager for a server-side search/paginate
+    (ListUsers query+offset+total) — no client-side ≤500 ceiling. Declared BEFORE
+    the `{user_id}` route so "roster" is not mistaken for a uuid."""
+    principal = _require_groot(request)
+    if principal is None:
+        return _admin_forbidden()
+    assertion = _admin_assertion(principal)
+    kernel_users, total = await _load_roster(assertion, q, offset)
+    return templates.TemplateResponse(
+        request,
+        "admin/_users_roster.html",
+        _roster_context(request, principal, kernel_users, total, q, offset),
     )
 
 
@@ -1158,34 +1206,28 @@ async def admin_user_detail(request: Request, user_id: str) -> HTMLResponse:
     principal = _require_groot(request)
     if principal is None:
         return _admin_forbidden()
-    kernel_users = None
     assertion = _admin_assertion(principal)
-    if assertion:
-        try:
-            resp = await core_client.list_users(assertion)
-            kernel_users = list(resp.users) if resp.status == core_pb2.CALL_OK else None
-        except Exception:
-            logger.exception("ListUsers failed for admin user detail")
-            kernel_users = None
     user = None
-    if kernel_users is not None:
-        # Interim roster lookup: at scale this becomes a GetUser(uuid) RPC; see
-        # board/todo/swarm-kernel-requirements-from-web.md.
-        user = next((u for u in kernel_users if u.id == user_id), None)
-    if user is None:
-        return templates.TemplateResponse(
-            request,
-            "admin/user_detail.html",
-            {
-                **_admin_template_context(request, principal, "users"),
-                "user": None,
-                "groups": auth.known_groups(),
-                "detail_error": "kernel roster unavailable"
-                if kernel_users is None
-                else "user not found",
-            },
-            status_code=404,
-        )
+    detail_error = None
+    status_code = 200
+    if not assertion:
+        detail_error, status_code = "kernel identity not resolved", 403
+    else:
+        try:
+            resp = await core_client.get_user(assertion, user_id)
+        except Exception:
+            logger.exception("GetUser failed for admin user detail")
+            resp = None
+        if resp is None:
+            detail_error, status_code = "kernel unavailable", 503
+        elif resp.status == core_pb2.CALL_OK:
+            user = resp.user
+        elif resp.status == core_pb2.CALL_NOT_FOUND:
+            detail_error, status_code = "user not found", 404
+        else:
+            label, _css = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
+            detail_error = label
+            status_code = 403 if resp.status == core_pb2.CALL_NOT_AUTHORIZED else 400
     return templates.TemplateResponse(
         request,
         "admin/user_detail.html",
@@ -1193,7 +1235,9 @@ async def admin_user_detail(request: Request, user_id: str) -> HTMLResponse:
             **_admin_template_context(request, principal, "users"),
             "user": user,
             "groups": auth.known_groups(),
+            "detail_error": detail_error,
         },
+        status_code=status_code,
     )
 
 
@@ -1207,6 +1251,8 @@ async def admin_auth_page(request: Request) -> HTMLResponse:
     except Exception:
         logger.exception("Keycloak list_users failed")
         users = None  # template shows an honest "Keycloak unavailable"
+    assertion = _admin_assertion(principal)
+    sso_map, our_groups = await _load_sso_map(assertion)
     return templates.TemplateResponse(
         request,
         "admin/auth.html",
@@ -1214,8 +1260,95 @@ async def admin_auth_page(request: Request) -> HTMLResponse:
             **_admin_template_context(request, principal, "auth"),
             "connector": _connector_view(),
             "users": users,
+            "sso_map": sso_map,
+            "our_groups": our_groups,
+            "sso_provider": auth.sso_provider(),
+            "groups_claim": auth.groups_claim(),
+            "roles_claim": auth.roles_claim(),
         },
     )
+
+
+async def _load_sso_map(assertion: str) -> tuple[list | None, list[str]]:
+    """(mappings, our_group_ids). mappings is None ⇒ the SSO-map RPC isn't
+    available yet (kernel pre-BE-1 ⇒ gRPC UNIMPLEMENTED) or a non-OK status — the
+    template shows that honestly. our_group_ids feeds the "map to" dropdown."""
+    if not assertion:
+        return None, []
+    mappings: list | None = None
+    our_groups: list[str] = []
+    try:
+        resp = await core_client.list_sso_map(assertion)
+        mappings = list(resp.mappings) if resp.status == core_pb2.CALL_OK else None
+    except Exception:
+        logger.exception("ListSsoMap failed (kernel may predate BE-1)")
+        mappings = None
+    try:
+        gresp = await core_client.list_groups(assertion)
+        if gresp.status == core_pb2.CALL_OK:
+            our_groups = [g.id for g in gresp.groups]
+    except Exception:
+        logger.exception("ListGroups failed for SSO-map group picker")
+    return mappings, our_groups
+
+
+@app.post("/admin/auth/claims", response_class=HTMLResponse)
+async def admin_auth_claims(
+    request: Request,
+    groups_claim: str = Form(""),
+    roles_claim: str = Form(""),
+    csrf: str = Form(""),
+):
+    """Persist WHICH id-token claim carries groups / roles (channel runtime config,
+    not kernel state — it governs how the channel reads the token before it derives
+    scope). Empty ⇒ fall back to the built-in default for that claim."""
+    principal = _require_groot(request)
+    if principal is None:
+        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
+    settings.put("OIDC_GROUPS_CLAIM", groups_claim.strip() or auth.DEFAULT_GROUPS_CLAIM)
+    settings.put("OIDC_ROLES_CLAIM", roles_claim.strip() or auth.DEFAULT_ROLES_CLAIM)
+    return RedirectResponse("/admin/auth", status_code=303)
+
+
+@app.post("/admin/auth/sso-map", response_class=HTMLResponse)
+async def admin_auth_sso_map(
+    request: Request,
+    op: str = Form(...),
+    incoming_group: str = Form(""),
+    our_group_id: str = Form(""),
+    csrf: str = Form(""),
+):
+    """CRUD one incoming-SSO-group → our-group mapping (ADR-18 ps-4) over the kernel
+    (ManageSsoMap, `manage_access`-gated + audited). Default-deny is unchanged — an
+    unmapped incoming group still grants nothing. Provider is the channel's SSO
+    provider key (must match how the kernel provisions SSO subjects)."""
+    principal = _require_groot(request)
+    if principal is None:
+        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
+    op_map = {"put": core_pb2.SSO_MAP_PUT, "delete": core_pb2.SSO_MAP_DELETE}
+    if op not in op_map:
+        return _admin_outcome_page(400, "bad request", "status-error")
+    assertion = _admin_assertion(principal)
+    try:
+        resp = await core_client.manage_sso_map(
+            assertion,
+            op_map[op],
+            provider=auth.sso_provider(),
+            incoming_group=incoming_group.strip(),
+            our_group_id=our_group_id.strip(),
+        )
+    except Exception:
+        logger.exception("ManageSsoMap failed (kernel may predate BE-1)")
+        return _admin_outcome_page(502, "kernel unreachable or SSO-map RPC not deployed yet",
+                                   "status-error")
+    if resp.status != core_pb2.CALL_OK:
+        label, css_class = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
+        return _admin_outcome_page(409, label, css_class)
+    return RedirectResponse("/admin/auth", status_code=303)
 
 
 @app.get("/admin/connector")
@@ -1247,6 +1380,68 @@ async def admin_tools(request: Request) -> HTMLResponse:
         request,
         "admin/tools.html",
         _admin_template_context(request, principal, "tools"),
+    )
+
+
+@app.get("/admin/groups", response_class=HTMLResponse)
+async def admin_groups(request: Request) -> HTMLResponse:
+    """Groups list (ListGroups) + per-row lifecycle via ManageGroup: name,
+    members, granted scopes/roles. The scope-picker offers known `src:*`/`public`
+    (never `private`) plus any scope a group already holds — no invented sources."""
+    principal = _require_groot(request)
+    if principal is None:
+        return _admin_forbidden()
+    assertion = _admin_assertion(principal)
+    groups = None
+    if assertion:
+        try:
+            resp = await core_client.list_groups(assertion)
+            groups = list(resp.groups) if resp.status == core_pb2.CALL_OK else None
+        except Exception:
+            logger.exception("ListGroups failed")
+            groups = None
+    scope_options = list(auth.known_source_scopes())
+    for g in groups or []:
+        for s in g.granted_scopes:
+            if s != "private" and s not in scope_options:
+                scope_options.append(s)
+    return templates.TemplateResponse(
+        request,
+        "admin/groups.html",
+        {
+            **_admin_template_context(request, principal, "groups"),
+            "kernel_groups": groups,
+            "scope_options": scope_options,
+            "baseline_group": auth.baseline_group(),
+            "assignable_roles": ["admin", "superadmin"],
+        },
+    )
+
+
+@app.get("/admin/roles", response_class=HTMLResponse)
+async def admin_roles(request: Request) -> HTMLResponse:
+    """Roles list (ListRoles), READ-ONLY: the fixed user/admin/superadmin set with
+    derived capabilities + holder counts (roles are administration-only, per the
+    decided model — never grown with connectors)."""
+    principal = _require_groot(request)
+    if principal is None:
+        return _admin_forbidden()
+    assertion = _admin_assertion(principal)
+    roles = None
+    if assertion:
+        try:
+            resp = await core_client.list_roles(assertion)
+            roles = list(resp.roles) if resp.status == core_pb2.CALL_OK else None
+        except Exception:
+            logger.exception("ListRoles failed")
+            roles = None
+    return templates.TemplateResponse(
+        request,
+        "admin/roles.html",
+        {
+            **_admin_template_context(request, principal, "roles"),
+            "kernel_roles": roles,
+        },
     )
 
 
@@ -1391,6 +1586,62 @@ async def admin_kernel_access(
         label, css_class = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
         return _admin_outcome_page(409, label, css_class)
     return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/kernel/group", response_class=HTMLResponse)
+async def admin_kernel_group(
+    request: Request,
+    op: str = Form(...),
+    group_id: str = Form(""),
+    name: str = Form(""),
+    description: str = Form(""),
+    role: str = Form(""),
+    confirm: str = Form(""),
+    csrf: str = Form(""),
+):
+    """ManageGroup — first-class group lifecycle (ADR-18): create/rename/delete +
+    set/clear role + set-scopes. `manage_access` for lifecycle/scopes, superadmin
+    for role ops (kernel-enforced, not here). `scopes` arrives as repeated checkbox
+    values (read from the raw form); `private` is dropped defensively (the kernel
+    hard-denies it too)."""
+    principal = _require_groot(request)
+    if principal is None:
+        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
+    op_map = {
+        "create": core_pb2.GROUP_CREATE,
+        "rename": core_pb2.GROUP_RENAME,
+        "delete": core_pb2.GROUP_DELETE,
+        "set_role": core_pb2.GROUP_SET_ROLE,
+        "clear_role": core_pb2.GROUP_CLEAR_ROLE,
+        "set_scopes": core_pb2.GROUP_SET_SCOPES,
+    }
+    if op not in op_map:
+        return _admin_outcome_page(400, "bad request", "status-error")
+    assertion = _admin_assertion(principal)
+    form_data = await request.form()
+    scope_list = [
+        s.strip() for s in form_data.getlist("scopes") if s.strip() and s.strip() != "private"
+    ]
+    try:
+        resp = await core_client.manage_group(
+            assertion,
+            op_map[op],
+            group_id=group_id.strip(),
+            name=name.strip(),
+            description=description.strip(),
+            role=role.strip(),
+            scopes=scope_list,
+            confirm=bool(confirm),
+        )
+    except Exception:
+        logger.exception("ManageGroup failed")
+        return _admin_outcome_page(502, "kernel unreachable", "status-error")
+    if resp.status != core_pb2.CALL_OK:
+        label, css_class = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
+        return _admin_outcome_page(409, label, css_class)
+    return RedirectResponse("/admin/groups", status_code=303)
 
 
 @app.post("/admin/kernel/read-conversation", response_class=HTMLResponse)

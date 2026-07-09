@@ -219,6 +219,10 @@ services:
       SESSION_SECRET: ${WEB_CHANNEL_SESSION_SECRET:-}
       # group→scope map (JSON); default-deny otherwise. Kernel stays scope authority.
       GROUP_SCOPE_MAP: ${WEB_CHANNEL_GROUP_SCOPE_MAP:-{"confluence":"group"}}
+      # The kernel-authz baseline group + the Groups scope-picker candidates (ADR-18),
+      # surfaced in the admin Groups page. Both flow from the env layers (base + stage).
+      SWARM_AUTH_BASELINE_GROUP: ${SWARM_AUTH_BASELINE_GROUP:-}
+      KNOWN_SOURCE_SCOPES: ${KNOWN_SOURCE_SCOPES:-}
       # Admin API for the groot invite/provision (server-to-server, internal URL).
       KEYCLOAK_ADMIN_URL: http://keycloak:8080
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-swarm-local}

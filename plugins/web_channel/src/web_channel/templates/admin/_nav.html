@@ -1,8 +1,8 @@
 <nav class="card admin-nav" aria-label="Admin sections">
   <section>
     <a class="navlink{% if admin_section == 'users' %} active{% endif %}" href="/admin/users">Users</a>
-    <span class="navlink muted">Groups <span class="muted">(planned)</span></span>
-    <span class="navlink muted">Roles <span class="muted">(planned)</span></span>
+    <a class="navlink{% if admin_section == 'groups' %} active{% endif %}" href="/admin/groups">Groups</a>
+    <a class="navlink{% if admin_section == 'roles' %} active{% endif %}" href="/admin/roles">Roles</a>
     <a class="navlink{% if admin_section == 'auth' %} active{% endif %}" href="/admin/auth">Auth Provider</a>
     <a class="navlink{% if admin_section == 'connectors' %} active{% endif %}" href="/admin/connectors">Connectors</a>
     <a class="navlink{% if admin_section == 'tools' %} active{% endif %}" href="/admin/tools">Tools</a>

@@ -70,6 +70,19 @@ service Core {
   // Success is NOT audited (a roster read on every admin page load would drown
   // admin_action_audit); DENIALS are audited like every other admin op.
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  // One user's full view for the detail page — avoids scanning the roster at scale.
+  // Same admin-cap gate as ListUsers; NOT_FOUND for an unknown/tombstoned uuid.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  // Read-only group list for the admin console (E3-read). Any admin cap.
+  rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse);
+  // Read-only role list with derived capabilities + holder counts. Any admin cap.
+  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
+  rpc ManageGroup(ManageGroupRequest) returns (AdminActionResponse);
+  // Incoming-SSO-group → our-group mapping (ADR-18 ps-4; Auth Provider UI). Read
+  // + CRUD, `manage_access`-gated + audited. Default-deny stays — an unmapped
+  // incoming group grants nothing; the mapping only routes to an existing group.
+  rpc ListSsoMap(ListSsoMapRequest) returns (ListSsoMapResponse);
+  rpc ManageSsoMap(ManageSsoMapRequest) returns (AdminActionResponse);
 }
 
 // Outcome of an identity/privacy call. UNAUTHENTICATED (no/invalid assertion) is
@@ -207,6 +220,10 @@ message ListUsersRequest {
   // Bounded by contract (council: gemini's must-fix): server clamps to [1..500];
   // 0 means the server default (500). Deterministic order: login, id.
   int32 limit = 3;
+  // Case-insensitive substring over login + first/last/nickname (server-side ILIKE).
+  string query = 4;
+  // Page offset (>= 0); clamped to >= 0 by the server. limit stays the page size.
+  int32 offset = 5;
 }
 
 message UserView {
@@ -220,16 +237,106 @@ message UserView {
   repeated string groups = 8;
   repeated string providers = 9; // identity_link providers (keycloak | local | …)
   string last_login_at = 10;     // ISO8601, "" when never
+  repeated string emails = 11;   // admin-visible PII; populated ONLY by GetUser
 }
 
 message ListUsersResponse {
   CallStatus status = 1;
   repeated UserView users = 2;
+  // Count of rows matching the filter, BEFORE limit/offset — for the pager.
+  int32 total = 3;
+}
+
+message GetUserRequest {
+  string assertion = 1;
+  string user_id = 2;
+}
+
+message GetUserResponse {
+  CallStatus status = 1;   // OK | NOT_FOUND | NOT_AUTHORIZED | UNAUTHENTICATED
+  UserView user = 2;
+}
+
+message ListGroupsRequest { string assertion = 1; }
+
+message GroupView {
+  string id = 1;
+  int32 member_count = 2;
+  repeated string granted_scopes = 3;
+  repeated string granted_roles = 4; // stays [] until a group->role binding exists (forward-compat)
+  string name = 5;
+  string description = 6;
+}
+
+message ListGroupsResponse {
+  CallStatus status = 1;             // OK | NOT_AUTHORIZED | UNAUTHENTICATED
+  repeated GroupView groups = 2;
+}
+
+message ListRolesRequest { string assertion = 1; }
+
+message RoleView {
+  string name = 1;
+  repeated string capabilities = 2;
+  int32 holder_count = 3;
+}
+
+message ListRolesResponse {
+  CallStatus status = 1;             // OK | NOT_AUTHORIZED | UNAUTHENTICATED
+  repeated RoleView roles = 2;
+}
+
+enum GroupOp {
+  GROUP_OP_UNSPECIFIED = 0;
+  GROUP_CREATE = 1;      // manage_access
+  GROUP_RENAME = 2;      // manage_access
+  GROUP_DELETE = 3;      // manage_access; non-empty needs confirm
+  GROUP_SET_ROLE = 4;    // superadmin (privilege)
+  GROUP_CLEAR_ROLE = 5;  // superadmin
+  GROUP_SET_SCOPES = 6;  // manage_access
+}
+
+message ManageGroupRequest {
+  string assertion = 1;
+  GroupOp op = 2;
+  string group_id = 3;
+  string name = 4;             // CREATE/RENAME
+  string description = 5;      // CREATE (optional)
+  string role = 6;             // SET_ROLE/CLEAR_ROLE ("admin"|"superadmin")
+  repeated string scopes = 7;  // SET_SCOPES (src:* / public; never private)
+  bool confirm = 8;            // DELETE of a non-empty group
 }
 
 message AdminActionResponse {
   CallStatus status = 1;         // OK | NOT_AUTHORIZED | UNAUTHENTICATED
   string user_id = 2;            // set on INVITE (the created user's uuid)
+}
+
+message ListSsoMapRequest { string assertion = 1; }
+
+message SsoMapView {
+  string provider = 1;        // the SSO provider (e.g. "keycloak")
+  string incoming_group = 2;  // the group/role name as it arrives in the SSO claim
+  string our_group_id = 3;    // the kernel access-group it maps to
+}
+
+message ListSsoMapResponse {
+  CallStatus status = 1;              // OK | NOT_AUTHORIZED | UNAUTHENTICATED
+  repeated SsoMapView mappings = 2;   // ordered by provider, incoming_group
+}
+
+enum SsoMapOp {
+  SSO_MAP_OP_UNSPECIFIED = 0;
+  SSO_MAP_PUT = 1;     // manage_access; upsert (provider,incoming_group)→our_group_id
+  SSO_MAP_DELETE = 2;  // manage_access; remove (provider,incoming_group)
+}
+
+message ManageSsoMapRequest {
+  string assertion = 1;
+  SsoMapOp op = 2;
+  string provider = 3;
+  string incoming_group = 4;
+  string our_group_id = 5;   // PUT only; must be an existing group (else BAD_REQUEST)
 }
 
 message AskRequest {

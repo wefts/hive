@@ -203,14 +203,121 @@ async def list_conversations(assertion: str) -> core_pb2.ListConversationsRespon
 
 
 async def list_users(
-    assertion: str, include_deleted: bool = False, limit: int = 0
+    assertion: str,
+    include_deleted: bool = False,
+    limit: int = 0,
+    query: str = "",
+    offset: int = 0,
 ) -> core_pb2.ListUsersResponse:
-    """Kernel-truth user roster for admin pages and per-row actions."""
+    """Kernel-truth user roster for admin pages and per-row actions. `query` is a
+    server-side case-insensitive substring over login + names (kills the client
+    ≤500 ceiling); `offset`/`limit` page it and the response `.total` is the
+    pre-page match count for the pager."""
     async with aio.insecure_channel(core_addr()) as channel:
         stub = core_pb2_grpc.CoreStub(channel)
         return await stub.ListUsers(
             core_pb2.ListUsersRequest(
-                assertion=assertion, include_deleted=include_deleted, limit=limit
+                assertion=assertion,
+                include_deleted=include_deleted,
+                limit=limit,
+                query=query,
+                offset=offset,
+            ),
+            timeout=read_timeout_s(),
+        )
+
+
+async def get_user(assertion: str, user_id: str) -> core_pb2.GetUserResponse:
+    """One user's full detail (identity, roles, groups, providers, emails) for the
+    detail page — avoids scanning the roster at scale. NOT_FOUND for an unknown or
+    tombstoned uuid. Same broad admin-cap gate as ListUsers."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.GetUser(
+            core_pb2.GetUserRequest(assertion=assertion, user_id=user_id),
+            timeout=read_timeout_s(),
+        )
+
+
+async def list_groups(assertion: str) -> core_pb2.ListGroupsResponse:
+    """Read-only group list: name, member_count, granted_scopes, granted_roles."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ListGroups(
+            core_pb2.ListGroupsRequest(assertion=assertion), timeout=read_timeout_s()
+        )
+
+
+async def list_roles(assertion: str) -> core_pb2.ListRolesResponse:
+    """Read-only role list: name, capabilities, holder_count (fixed admin set)."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ListRoles(
+            core_pb2.ListRolesRequest(assertion=assertion), timeout=read_timeout_s()
+        )
+
+
+async def manage_group(
+    assertion: str,
+    op: core_pb2.GroupOp,
+    group_id: str = "",
+    name: str = "",
+    description: str = "",
+    role: str = "",
+    scopes: list[str] | None = None,
+    confirm: bool = False,
+) -> core_pb2.AdminActionResponse:
+    """First-class group lifecycle (ADR-18): create/rename/delete + set-role +
+    set-scopes — capability-gated + audited kernel-side. `op` is a
+    `core_pb2.GroupOp` value. Scopes are validated at the grant boundary (src:* /
+    public only; private hard-denied). DELETE of a non-empty group needs confirm."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ManageGroup(
+            core_pb2.ManageGroupRequest(
+                assertion=assertion,
+                op=op,
+                group_id=group_id,
+                name=name,
+                description=description,
+                role=role,
+                scopes=scopes or [],
+                confirm=confirm,
+            ),
+            timeout=read_timeout_s(),
+        )
+
+
+async def list_sso_map(assertion: str) -> core_pb2.ListSsoMapResponse:
+    """Incoming-SSO-group → our-group mappings (ADR-18 ps-4), ordered by provider
+    then incoming group. `manage_access`-gated kernel-side."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ListSsoMap(
+            core_pb2.ListSsoMapRequest(assertion=assertion), timeout=read_timeout_s()
+        )
+
+
+async def manage_sso_map(
+    assertion: str,
+    op: core_pb2.SsoMapOp,
+    provider: str = "",
+    incoming_group: str = "",
+    our_group_id: str = "",
+) -> core_pb2.AdminActionResponse:
+    """Upsert/delete an SSO group mapping (ADR-18 ps-4) — `manage_access`-gated +
+    audited. `op` is a `core_pb2.SsoMapOp` value (SSO_MAP_PUT/SSO_MAP_DELETE). PUT
+    onto a non-existent group is BAD_REQUEST; default-deny stays (unmapped grants
+    nothing)."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ManageSsoMap(
+            core_pb2.ManageSsoMapRequest(
+                assertion=assertion,
+                op=op,
+                provider=provider,
+                incoming_group=incoming_group,
+                our_group_id=our_group_id,
             ),
             timeout=read_timeout_s(),
         )
