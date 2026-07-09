@@ -18,4 +18,13 @@ def _isolate_stores(tmp_path, monkeypatch):
         localusers._initialized = False
     except ImportError:
         pass  # localusers added in phase C
+    import web_channel.settings as settings
+
+    settings._initialized = False
+    import web_channel.kc_admin as kc_admin
+
+    async def fake_list_users():
+        return []
+
+    monkeypatch.setattr(kc_admin, "list_users", fake_list_users)
     yield

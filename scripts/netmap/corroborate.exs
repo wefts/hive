@@ -1,13 +1,12 @@
-# Edge-level wiki∩repo corroboration: for each repo `tunnel carries subnet(CIDR)` edge in the graph,
-# if the WIKI documents it (tunnel name AND that exact CIDR co-occur in one corpus body), re-emit
-# the same edge with a `wiki:corrob` origin → seen_count↑ = corroborated (ADR-13). Deterministic
-# co-occurrence on exact shared identifiers (CIDRs) — no name-canonicalization needed.
+# Edge-level wiki∩repo corroboration: for each repo `tunnel carries subnet(CIDR)` edge, if the WIKI
+# documents it (tunnel name AND that exact CIDR co-occur in one corpus body), re-emit the same edge
+# with the co-occurring PAGE as its lineage (`wiki:page:<node>`, S1) → so it corroborates the repo
+# (iac + wiki = 2) but does NOT double-count against that same page's other extraction passes.
 Logger.configure(level: :error)
 alias Swarm.Enrichment.NetworkMap
 alias Swarm.Graph.Store
 alias Swarm.Repo
 
-# existing repo carries edges: net:tunnel:<t> -carries-> net:subnet:<cidr>
 %{rows: rows} =
   Repo.query!("""
   SELECT replace(s.key,'net:tunnel:',''), replace(d.key,'net:subnet:','')
@@ -15,19 +14,35 @@ alias Swarm.Repo
    WHERE e.type='carries' AND s.key LIKE 'net:tunnel:%' AND d.key LIKE 'net:subnet:%' AND e.reward >= 0
   """)
 
+# For each, the FIRST corpus page where tunnel name + exact CIDR co-occur → that page is the lineage.
 documented =
   rows
-  |> Enum.filter(fn [tun, cidr] ->
-    match?(%{rows: [[c]]} when c > 0,
-      Repo.query!("SELECT count(*) FROM content WHERE body ILIKE $1 AND body ILIKE $2",
-        ["%" <> tun <> "%", "%" <> cidr <> "%"]))
-  end)
   |> Enum.map(fn [tun, cidr] ->
-    %{subject: tun, subject_kind: "tunnel", relation: "carries", object: cidr, object_kind: "subnet"}
-  end)
+    %{rows: r} =
+      Repo.query!(
+        "SELECT node_id FROM content WHERE body ILIKE $1 AND body ILIKE $2 ORDER BY node_id LIMIT 1",
+        ["%" <> tun <> "%", "%" <> cidr <> "%"]
+      )
 
-src = Store.upsert_node("source", "wiki:corrob", scope: "group")
-ids = NetworkMap.write(%{id: src, scope: "group"}, documented, "wiki:corrob:facts",
-  origin: "wiki:corrob", reliability: 0.5, evidence_kind: "observation")
+    case r do
+      [[node]] ->
+        {"wiki:page:#{node}",
+         %{subject: tun, subject_kind: "tunnel", relation: "carries", object: cidr, object_kind: "subnet"}}
+
+      _ ->
+        nil
+    end
+  end)
+  |> Enum.reject(&is_nil/1)
+
+node = %{id: Store.upsert_node("source", "wiki:corrob", scope: "group"), scope: "group"}
+
+ids =
+  documented
+  |> Enum.group_by(fn {lin, _} -> lin end, fn {_, f} -> f end)
+  |> Enum.flat_map(fn {lineage, facts} ->
+    NetworkMap.write(node, facts, "wiki:corrob:facts",
+      origin: "wiki:corrob", lineage: lineage, reliability: 0.5, evidence_kind: "observation")
+  end)
 
 IO.puts("NETMAP-CORROB carries_edges=#{length(rows)} wiki_documented=#{length(documented)} edges=#{length(ids)}")

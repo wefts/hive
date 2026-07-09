@@ -35,8 +35,8 @@ def _as_groot(monkeypatch) -> None:
 
 
 def _csrf_token() -> str:
-    """GET /admin as groot and scrape the session-bound token from a form."""
-    r = client.get("/admin")
+    """GET /admin/users as groot and scrape the session-bound token from a form."""
+    r = client.get("/admin/users")
     assert r.status_code == 200
     m = re.search(r'name="csrf" value="([^"]+)"', r.text)
     assert m, "admin forms must embed the csrf token"
@@ -61,11 +61,25 @@ def test_admin_post_without_csrf_is_rejected_and_rpc_never_fires(monkeypatch) ->
         ("/admin/kernel/user", {"op": "invite", "login": "x"}),
         ("/admin/kernel/access", {"op": "grant_role", "role": "admin"}),
         ("/admin/kernel/read-conversation", {"conversation_id": "c", "reason": "r"}),
-        ("/admin/invite", {"username": "x", "password": "p"}),
-        ("/admin/local-invite", {"username": "x", "password": "p"}),
+        (
+            "/admin/auth",
+            {
+                "issuer": "http://kc.test/realms/swarm",
+                "realm": "swarm",
+                "client_id": "web",
+                "admin_url": "http://kc.test",
+                "admin_user": "admin",
+            },
+        ),
     ]:
         r = client.post(path, data=data)
         assert r.status_code == 403, path
+
+    assert client.post("/admin/invite", data={"username": "x", "password": "p"}).status_code == 404
+    assert (
+        client.post("/admin/local-invite", data={"username": "x", "password": "p"}).status_code
+        == 404
+    )
 
     # a wrong token is equally rejected
     r = client.post(
@@ -98,7 +112,7 @@ def test_admin_post_with_session_token_passes_the_csrf_gate(monkeypatch) -> None
 
 def test_admin_page_embeds_the_token_in_every_form(monkeypatch) -> None:
     _as_groot(monkeypatch)
-    r = client.get("/admin")
+    r = client.get("/admin/users")
     assert r.status_code == 200
     forms = r.text.count("<form")
     tokens = r.text.count('name="csrf"')

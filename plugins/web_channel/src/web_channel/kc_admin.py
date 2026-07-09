@@ -8,17 +8,17 @@ scoped to just `manage-users` instead of full admin creds.
 
 from __future__ import annotations
 
-import os
-
 import httpx
+
+from web_channel import settings
 
 
 def _cfg() -> tuple[str, str, str, str]:
     return (
-        os.environ.get("KEYCLOAK_ADMIN_URL", "http://keycloak:8080").rstrip("/"),
-        os.environ.get("KEYCLOAK_REALM", "swarm-local"),
-        os.environ.get("KEYCLOAK_ADMIN_USER", "admin"),
-        os.environ.get("KEYCLOAK_ADMIN_PASSWORD", "admin"),
+        settings.get_or_env("KEYCLOAK_ADMIN_URL", "http://keycloak:8080").rstrip("/"),
+        settings.get_or_env("KEYCLOAK_REALM", "swarm-local"),
+        settings.get_or_env("KEYCLOAK_ADMIN_USER", "admin"),
+        settings.get_or_env("KEYCLOAK_ADMIN_PASSWORD", "admin"),
     )
 
 
@@ -66,38 +66,25 @@ async def list_users() -> list[dict]:
         return out
 
 
-async def invite_user(username: str, password: str, group: str | None = None) -> None:
-    """Provision a realm user (temporary password) and optionally join a group.
-    This is the lean local 'invite someone' — the groot-gated path that grants access.
-    Fails CLOSED: every step is checked, and a missing group raises (never silently
-    create a user without the intended grant)."""
-    base, realm, user, pw = _cfg()
-    async with httpx.AsyncClient(timeout=10) as client:
-        tok = await _admin_token(client, base, user, pw)
-        h = {"Authorization": f"Bearer {tok}"}
-        payload = {
-            "username": username,
-            "enabled": True,
-            "emailVerified": True,
-            "credentials": [{"type": "password", "value": password, "temporary": True}],
-        }
-        created = await client.post(f"{base}/admin/realms/{realm}/users", headers=h, json=payload)
-        created.raise_for_status()
-        uid = created.headers.get("Location", "").rstrip("/").rsplit("/", 1)[-1]
-        if not uid:
-            found = await _get_json(
-                client,
-                f"{base}/admin/realms/{realm}/users",
-                h,
-                params={"username": username, "exact": "true"},
-            )
-            uid = found[0]["id"]
-        if group:
-            grps = await _get_json(
-                client, f"{base}/admin/realms/{realm}/groups", h, params={"search": group}
-            )
-            gid = next((g["id"] for g in grps if g.get("name") == group), None)
-            if gid is None:
-                raise ValueError(f"group not found in realm: {group}")
-            r = await client.put(f"{base}/admin/realms/{realm}/users/{uid}/groups/{gid}", headers=h)
+async def check_connector(
+    issuer: str,
+    admin_url: str,
+    admin_user: str,
+    admin_password: str,
+    timeout: float = 3,
+) -> dict[str, bool]:
+    """Connectivity probe for operator settings; returns only booleans, never secrets."""
+    out = {"oidc": False, "admin": False}
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            r = await client.get(f"{issuer.rstrip('/')}/.well-known/openid-configuration")
             r.raise_for_status()
+            out["oidc"] = True
+        except Exception:
+            out["oidc"] = False
+        try:
+            await _admin_token(client, admin_url.rstrip("/"), admin_user, admin_password)
+            out["admin"] = True
+        except Exception:
+            out["admin"] = False
+    return out

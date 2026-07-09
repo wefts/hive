@@ -15,6 +15,8 @@ from dataclasses import asdict, dataclass, field
 
 from authlib.integrations.starlette_client import OAuth
 
+from web_channel import settings
+
 PUBLIC_SCOPE = "public"
 GROOT_ROLE = "groot"
 
@@ -124,13 +126,21 @@ def oauth() -> OAuth:
     global _oauth
     if _oauth is None:
         registry = OAuth()
-        issuer = os.environ["OIDC_ISSUER"].rstrip("/")
+        issuer = settings.get_or_env("OIDC_ISSUER").rstrip("/")
         registry.register(
             name="kc",
             server_metadata_url=f"{issuer}/.well-known/openid-configuration",
-            client_id=os.environ["OIDC_CLIENT_ID"],
-            client_secret=os.environ["OIDC_CLIENT_SECRET"],
+            client_id=settings.get_or_env("OIDC_CLIENT_ID"),
+            client_secret=settings.get_or_env("OIDC_CLIENT_SECRET"),
             client_kwargs={"scope": "openid profile email"},
         )
         _oauth = registry
     return _oauth
+
+
+def _reset_oauth() -> None:
+    global _oauth
+    _oauth = None
+
+
+settings.register_on_change(_reset_oauth)

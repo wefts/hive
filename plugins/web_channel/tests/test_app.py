@@ -9,7 +9,7 @@ import grpc
 from fastapi.testclient import TestClient
 from grpc import aio
 
-from web_channel import core_client
+from web_channel import convlog, core_client
 from web_channel import main as web
 from web_channel._gen import core_pb2
 
@@ -17,7 +17,7 @@ client = TestClient(web.app)
 
 
 def _fake_ask(resp: core_pb2.AskResponse, captured: dict | None = None):
-    async def ask(query: str, scopes: list[str], viewer: str) -> core_pb2.AskResponse:
+    async def ask(query: str, scopes: list[str], viewer: str, **kwargs) -> core_pb2.AskResponse:
         if captured is not None:
             captured.update(query=query, scopes=scopes, viewer=viewer)
         return resp
@@ -28,11 +28,42 @@ def _fake_ask(resp: core_pb2.AskResponse, captured: dict | None = None):
 def test_index_renders_input_box() -> None:
     r = client.get("/")
     assert r.status_code == 200
-    assert 'hx-post="/ask"' in r.text
+    assert 'hx-post="/ask/start"' in r.text  # phase 1: the instant pending post
     assert 'name="q"' in r.text
     # local-first: assets are vendored, no external network call
     assert "/static/vendor/htmx.min.js" in r.text
     assert "https://" not in r.text.split("<body")[0].replace("initial-scale", "")
+
+
+def test_index_renders_post_feed_compose_on_top_and_sidebar_history(monkeypatch) -> None:
+    """Post-objects rework + chat standard: home = sidebar history + compose on top +
+    a feed that new asks APPEND to at the bottom (top-down, oldest first — the chat
+    standard; newest-first is a history-page concern, out of scope) — never one
+    continuous chat ribbon of past history."""
+    convlog.log_turn("operator", ["public"], "an old question", "old answer", "t", "found", 0.9, [])
+    r = client.get("/")
+    assert 'id="feed"' in r.text
+    assert 'hx-target="#feed"' in r.text and 'hx-swap="beforeend"' in r.text
+    assert 'hx-swap="afterbegin"' not in r.text  # top-down: never newest-first
+    assert "Recent conversations" in r.text and "an old question" in r.text  # sidebar history
+    assert 'id="thread"' not in r.text  # the chat ribbon must never come back
+    assert "old answer" not in r.text  # history is sidebar links, not a wall on home
+
+
+def test_ask_returns_a_post_object_with_a_visible_reply_box(monkeypatch) -> None:
+    """A fresh ask = one discrete post object: the question, the answer under it, and
+    an ALWAYS-VISIBLE reply box carrying the post's thread handle — the collapsed
+    affordance sent follow-ups to the top compose as context-free NEW posts
+    (operator-observed failure, 2026-07-08)."""
+    resp = core_pb2.AskResponse(answer="ok", confidence=0.8, tier="t", status=core_pb2.FOUND)
+    monkeypatch.setattr(core_client, "ask", _fake_ask(resp))
+    r = client.post("/ask", data={"q": "a brand new topic?"})
+    assert 'class="post-object"' in r.text
+    assert 'class="reply-form"' in r.text and 'name="thread_id"' in r.text
+    assert "reply-affordance" not in r.text  # no more hidden follow-up
+    # the hidden thread_id is the convlog row id of this very post
+    root = convlog.recent("operator", 1)[0]
+    assert f'value="{root["id"]}"' in r.text
 
 
 def test_a01_found_renders_answer_and_verbatim_citation(monkeypatch) -> None:
@@ -74,7 +105,9 @@ def test_a02_not_found_is_honest_no_fabricated_citation_or_confidence(monkeypatc
 
 
 def test_a03_kernel_unreachable_renders_honest_error(monkeypatch) -> None:
-    async def failing_ask(query: str, scopes: list[str], viewer: str) -> core_pb2.AskResponse:
+    async def failing_ask(
+        query: str, scopes: list[str], viewer: str, **kwargs
+    ) -> core_pb2.AskResponse:
         raise aio.AioRpcError(
             grpc.StatusCode.UNAVAILABLE, aio.Metadata(), aio.Metadata(), details="down"
         )
@@ -153,7 +186,9 @@ def test_unexpected_exception_renders_generic_error_no_leak(monkeypatch) -> None
 def test_empty_query_clears_without_calling_kernel(monkeypatch) -> None:
     called = {"n": 0}
 
-    async def counting_ask(query: str, scopes: list[str], viewer: str) -> core_pb2.AskResponse:
+    async def counting_ask(
+        query: str, scopes: list[str], viewer: str, **kwargs
+    ) -> core_pb2.AskResponse:
         called["n"] += 1
         return core_pb2.AskResponse(status=core_pb2.FOUND)
 
@@ -162,3 +197,85 @@ def test_empty_query_clears_without_calling_kernel(monkeypatch) -> None:
     assert r.status_code == 200
     assert r.text.strip() == ""  # answer region cleared
     assert called["n"] == 0  # no Ask spent on an empty query
+
+
+def test_markdown_title_rules(monkeypatch) -> None:
+    # 1.3 — an explicit `# Heading` names the topic (post header AND sidebar).
+    assert web._split_question("# Deploy plan\nHere is the body.") == (
+        "Deploy plan",
+        "Here is the body.",
+    )
+    # 1.1 — a short post is all title (microblog).
+    assert web._split_question("who is erker") == ("who is erker", "")
+    # 1.2 — long post: first sentence (or first line) is the title.
+    long_q = "What is the plan for LDAP?\nWe need failover and a second replica soon."
+    t, rest = web._split_question(long_q)
+    assert t == "What is the plan for LDAP?" and rest.startswith("We need failover")
+    # an overlong first sentence is display-truncated; the body keeps the FULL text
+    huge = "word " * 40
+    t, rest = web._split_question(huge)
+    assert t.endswith("…") and len(t) <= web._TITLE_MAX and rest == huge.strip()
+
+
+def test_answer_renders_markdown_lists_and_autolinks(monkeypatch) -> None:
+    resp = core_pb2.AskResponse(
+        answer="Links:\n* https://tmate.io/ — terminal sharing\n* https://explainshell.com/",
+        confidence=0.9,
+        tier="escalate",
+        status=core_pb2.FOUND,
+    )
+    monkeypatch.setattr(core_client, "ask", _fake_ask(resp))
+    r = client.post("/ask", data={"q": "give me the links"})
+    assert "<ul>" in r.text and "<li>" in r.text  # a real list, not raw asterisks
+    assert '<a href="https://tmate.io/"' in r.text  # bare URL autolinked
+
+
+def test_markdown_never_passes_raw_html_through(monkeypatch) -> None:
+    # html=False: script tags in a question OR an answer render ESCAPED, never live.
+    resp = core_pb2.AskResponse(
+        answer='<script>alert("a")</script>', confidence=0.9, tier="t", status=core_pb2.FOUND
+    )
+    monkeypatch.setattr(core_client, "ask", _fake_ask(resp))
+    r = client.post("/ask", data={"q": 'hi <script>alert("q")</script>\nmore text'})
+    assert "<script>" not in r.text
+    assert "&lt;script&gt;" in r.text
+
+
+def test_chat_keys_guard_unclosed_code_blocks(monkeypatch) -> None:
+    # Mattermost behavior (operator): Enter sends, Shift+Enter is a newline, and an
+    # UNCLOSED ``` code block holds the send (Enter = newline until the fence closes)
+    # so a half-written block can't be posted by accident. Client-side — pin the
+    # handler's presence on both the compose and the reply box.
+    resp = core_pb2.AskResponse(answer="ok", confidence=0.8, tier="t", status=core_pb2.FOUND)
+    monkeypatch.setattr(core_client, "ask", _fake_ask(resp))
+    home = client.get("/")
+    assert home.text.count("match(/```/g)") == 1  # the compose
+    r = client.post("/ask", data={"q": "any post"})
+    assert r.text.count("match(/```/g)") == 1  # the reply box in the post object
+
+
+def test_code_blocks_are_syntax_highlighted_server_side(monkeypatch) -> None:
+    # Local-first highlighting (operator): pygments spans server-side — no CDN, no
+    # client JS. A labeled fence uses its language; an UNLABELED one is guessed.
+    resp = core_pb2.AskResponse(
+        answer='```yaml\nbuild:\n  image: "moby/buildkit"\n```',
+        confidence=0.9,
+        tier="t",
+        status=core_pb2.FOUND,
+    )
+    monkeypatch.setattr(core_client, "ask", _fake_ask(resp))
+    r = client.post("/ask", data={"q": "show me the job"})
+    assert '<span class="' in r.text.split("<pre>")[1]  # real token spans in the block
+    # code content stays escaped even through the highlighter
+    resp2 = core_pb2.AskResponse(
+        answer='```html\n<script>alert("x")</script>\n```',
+        confidence=0.9,
+        tier="t",
+        status=core_pb2.FOUND,
+    )
+    monkeypatch.setattr(core_client, "ask", _fake_ask(resp2))
+    r2 = client.post("/ask", data={"q": "and html?"})
+    # pygments token spans SPLIT the escaped text (&lt;</span>...script), so assert
+    # the raw tag is absent rather than looking for a contiguous escaped string.
+    assert "<script>" not in r2.text
+    assert "&lt;" in r2.text.split("<pre>")[1]  # escaped inside the highlighted block

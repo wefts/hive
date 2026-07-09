@@ -63,6 +63,13 @@ service Core {
   // User lifecycle: invite / deactivate / delete, capability-gated + audited
   // (Decision 11). Deactivate/delete kill the login; learned content persists.
   rpc ManageUser(ManageUserRequest) returns (AdminActionResponse);
+
+  // The kernel-truth user roster for an admin console (ADR-16; admin-cleanup epic).
+  // Allowed for ANY of {invite_users, manage_users, manage_access} — the list is
+  // prerequisite data for all three workflows (council: codex+gemini agreed).
+  // Success is NOT audited (a roster read on every admin page load would drown
+  // admin_action_audit); DENIALS are audited like every other admin op.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
 }
 
 // Outcome of an identity/privacy call. UNAUTHENTICATED (no/invalid assertion) is
@@ -192,6 +199,34 @@ message ManageUserRequest {
   string nickname = 7;
 }
 
+message ListUsersRequest {
+  string assertion = 1;
+  // Tombstones (status=deleted) are EXCLUDED by default — normal operator
+  // workflows must not act on deleted identities (council). Explicit opt-in only.
+  bool include_deleted = 2;
+  // Bounded by contract (council: gemini's must-fix): server clamps to [1..500];
+  // 0 means the server default (500). Deterministic order: login, id.
+  int32 limit = 3;
+}
+
+message UserView {
+  string id = 1;                 // the kernel uuid — what ManageUser/ManageAccess target
+  string login = 2;
+  string first_name = 3;
+  string last_name = 4;
+  string nickname = 5;
+  string status = 6;             // invited | active | disabled | deleted
+  repeated string roles = 7;     // admin | superadmin
+  repeated string groups = 8;
+  repeated string providers = 9; // identity_link providers (keycloak | local | …)
+  string last_login_at = 10;     // ISO8601, "" when never
+}
+
+message ListUsersResponse {
+  CallStatus status = 1;
+  repeated UserView users = 2;
+}
+
 message AdminActionResponse {
   CallStatus status = 1;         // OK | NOT_AUTHORIZED | UNAUTHENTICATED
   string user_id = 2;            // set on INVITE (the created user's uuid)
@@ -205,6 +240,22 @@ message AskRequest {
   // this canonical id (a deployment fact); the kernel uses it to resolve "my X"
   // and to scope. Empty ⇒ anonymous (a first-person query is then limited).
   string viewer = 3;
+  // Conversational memory (chat-thread epic 2, hive/docs/design/chat-thread-ui.md):
+  // entity KEYS the previous turn's AskResponse.citations already resolved
+  // (non-claim citations' `ref` IS the graph node key — the channel echoes them
+  // back here, no new extraction work). Folded into the world-map tier-gate's
+  // candidate keys so a pronoun follow-up ("its dependencies?") can still hit the
+  // fast structured-serve path — deliberately NOT resolved via an LLM rewrite (a
+  // bogus/foreign-scoped key here simply fails to match real structure; the gate's
+  // existing scope/evidence checks are the only validation, so this adds no new
+  // no-leak surface). Empty ⇒ unchanged behavior.
+  repeated string active_keys = 4;
+  // Optional kernel-owned conversation to draw recent history from (ADR-16) — used
+  // ONLY on the escalate/consilium path (an LLM call is already being paid for
+  // there); owner-enforced via the SAME `Swarm.Conversations` predicate as
+  // `GetConversation` — a `viewer` that doesn't own it (or isn't a real actor
+  // uuid) silently yields no history, never an error or a leak. Empty ⇒ no history.
+  string conversation_id = 5;
 }
 
 message Citation {

@@ -1,0 +1,16 @@
+# E-service overlay — EXAMPLE / template (committed, generic). The REAL spec is the gitignored
+# per-stage env/services.staging.yaml (real service/team names stay out of git, like groups).
+#
+# TEAM-level service ownership — a navigable map of "who/what team manages what" (the DEFAULT answer
+# for all users). Person owner/backup is a separate later layer (P2). NOT access control. See
+# board/doing/e-service-design.md.
+#
+# Each service materializes who:service:<slug> (searchable content = name + aliases) + a
+# managed_by_team edge → who:group:<team.slug> (the owning team, reusing the curated-groups layer),
+# under origin curated:services, full-replaced each reconcile.
+
+services:
+  - slug: example-service
+    name: "Example Service"
+    aliases: ["example", "svc-x"]           # names users might query by
+    team: { slug: example-team, name: "Example Team" }   # owning team (a group slug + display name)

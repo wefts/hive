@@ -1,0 +1,12 @@
+{# The post's THINKING block (claude.ai-style, cheap step): sits BETWEEN the question
+   and the answer, collapsed to "thought for Ns". Inside: the real trace path and the
+   FULL retained deliberation (panel-vs-judge, ADR-15), lazy-loaded on first expand —
+   the same record the old below-the-answer "How it decided" disclosure held. #}
+{% if post.duration or post.path or post.ask_ref %}
+  <details class="thinking"{% if post.ask_ref %} hx-get="/deliberation/{{ post.ask_ref }}"
+            hx-trigger="toggle once" hx-target="find .delib-slot" hx-swap="innerHTML"{% endif %}>
+    <summary>{% if post.duration %}thought for {{ post.duration }}{% else %}thinking{% endif %}</summary>
+    {% if post.path %}<div class="trace">how: {{ post.path }}{% if post.tier %} · tier={{ post.tier }}{% endif %}</div>{% endif %}
+    {% if post.ask_ref %}<div class="delib-slot"><span class="muted">loading…</span></div>{% endif %}
+  </details>
+{% endif %}

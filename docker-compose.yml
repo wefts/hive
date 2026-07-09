@@ -161,7 +161,7 @@ services:
       # until an operator configures it on both sides. auth_mode stays the config
       # default (:dual) until the step-6b.7 cutover explicitly sets :strict.
       SWARM_ACTOR_SECRET: ${SWARM_ACTOR_SECRET:-}
-      SWARM_AUTH_MODE: ${SWARM_AUTH_MODE:-dual}
+      SWARM_AUTH_MODE: ${SWARM_AUTH_MODE:-strict}
       # ADR-17 tier-gate: serve covered asks from structure before the consilium. OFF unless
       # set "true" (a false-serve breaks trust — enable only after the go/no-go shows
       # false_serve_rate ~0; set in env/staging.env for the internal instance). Entail model
@@ -170,6 +170,7 @@ services:
       SWARM_TIER_GATE_ENTAIL_MODEL: ${SWARM_TIER_GATE_ENTAIL_MODEL:-}
       SWARM_TIER_GATE_NETWORK_SERVE: ${SWARM_TIER_GATE_NETWORK_SERVE:-}
       SWARM_TIER_GATE_NETWORK_MIN_CORROB: ${SWARM_TIER_GATE_NETWORK_MIN_CORROB:-}
+      SWARM_TIER_GATE_WHO_SERVE: ${SWARM_TIER_GATE_WHO_SERVE:-}
     ports:
       - "${SWARM_CORE_API_PORT:-50061}:50061"
     depends_on:
@@ -225,6 +226,8 @@ services:
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
       # Durable conversation log + local credential store (private, on the volume below).
       WEB_CHANNEL_DB: /app/data/web_channel.db
+      # Body telemetry (the footer): the glances sidecar's REST API, compose-internal.
+      GLANCES_ADDR: http://glances:61208
       # Verified actor assertion (ADR-16 D9, step 6b): signs the HS256 assertion the
       # kernel verifies. MUST equal the kernel's SWARM_ACTOR_SECRET above (same
       # secret, both from secrets.env — never committed). Unset ⇒ signing is a no-op
@@ -246,6 +249,35 @@ services:
     depends_on:
       kernel:
         condition: service_started
+
+  # --- Body telemetry: Glances (htop-family) as a REST data source ----------
+  # Feeds web_channel's footer strip ("state of my body": CPU/RAM/load/procs/GPU).
+  # `pid: host` = host-wide READ-ONLY observation; deliberately NO docker.sock
+  # (the socket grants full docker API control even mounted ro — least privilege).
+  # API stays compose-internal (no published port); GPU stats via NVML like ollama.
+  glances:
+    # ubuntu variant, NOT alpine: the toolkit-injected NVML is a glibc library —
+    # musl's loader can't dlopen it (verified live: LibraryNotFound on alpine).
+    image: ${HUB_REGISTRY:-dockerhub.smile.fr}/nicolargo/glances:ubuntu-latest-full
+    init: true
+    pid: host
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: utility
+      GLANCES_OPT: "-w --disable-webui"
+    # The toolkit injects only the fully-versioned libnvidia-ml.so.<ver> on this host
+    # (no .so.1 symlink, no ldconfig run), and pynvml loads "libnvidia-ml.so.1" —
+    # link it before exec (same python/glances invocation as the image's own CMD).
+    command:
+      - /bin/sh
+      - -c
+      - |
+        for f in /usr/lib/aarch64-linux-gnu/libnvidia-ml.so.*.*; do
+          ln -sf "$$f" /usr/lib/aarch64-linux-gnu/libnvidia-ml.so.1; break
+        done
+        exec /venv/bin/python$${PYTHON_VERSION} -m glances $${GLANCES_OPT}
+    restart: unless-stopped
 
   # --- Identity: local Keycloak (OIDC) — P1 dev login mechanism ------------
   # Mirrors the org's real Keycloak (KC 26.6.1, DHI image, OIDC + groups mapper) so the

@@ -12,7 +12,47 @@ FOUND gets an explicit badge here.
 
 from __future__ import annotations
 
+from markdown_it import MarkdownIt
+from pygments import highlight as _pyg_highlight
+from pygments.formatters.html import HtmlFormatter
+from pygments.lexers import get_lexer_by_name, guess_lexer
+from pygments.util import ClassNotFound
+
 from web_channel._gen import core_pb2
+
+# Server-side syntax highlighting (local-first: no CDN, no client JS — the vendored
+# pygments CSS carries the colors). `nowrap` emits bare token spans; markdown-it
+# wraps them in <pre><code>. Pygments HTML-escapes the code content itself, so the
+# safety property of `markdown()` below is preserved.
+_pyg_formatter = HtmlFormatter(nowrap=True)
+
+
+def _highlight(code: str, lang: str, _attrs: str) -> str:
+    """Fence highlighter: a labeled fence uses its language; an unlabeled one is
+    guessed (operator: highlighting should be automatic). Returning "" falls back
+    to markdown-it's plain escaped rendering."""
+    try:
+        lexer = get_lexer_by_name(lang) if lang else guess_lexer(code)
+    except ClassNotFound:
+        return ""
+    return _pyg_highlight(code, lexer, _pyg_formatter)
+
+
+# Chat-style markdown (Mattermost/Slack shape — operator, 2026-07-08): CommonMark
+# with `breaks` (a bare newline IS a line break — keeps the kernel's structured
+# line-based answers intact) and `linkify` (bare URLs become links). `html=False`
+# is the safety line: raw HTML in a question or a corpus-quoting answer is escaped,
+# never emitted — so the rendered output is safe to mark |safe in templates.
+_md = MarkdownIt(
+    "commonmark", {"html": False, "breaks": True, "linkify": True, "highlight": _highlight}
+)
+_md.enable("linkify")
+
+
+def markdown(text: str) -> str:
+    """Render untrusted markdown text to safe HTML (chat-style: breaks + autolinks)."""
+    return _md.render(text or "")
+
 
 # status -> (human label, css class). Driven by the structured enum only.
 _STATUS_LABELS: dict[int, tuple[str, str]] = {

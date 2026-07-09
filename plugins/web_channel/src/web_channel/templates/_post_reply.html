@@ -1,0 +1,11 @@
+{# One REPLY inside a post object's thread (post-objects rework): the follow-up
+   question and the swarm's answer, indented under the root post — forum-style. #}
+<div class="post-reply"{% if post.id %} id="reply-{{ post.id }}"{% endif %}>
+  <div class="reply-q">
+    <span class="thread-who">you</span>
+    <span class="meta">{{ post.asked_at }}</span>
+    <div class="reply-question md">{{ post.question_html|safe }}</div>
+  </div>
+  {% include "_thinking_block.html" %}
+  {% include "_answer_block.html" %}
+</div>

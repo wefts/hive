@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="layout admin-layout">
+  <aside class="aside-col">
+    {% include "admin/_nav.html" %}
+  </aside>
+
+  <main class="main stack">
+    <div class="card">
+      <header><h2 class="card-title">Auth Provider (Keycloak / OIDC)</h2></header>
+      <section>
+        <div class="table-container">
+          <table class="table">
+            <tbody>
+              <tr><th>Issuer</th><td>{{ connector.issuer or 'unset' }}</td></tr>
+              <tr><th>Realm</th><td>{{ connector.realm or 'unset' }}</td></tr>
+              <tr><th>Client ID</th><td>{{ connector.client_id or 'unset' }}</td></tr>
+              <tr><th>Admin URL</th><td>{{ connector.admin_url or 'unset' }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div hx-get="/admin/auth/status" hx-trigger="load" hx-swap="innerHTML" class="muted">
+          <span class="badge status-warn">checking auth provider</span>
+        </div>
+        <form class="invite" method="post" action="/admin/auth" autocomplete="off">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <input class="input" type="url" name="issuer" value="{{ connector.issuer }}" placeholder="issuer" required aria-label="issuer">
+          <input class="input" type="text" name="realm" value="{{ connector.realm }}" placeholder="realm" required aria-label="realm">
+          <input class="input" type="text" name="client_id" value="{{ connector.client_id }}" placeholder="client id" required aria-label="client id">
+          <input class="input" type="password" name="client_secret" placeholder="client secret (blank keeps current)" aria-label="client secret">
+          <input class="input" type="url" name="admin_url" value="{{ connector.admin_url }}" placeholder="admin url" required aria-label="admin url">
+          <input class="input" type="text" name="admin_user" value="{{ connector.admin_user }}" placeholder="admin user" required aria-label="admin user">
+          <input class="input" type="password" name="admin_password" placeholder="admin password (blank keeps current)" aria-label="admin password">
+          <button class="btn" type="submit">Save auth provider</button>
+        </form>
+      </section>
+    </div>
+
+    <div class="card">
+      <header><h3 class="card-title">Keycloak realm users <span class="badge status-found">info-only</span></h3></header>
+      <section>
+        {% if users is none %}
+          <p class="muted"><span class="badge status-warn">Keycloak unavailable</span>
+            Could not list SSO users right now.</p>
+        {% else %}
+          <div class="table-container">
+            <table class="table">
+              <thead><tr><th>Username</th><th>Email</th><th>Groups</th></tr></thead>
+              <tbody>
+                {% for u in users %}
+                  <tr><td>{{ u.username }}</td><td class="muted">{{ u.email }}</td>
+                    <td>{{ u.groups|join(', ') if u.groups else '—' }}</td></tr>
+                {% else %}
+                  <tr><td colspan="3" class="muted">none yet</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </section>
+    </div>
+  </main>
+</div>
+{% endblock %}

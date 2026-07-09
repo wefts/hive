@@ -161,22 +161,28 @@ def html_of(path):
 
 
 def main():
+    # S1: per-fact lineage = the source page (`wiki:page:api:<slug>`) — per-page distinct. (Residual:
+    # doesn't unify with the prose worker's `wiki:page:<node>` for the same page — a title→node
+    # resolution would; deferred, low volume.)
     seen, facts = set(), []
     files = sorted(glob.glob(os.path.join(IN_DIR, "*.json")))
     for path in files:
+        slug = os.path.splitext(os.path.basename(path))[0]
+        lineage = "wiki:page:api:%s" % slug
         soup = BeautifulSoup(html_of(path), "html.parser")
         for table in soup.find_all("table"):
             for f in extract_table(table):
-                if f not in seen:
-                    seen.add(f)
-                    facts.append(f)
+                key = (f, lineage)
+                if key not in seen:
+                    seen.add(key)
+                    facts.append((f, lineage))
     out = {
         "origin": "wiki:api",
         "reliability": 0.6,
         "evidence_kind": "observation",
         "facts": [
-            {"subject": s, "subject_kind": sk, "relation": r, "object": o, "object_kind": ok}
-            for (s, sk, r, o, ok) in facts
+            {"subject": s, "subject_kind": sk, "relation": r, "object": o, "object_kind": ok, "lineage": lin}
+            for ((s, sk, r, o, ok), lin) in facts
         ],
     }
     print(json.dumps(out))

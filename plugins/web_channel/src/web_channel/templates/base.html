@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Swarm — web_channel</title>
+  <title>swarm — operator console</title>
   <!-- Vendored locally: the page renders with no external network call (brief §5/§8).
        Basecoat is the design system (ADR-2); app.css is our one token layer over it. -->
   <link rel="stylesheet" href="/static/vendor/basecoat.min.css">
+  <link rel="stylesheet" href="/static/vendor/pygments-one-dark.css">
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/vendor/htmx.min.js" defer></script>
   <script src="/static/vendor/alpine.min.js" defer></script>
@@ -18,10 +19,10 @@
       @close-palette.window="palette = false">
   <main class="shell">
     <header class="topbar">
-      <span class="brand">swarm</span>
-      <span class="muted">operator console</span>
+      {# The brand IS the home link; "operator console" lives in the <title> only —
+         operator: the "swarm operator console home" row was noise. #}
+      <a class="brand" href="/">swarm</a>
       {% if authed %}
-        <a class="navlink" href="/">home</a>
         <a class="navlink" href="/dashboard">dashboard</a>
         <a class="navlink" href="/history">history</a>
       {% endif %}
@@ -38,6 +39,13 @@
     </header>
     {% block content %}{% endblock %}
   </main>
+
+  {% if authed %}
+  <!-- Body telemetry (operator: footer ONLY, the aside is full) — a thin fixed
+       strip, htop-flavored, fed by the glances sidecar; empty when unconfigured. -->
+  <footer class="sysfoot" hx-get="/tile/system" hx-trigger="load, every 5s"
+          hx-swap="innerHTML" aria-label="system state"></footer>
+  {% endif %}
 
   {% if authed %}
   <!-- ⌘K command palette (opened from the header; shared across pages) -->

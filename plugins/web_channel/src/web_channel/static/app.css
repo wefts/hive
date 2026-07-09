@@ -48,10 +48,12 @@ body { line-height: 1.6; }
   flex-wrap: wrap;
 }
 .brand { font-weight: 700; font-size: 1.05rem; letter-spacing: 0.01em; color: var(--foreground); }
+a.brand:hover { color: var(--link); text-decoration: none; }
 .topbar .muted { font-size: 0.9rem; }
 .spacer { flex: 1; }
 .navlink { color: var(--link); font-size: 0.9rem; margin-left: 1rem; }
 .navlink:hover { text-decoration: underline; }
+.navlink.active { color: var(--foreground); font-weight: 600; text-decoration: none; }
 
 /* aside (left) | main (right) — fluid sidebar instead of a fixed 280px cage
    (a long timestamp no longer breaks mid-token at narrower-than-1440 widths). */
@@ -61,15 +63,86 @@ body { line-height: 1.6; }
 .aside-col { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1rem; }
 .answer-area { min-height: 2rem; }
 
-/* compose row (ask box + button) */
+/* home: the post feed (post-objects rework) — each ask is a DISCRETE post object
+   with visible boundaries (question, answer, its own reply thread), forum/social
+   style, never a continuous chat ribbon. Compose stays on top. */
+.feed { display: flex; flex-direction: column; gap: 1.25rem; }
+/* the invite hint disappears once the feed holds any post object */
+.feed:has(.post-object) .invite-msg { display: none; }
+.post-object { padding: 0.25rem 0; }
+/* the question: a right-aligned bubble (the chat standard — Claude/ChatGPT/Gemini:
+   question right, answer left, everything top-down). */
+.post-q { margin-left: auto; max-width: 75%; width: fit-content; padding: 0.6rem 1rem;
+          border-radius: var(--radius-lg); background: var(--secondary); text-align: left; }
+.post-q .post-q-rest { margin: 0.25rem 0 0; color: var(--muted-foreground); }
+.post-q .meta { margin-top: 0.2rem; font-size: 0.8rem; }
+.post-answer { margin-top: 0.75rem; }
+.thread-who { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); }
+
+/* the thinking block (claude.ai-style, between question and answer): collapsed
+   "thought for Ns"; expanded = the real trace + the retained deliberation. The
+   .live variant is the pending state — an honest elapsed counter, pulsing. */
+.thinking { margin: 0.75rem 0 0; }
+.thinking summary {
+  cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 0.35rem;
+  font-size: 0.88rem; font-style: italic; color: var(--muted-foreground);
+}
+.thinking summary::-webkit-details-marker { display: none; }
+.thinking summary::before { content: "\25B8"; font-size: 0.7em; font-style: normal; transition: transform 120ms ease; }
+.thinking[open] summary::before { transform: rotate(90deg); }
+.thinking[open] { padding: 0.5rem 0.9rem; border-left: 2px solid var(--border); }
+.thinking[open] summary { margin-bottom: 0.4rem; }
+.thinking .trace { margin-top: 0.25rem; }
+div.thinking.live { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.9rem; border-left: 2px solid var(--border); }
+.thinking-label { font-size: 0.88rem; font-style: italic; color: var(--muted-foreground); animation: thinking-pulse 1.6s ease-in-out infinite; }
+@keyframes thinking-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+
+/* the post's own reply thread — indented, forum-style */
+.post-replies { display: flex; flex-direction: column; gap: 0.9rem; }
+.post-replies:not(:empty) { margin-top: 1rem; }
+/* a reply flows flat, top-down — no indent/thread line: with ONE active chat per
+   view the nesting is already told by order (operator, 2026-07-08). */
+.post-reply { padding: 0.75rem 0 0.25rem; }
+.reply-q { margin-left: auto; max-width: 75%; width: fit-content; padding: 0.5rem 0.9rem;
+           border-radius: var(--radius-lg); background: var(--secondary); }
+.reply-q .reply-question { margin: 0.3rem 0 0; color: var(--foreground); font-weight: 600; }
+/* the reply box: ALWAYS visible at the post's foot (Discourse-style) — quiet until focus */
+.reply-form { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;
+              margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.reply-form .q { flex: 1; min-width: 220px; }
+
+/* claude.ai-style collapsed-by-default metadata: Sources / How it decided. */
+.disclosure { margin-top: 0.6rem; }
+.disclosure summary {
+  cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.3rem 0.7rem; border: 1px solid var(--border); border-radius: 999px;
+  font-size: 0.82rem; color: var(--muted-foreground); background: var(--secondary);
+  width: fit-content;
+}
+.disclosure summary::-webkit-details-marker { display: none; }
+.disclosure summary::before { content: "▸"; font-size: 0.7em; transition: transform 120ms ease; }
+.disclosure[open] summary::before { transform: rotate(90deg); }
+.disclosure[open] summary { margin-bottom: 0.5rem; }
+.disclosure .citations { margin-top: 0; }
+
+/* compose row (ask box + button) — the START state only: once the feed holds a
+   post, the reply box inside the thread is the one place to type; a fresh topic
+   goes through the sidebar's "New chat". */
+.main:has(.feed .post-object) .compose { display: none; }
 .compose { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.5rem; }
 .compose .q { flex: 1; min-width: 280px; }
+.compose .q, .reply-form .q { min-height: 2.5rem; max-height: 40vh; }
 .htmx-indicator { opacity: 0; transition: opacity 120ms ease-in; color: var(--muted-foreground); font-size: 0.9rem; }
 .htmx-request .htmx-indicator { opacity: 1; }
 
 /* quiet section label (uppercase) — used in card headers + footer.
    NB: named .section-label, not .label — Basecoat ships a .label form-component. */
 .section-label { display: block; margin: 0; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); }
+
+/* the sidebar's New chat: Basecoat's .btn as-is (its flex handles centering —
+   never override a framework component's internals); only sized to the column */
+.new-chat { width: 100%; }
+.new-chat:hover { text-decoration: none; }
 
 /* recent conversations: a quiet list of links */
 .recent { list-style: none; margin: 0; padding: 0; }
@@ -91,7 +164,27 @@ body { line-height: 1.6; }
 /* answer + conversation entry */
 #answer:empty { display: none; }
 .invite-msg { color: var(--muted-foreground); padding: 1.5rem 0; }
-.answer { max-width: 65ch; color: var(--foreground); white-space: pre-wrap; font-size: 1.05rem; }
+.answer { max-width: 65ch; color: var(--foreground); font-size: 1.05rem; }
+
+/* chat-style markdown content (questions + answers): breaks are <br> (render.py),
+   so no pre-wrap; quiet, readable block elements. */
+.md p { margin: 0 0 0.6rem; }
+.md p:last-child { margin-bottom: 0; }
+.md ul, .md ol { margin: 0.25rem 0 0.6rem; padding-left: 1.4rem; }
+.md ul { list-style: disc outside; }
+.md ul ul { list-style: circle outside; }
+.md ol { list-style: decimal outside; }
+.md li { margin: 0.15rem 0; }
+.md a { color: var(--link); word-break: break-all; }
+.md a:hover { text-decoration: underline; }
+.md code { background: var(--secondary); padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.92em; }
+/* code blocks: compact + regular weight so real snippets fit (operator);
+   token colors come from the vendored pygments one-dark sheet. */
+.md pre { background: var(--secondary); padding: 0.75rem 1rem; border-radius: var(--radius-lg); overflow-x: auto;
+          font-size: 0.82rem; font-weight: 400; line-height: 1.55; }
+.md pre code { background: none; padding: 0; font-size: inherit; font-weight: inherit; }
+.md blockquote { margin: 0.5rem 0; padding-left: 0.9rem; border-left: 2px solid var(--border); color: var(--muted-foreground); }
+.md h1, .md h2, .md h3 { font-size: 1.05rem; font-weight: 600; margin: 0.75rem 0 0.4rem; }
 .post-title { font-size: 1.05rem; font-weight: 600; color: var(--foreground); line-height: 1.4; }
 .post-head { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin: 0.75rem 0; }
 .meta { font-size: 0.9rem; color: var(--muted-foreground); }
@@ -121,6 +214,45 @@ body { line-height: 1.6; }
 .invite { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.75rem 0; }
 .invite .input, .invite select { width: auto; }
 .field-stack { display: flex; flex-direction: column; gap: 0.75rem; max-width: 420px; margin: 1rem 0; }
+.admin-roster-search { display: grid; gap: 0.35rem; max-width: 34rem; margin: 1rem 0; }
+.admin-nav .navlink { display: block; margin: 0; padding: 0.35rem 0; }
+.admin-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; }
+.admin-section-card { display: flex; flex-direction: column; gap: 0.6rem; color: var(--foreground); text-decoration: none; }
+.admin-section-card header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.admin-section-card p { margin: 0; }
+.admin-section-card:hover { text-decoration: none; border-color: var(--ring); }
+.admin-section-card-planned { opacity: 0.72; }
+.admin-actions-col { width: 1%; text-align: right; }
+/* Alpine owns visibility; this only anchors the Basecoat popover to the row action. */
+.admin-kebab { position: relative; }
+.admin-kebab > [data-popover] { position: absolute; left: auto; right: 0; top: calc(100% + 0.25rem); z-index: 40; min-width: 14rem;
+                                background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg);
+                                padding: 0.25rem; box-shadow: 0 8px 24px rgb(0 0 0 / 0.4); }
+/* never clip the row menu: the roster table AND its Basecoat card (overflow:hidden
+   for its rounded corners) must let the popover escape downward over the next card. */
+.admin-actions-col { position: relative; }
+.roster-wrap, .roster-wrap table { overflow: visible; }
+.admin-roster-card { overflow: visible; }
+.admin-kebab form { display: contents; }
+.admin-kebab button[role="menuitem"] {
+  display: block; width: 100%; background: transparent; border: 0; color: inherit;
+  padding: 0.4rem 0.6rem; text-align: left; border-radius: var(--radius); cursor: pointer;
+}
+.admin-kebab button[role="menuitem"]:hover { background: var(--secondary); }
+.admin-kebab button[role="menuitem"][data-variant="destructive"] { color: var(--destructive); }
+.admin-kebab button[role="menuitem"][data-variant="destructive"]:hover {
+  background: color-mix(in srgb, var(--destructive) 15%, transparent);
+}
+/* the ⋮ trigger reads as clickable; the row lifts on hover so it's clearly a target */
+.admin-kebab > button { cursor: pointer; }
+.admin-users-table tbody tr:hover { background: var(--secondary); }
+.admin-detail-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 0.85fr); gap: 1rem; align-items: start; }
+@media (max-width: 980px) { .admin-detail-layout { grid-template-columns: 1fr; } }
+.admin-detail-list { display: grid; gap: 0.9rem; }
+.admin-detail-list > div { display: grid; gap: 0.15rem; }
+.admin-actions-panel, .admin-action-group { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.admin-action-group { width: 100%; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.admin-action-group .section-label { width: 100%; }
 
 /* ⌘K command palette (Alpine overlay; Basecoat .input for the field) */
 [x-cloak] { display: none !important; }
@@ -189,3 +321,19 @@ body { line-height: 1.6; }
   height: 520px; width: 100%; margin-top: 0.75rem;
   background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-md);
 }
+
+/* the body-telemetry footer: one thin fixed strip, htop vibe — quiet mono numbers
+   + tiny meter bars; empty (zero-height content) when the sidecar is off. */
+.sysfoot { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+           display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;
+           padding: 0.3rem 1.5rem; background: color-mix(in srgb, var(--background) 88%, transparent);
+           backdrop-filter: blur(6px); border-top: 1px solid var(--border);
+           font-size: 0.78rem; color: var(--muted-foreground); }
+.sysfoot:empty { display: none; }
+.sys-item { display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+.sys-num { font-family: ui-monospace, monospace; color: var(--foreground); }
+.meter { width: 3.5rem; height: 0.35rem; border-radius: 999px; background: var(--secondary); overflow: hidden; }
+.meter-fill { display: block; height: 100%; border-radius: 999px; background: var(--link); transition: width 600ms ease; }
+.meter-fill.hot { background: #e0b341; }
+/* keep page content clear of the fixed strip */
+.shell { padding-bottom: 2.25rem; }

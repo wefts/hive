@@ -26,7 +26,7 @@ def test_log_and_recent_newest_first_per_viewer() -> None:
 def test_ask_persists_a_turn(monkeypatch) -> None:
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)  # viewer = operator
 
-    async def fake_ask(query, scopes, viewer):
+    async def fake_ask(query, scopes, viewer, **kwargs):
         return core_pb2.AskResponse(
             answer="Postgres.",
             status=core_pb2.FOUND,
@@ -57,7 +57,7 @@ def test_ask_error_is_logged_as_error(monkeypatch) -> None:
 def test_answer_card_shows_trace_path(monkeypatch) -> None:
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
 
-    async def fake_ask(query, scopes, viewer):
+    async def fake_ask(query, scopes, viewer, **kwargs):
         return core_pb2.AskResponse(
             answer="x", status=core_pb2.FOUND, tier="escalate", confidence=0.8
         )
@@ -106,3 +106,76 @@ def test_conversation_is_viewer_scoped(monkeypatch) -> None:
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)  # viewer = operator, not alice
     r = client.get(f"/conversation/{cid}")
     assert r.status_code == 404  # operator cannot open alice's conversation
+
+
+def test_threads_roots_in_recent_replies_under_their_root() -> None:
+    # Post-objects rework: a reply (thread_id = root's row id) never shows up as
+    # standalone history — it lives under its root; last_turn is the thread's tail.
+    root_id = convlog.log_turn("alice", ["public"], "root q", "root a", "t", "found", 0.9, [])
+    convlog.log_turn(
+        "alice", ["public"], "follow q", "follow a", "t", "found", 0.8, [], thread_id=root_id
+    )
+
+    roots = convlog.recent("alice", 10)
+    assert [t["question"] for t in roots] == ["root q"]  # the reply is not history
+
+    thread = convlog.replies("alice", root_id)
+    assert [t["question"] for t in thread] == ["follow q"]
+    tail = convlog.last_turn("alice", root_id)
+    assert tail is not None and tail["question"] == "follow q"
+    # and per-viewer isolation holds for thread reads too
+    assert convlog.replies("bob", root_id) == []
+    assert convlog.last_turn("bob", root_id) is None
+
+
+def test_set_kernel_conv_binds_the_thread_to_its_kernel_conversation() -> None:
+    root_id = convlog.log_turn("alice", ["public"], "q", "a", "t", "found", 0.9, [])
+    convlog.set_kernel_conv("alice", root_id, "conv-77")
+    root = convlog.get("alice", root_id)
+    assert root is not None and root["kernel_conv_id"] == "conv-77"
+    # viewer-scoped: bob can't rebind alice's thread
+    convlog.set_kernel_conv("bob", root_id, "evil")
+    root = convlog.get("alice", root_id)
+    assert root is not None and root["kernel_conv_id"] == "conv-77"
+
+
+def test_every_turn_gets_a_slug_and_old_rows_are_backfilled() -> None:
+    # Every post (root AND reply — replies are first-class posts) carries a public
+    # YouTube-shaped permalink slug; rows from before slugs existed get one at init.
+    rid = convlog.log_turn("alice", ["public"], "q", "a", "t", "found", 0.9, [])
+    row = convlog.get("alice", rid)
+    assert row is not None and len(row["slug"]) >= 8
+    assert convlog.get_by_slug("alice", row["slug"]) is not None
+    assert convlog.get_by_slug("bob", row["slug"]) is None  # viewer-scoped, no leak
+
+    # simulate a pre-slug row, then re-init → backfilled
+    with convlog._conn() as conn:
+        conn.execute("UPDATE conversations SET slug = NULL WHERE id = ?", (rid,))
+    convlog._initialized = False
+    convlog.init()
+    refreshed = convlog.get("alice", rid)
+    assert refreshed is not None and refreshed["slug"]
+
+
+def test_post_page_by_slug_and_ask_start_pushes_the_permalink(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+    # a fresh ask/start mints the slug and pushes the post's URL immediately
+    r = client.post("/ask/start", data={"q": "a permalinked question?"})
+    assert r.status_code == 200
+    assert r.headers.get("hx-push-url", "").startswith("/p/")
+    slug = r.headers["hx-push-url"].removeprefix("/p/")
+    assert f'name="slug" value="{slug}"' in r.text  # /ask will persist the SAME slug
+
+    async def fake_ask(query, scopes, viewer, **kwargs):
+        return core_pb2.AskResponse(answer="ok", status=core_pb2.FOUND, tier="t", confidence=0.8)
+
+    monkeypatch.setattr(core_client, "ask", fake_ask)
+    client.post("/ask", data={"q": "a permalinked question?", "slug": slug})
+
+    # the pushed URL resolves to the post's own PAGE (full layout + the thread)
+    page = client.get(f"/p/{slug}")
+    assert page.status_code == 200
+    assert "a permalinked question?" in page.text and 'class="post-object"' in page.text
+    # and the sidebar links are REAL permalinks (open-in-new-tab must work)
+    assert f'href="/p/{slug}"' in page.text
+    assert 'href="#"' not in page.text

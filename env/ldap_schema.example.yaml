@@ -1,0 +1,33 @@
+# LDAP schema/decoder map — EXAMPLE / template (committed, synthetic).
+#
+# The REAL spec is a gitignored per-stage file: env/ldap_schema.staging.yaml.
+# This file keeps the connector runnable without exposing an instance-specific directory schema.
+
+staff_object_classes:
+  - acmeEmployee
+  - acmeContractor
+mfa_attr: acmeMFA
+employment_class:
+  acmeemployee: employee
+  acmecontractor: contractor
+non_staff_pattern: "^\\s*(guest|test|service account)\\s*$"
+role_family_rules:
+  - [developer, "develop|engineer"]
+  - [hr, "\\bhr\\b|recruit"]
+  - [management, "manager|director"]
+dept_country:
+  xx: CountryX
+  yy: CountryY
+dept_seg:
+  seg1: DivisionA
+  seg2: DivisionB
+dept_func:
+  ops: ops
+  dev: development
+loc_company_prefix:
+  - seg1
+  - seg2
+loc_city:
+  c1: CityOne
+  c2: CityTwo
+leaver_pwdlock: "000001010000Z"

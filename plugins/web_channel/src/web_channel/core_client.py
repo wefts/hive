@@ -32,13 +32,30 @@ def read_timeout_s() -> float:
     return float(os.environ.get("SWARM_READ_TIMEOUT_S", "15"))
 
 
-async def ask(query: str, scopes: list[str], viewer: str) -> core_pb2.AskResponse:
+async def ask(
+    query: str,
+    scopes: list[str],
+    viewer: str,
+    active_keys: list[str] | None = None,
+    conversation_id: str = "",
+) -> core_pb2.AskResponse:
     """Call Core.Ask. Raises grpc.aio.AioRpcError on an unreachable kernel or a
-    DEADLINE_EXCEEDED — the route maps either to an honest `error` state (A.0.3)."""
+    DEADLINE_EXCEEDED — the route maps either to an honest `error` state (A.0.3).
+    `active_keys` (chat-thread epic 2): entity keys from the previous turn's
+    citations — lets a pronoun follow-up ("its dependencies?") still hit the
+    kernel's fast structured path. `conversation_id`: reserved for epic 3
+    (conversation continuity); unused until `/ask` actually threads one turn's
+    conversation into the next."""
     async with aio.insecure_channel(core_addr()) as channel:
         stub = core_pb2_grpc.CoreStub(channel)
         return await stub.Ask(
-            core_pb2.AskRequest(query=query, scopes=scopes, viewer=viewer),
+            core_pb2.AskRequest(
+                query=query,
+                scopes=scopes,
+                viewer=viewer,
+                active_keys=active_keys or [],
+                conversation_id=conversation_id,
+            ),
             timeout=ask_timeout_s(),
         )
 
@@ -182,6 +199,20 @@ async def list_conversations(assertion: str) -> core_pb2.ListConversationsRespon
         stub = core_pb2_grpc.CoreStub(channel)
         return await stub.ListConversations(
             core_pb2.ListConversationsRequest(assertion=assertion), timeout=read_timeout_s()
+        )
+
+
+async def list_users(
+    assertion: str, include_deleted: bool = False, limit: int = 0
+) -> core_pb2.ListUsersResponse:
+    """Kernel-truth user roster for admin pages and per-row actions."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ListUsers(
+            core_pb2.ListUsersRequest(
+                assertion=assertion, include_deleted=include_deleted, limit=limit
+            ),
+            timeout=read_timeout_s(),
         )
 
 

@@ -17,6 +17,7 @@ authority. When OIDC is off (P0), a fixed operator + public scope is used.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -26,6 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 import grpc
+import httpx
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import (
     HTMLResponse,
@@ -39,7 +41,7 @@ from fastapi.templating import Jinja2Templates
 from grpc import aio
 from starlette.middleware.sessions import SessionMiddleware
 
-from web_channel import actor, auth, convlog, core_client, kc_admin, localusers, render
+from web_channel import actor, auth, convlog, core_client, kc_admin, localusers, render, settings
 from web_channel._gen import core_pb2
 
 # Friendly answer-trace: how the kernel produced the answer (from the structured
@@ -67,14 +69,39 @@ _STATUS_VIEW = {
 }
 
 
+# A post title must fit the aside's history list — longer first sentences are
+# display-truncated (the body keeps the full text, nothing is lost).
+_TITLE_MAX = 90
+
+
 def _split_question(q: str) -> tuple[str, str]:
-    """A microblog post: a short question is the whole post; a long one uses its
-    first sentence as the title and the rest as the body."""
+    """A post's (title, body) — microblog rules (operator, 2026-07-08):
+    an explicit `# Heading` line IS the title; else the first sentence OR first
+    line (whichever ends sooner) is; a short post is all title; an overlong first
+    sentence is display-truncated while the body keeps the full text."""
     q = q.strip()
-    parts = re.split(r"(?<=[.!?])\s+", q, maxsplit=1)
-    if len(q) > 80 and len(parts) == 2:
-        return parts[0], parts[1]
-    return q, ""
+    # 1.3 — an explicit markdown heading names the topic.
+    m = re.match(r"^#{1,3}\s+(.+?)\s*\n+(.*)$", q, re.DOTALL)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    if m2 := re.match(r"^#{1,3}\s+(.+?)\s*$", q):  # heading-only post
+        return m2.group(1).strip(), ""
+    # 1.2 — a line break is an explicit structure signal: the first line is the
+    # title regardless of total length (a multi-paragraph post is never all-title).
+    if "\n" in q:
+        first, rest = q.split("\n", 1)
+        title, rest = first.strip(), rest.strip()
+    else:
+        # 1.1 — single line: a short post is all title (microblog); a long one
+        # takes its first sentence.
+        parts = re.split(r"(?<=[.!?])\s+", q, maxsplit=1)
+        if len(q) > 80 and len(parts) == 2:
+            title, rest = parts[0].strip(), parts[1].strip()
+        else:
+            title, rest = q, ""
+    if len(title) > _TITLE_MAX:
+        return title[: _TITLE_MAX - 1].rsplit(" ", 1)[0] + "…", q
+    return title, rest
 
 
 def _post_view(turn: dict) -> dict:
@@ -84,9 +111,17 @@ def _post_view(turn: dict) -> dict:
     dur = turn.get("duration_ms")
     asked = turn.get("asked_at")
     return {
+        # The turn's own row id — every reply is a first-class POST with an identity
+        # (an addressable anchor now; a graph-referenceable object later).
+        "id": turn.get("id"),
         "q_title": title,
-        "q_rest": rest,
+        # Question body + answer render as chat-style markdown (Mattermost/Slack
+        # shape): lists/emphasis work, bare URLs autolink, raw HTML is escaped
+        # (render.markdown, html=False) — so these are safe for |safe.
+        "q_rest_html": render.markdown(rest) if rest else "",
+        "question_html": render.markdown(turn["question"]),
         "answer": turn["answer"],
+        "answer_html": render.markdown(turn["answer"]) if turn["answer"] else "",
         "status_label": label,
         "status_class": status_class,
         "tier": turn["tier"],
@@ -102,6 +137,75 @@ def _post_view(turn: dict) -> dict:
         # "see how it decided" affordance only when it is present.
         "ask_ref": turn.get("ask_ref", ""),
     }
+
+
+def _active_keys_of(turn: dict | None) -> list[str]:
+    """Entity keys from one turn's citations (chat-thread epic 2) — Citation.ref for
+    a non-"claim" citation IS the graph node's key (kernel: `Swarm.Core.cite/1`).
+    Lets a pronoun follow-up ("its dependencies?") in a post's REPLY THREAD still
+    resolve on the kernel's fast structured path. Context is per-thread (post-objects
+    rework): a NEW post is a new topic and gets no keys at all."""
+    if not turn:
+        return []
+    return [c["ref"] for c in turn["citations"] if c.get("source") != "claim" and c.get("ref")]
+
+
+def _post_object_view(viewer: str, root: dict) -> dict:
+    """A root turn → the full post-object context: the post view + its thread handle
+    + its replies (oldest first, forum order)."""
+    view = _post_view(root)
+    view["thread_id"] = root["id"]
+    try:
+        view["replies"] = [_post_view(r) for r in convlog.replies(viewer, root["id"])]
+    except Exception:
+        logger.exception("convlog replies read failed")
+        view["replies"] = []
+    return view
+
+
+def _recent_titled(viewer: str) -> list[dict]:
+    """Sidebar history entries: root posts, newest first, each with its display
+    TITLE (same rules as the post header — a `# Heading` post shows its heading,
+    not the raw markdown)."""
+    try:
+        recent = convlog.recent(viewer, 20)
+    except Exception:
+        logger.exception("convlog read failed")
+        return []
+    for r in recent:
+        r["title"] = _split_question(r["question"])[0]
+    return recent
+
+
+async def _backfill_thread(assertion: str, viewer: str, root: dict) -> str:
+    """Write a thread's EXISTING turns (root Q&A + replies, oldest first) into a new
+    kernel conversation and bind it to the root — so a reply on a thread that predates
+    kernel threading still gets real history in its Ask. Returns the conversation id,
+    or "" on any failure (best-effort: the reply then proceeds with keys only)."""
+    try:
+        turns = [root, *convlog.replies(viewer, root["id"])]
+        title, _ = _split_question(root["question"])
+        conv_id = ""
+        for t in turns:
+            user_msg = await core_client.log_conversation(
+                assertion, conversation_id=conv_id, title=title, role="user", body=t["question"]
+            )
+            if user_msg.status != core_pb2.CALL_OK:
+                return ""
+            conv_id = conv_id or user_msg.conversation_id
+            await core_client.log_conversation(
+                assertion,
+                conversation_id=conv_id,
+                role="assistant",
+                body=t["answer"],
+                ask_ref=t.get("ask_ref", ""),
+            )
+        if conv_id:
+            convlog.set_kernel_conv(viewer, root["id"], conv_id)
+        return conv_id
+    except Exception:
+        logger.exception("thread backfill into the kernel conversation failed")
+        return ""
 
 
 logger = logging.getLogger("web_channel")
@@ -136,7 +240,9 @@ def _validate_oidc_config() -> None:
     if not auth.oidc_enabled():
         return
     missing = [
-        k for k in ("OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET") if not os.environ.get(k)
+        k
+        for k in ("OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET")
+        if not settings.get_or_env(k)
     ]
     if missing:
         raise RuntimeError(f"OIDC_ENABLED=true but missing required env: {', '.join(missing)}")
@@ -377,11 +483,6 @@ async def index(request: Request) -> Response:
     # Cold open lands on the dashboard (brief A.1.1), not a blank box. The KbStatus
     # tile loads async (HTMX) so the page is instant and never blocks on the kernel.
     viewer = principal.viewer if principal else _viewer()
-    try:
-        recent = convlog.recent(viewer, 15)  # for the sidebar links (durable, per-viewer)
-    except Exception:
-        logger.exception("convlog read failed")
-        recent = []
     return templates.TemplateResponse(
         request,
         "home.html",
@@ -389,32 +490,105 @@ async def index(request: Request) -> Response:
             "oidc_enabled": auth.oidc_enabled(),
             "authed": True,  # home → show the ⌘K search + palette in the header
             "principal": principal.to_session() if principal else None,
-            "recent": [
-                {
-                    "id": t["id"],
-                    "question": _split_question(t["question"])[0],
-                    "status": t["status"],
-                }
-                for t in recent
-            ],
+            "recent": _recent_titled(viewer),
         },
     )
 
 
-@app.get("/conversation/{conv_id}", response_class=HTMLResponse)
-async def conversation(request: Request, conv_id: int) -> HTMLResponse:
-    """Reopen a past conversation (a Recent link) into the main answer area."""
+@app.get("/p/{slug}", response_class=HTMLResponse)
+async def post_page(request: Request, slug: str) -> Response:
+    """A post's own PAGE (its permalink — the sidebar links here, and a fresh ask
+    pushes this URL). The full home layout with the post + its thread loaded; a
+    reply's slug resolves to its root's page. Viewer-scoped: someone else's slug is
+    indistinguishable from an absent one."""
+    principal = _current_principal(request)
+    if principal is None and (auth.oidc_enabled() or localusers.has_any()):
+        return RedirectResponse("/login")
+    viewer = principal.viewer if principal else _viewer()
+    turn = convlog.get_by_slug(viewer, slug)
+    if turn is not None and turn.get("thread_id"):
+        turn = convlog.get(viewer, turn["thread_id"])
+    if turn is None:
+        return HTMLResponse('<p class="muted">Post not found.</p>', status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        {
+            "oidc_enabled": auth.oidc_enabled(),
+            "authed": True,
+            "principal": principal.to_session() if principal else None,
+            "recent": _recent_titled(viewer),
+            "post": _post_object_view(viewer, turn),
+        },
+    )
+
+
+@app.get("/conversation/{conv_id}")
+async def conversation(request: Request, conv_id: int) -> Response:
+    """Legacy integer-id link → the post's permalink page (kept for old bookmarks)."""
     if auth.oidc_enabled():
         principal = _current_principal(request)
         if principal is None:
-            return HTMLResponse('<p class="muted">Session ended — <a href="/login">log in</a>.</p>')
+            return RedirectResponse("/login")
         viewer = principal.viewer
     else:
         viewer = _viewer()
     turn = convlog.get(viewer, conv_id)
-    if turn is None:
+    if turn is None or not turn.get("slug"):
         return HTMLResponse('<p class="muted">Conversation not found.</p>', status_code=404)
-    return templates.TemplateResponse(request, "_post.html", {"post": _post_view(turn)})
+    return RedirectResponse(f"/p/{turn['slug']}")
+
+
+def _glances_addr() -> str:
+    return os.environ.get("GLANCES_ADDR", "")
+
+
+async def _glances_json(client, path: str):
+    r = await client.get(f"{_glances_addr()}{path}")
+    r.raise_for_status()
+    return r.json()
+
+
+@app.get("/tile/system", response_class=HTMLResponse)
+async def tile_system(request: Request) -> HTMLResponse:
+    """The footer's body-telemetry strip — CPU/RAM/load/processes (+GPU when NVML
+    sees one) from the glances sidecar's REST API. Honest empty state when the
+    sidecar is unconfigured/unreachable; never blocks or breaks a page."""
+    if not _glances_addr():
+        return HTMLResponse("")
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            quick, mem, load, pcount, gpus = await asyncio.gather(
+                _glances_json(client, "/api/4/quicklook"),
+                _glances_json(client, "/api/4/mem"),
+                _glances_json(client, "/api/4/load"),
+                _glances_json(client, "/api/4/processcount"),
+                _glances_json(client, "/api/4/gpu"),
+            )
+    except Exception:
+        logger.exception("glances poll failed")
+        return HTMLResponse('<span class="muted">body telemetry offline</span>')
+    gib = 1024**3
+    ctx = {
+        "cpu": round(quick.get("cpu", 0)),
+        "mem": round(quick.get("mem", 0)),
+        "mem_used": f"{mem.get('used', 0) / gib:.1f}",
+        "mem_total": f"{mem.get('total', 0) / gib:.0f}",
+        "load1": f"{load.get('min1', 0):.2f}",
+        "procs": pcount.get("total", 0),
+        "running": pcount.get("running", 0),
+        # GB10 unified memory: NVML reports mem as null — omit vram then, never 0%.
+        "gpus": [
+            {
+                "name": g.get("name", "gpu"),
+                "proc": round(g.get("proc") or 0),
+                "mem": round(g["mem"]) if g.get("mem") is not None else None,
+                "temp": round(g["temperature"]) if g.get("temperature") is not None else None,
+            }
+            for g in (gpus or [])
+        ],
+    }
+    return templates.TemplateResponse(request, "_system_tile.html", ctx)
 
 
 @app.get("/tile/status", response_class=HTMLResponse)
@@ -769,12 +943,12 @@ def _end_session_url(session: dict, base_url: str) -> str:
     show a confirm screen (still correct — the SSO cookie dies either way).
     Observed live before this fix: every /auth/callback carried the SAME
     session_state, so 'logging in as bob' silently returned alice."""
-    issuer = os.environ.get("OIDC_ISSUER", "").rstrip("/")
+    issuer = settings.get_or_env("OIDC_ISSUER").rstrip("/")
     from urllib.parse import urlencode
 
     params = {
         "post_logout_redirect_uri": base_url,
-        "client_id": os.environ.get("OIDC_CLIENT_ID", ""),
+        "client_id": settings.get_or_env("OIDC_CLIENT_ID", ""),
     }
     id_token = session.get("id_token") or ""
     if id_token:
@@ -802,15 +976,232 @@ def _require_groot(request: Request) -> auth.Principal | None:
     return principal
 
 
+_CONNECTOR_KEYS = (
+    "OIDC_ISSUER",
+    "KEYCLOAK_REALM",
+    "OIDC_CLIENT_ID",
+    "OIDC_CLIENT_SECRET",
+    "KEYCLOAK_ADMIN_URL",
+    "KEYCLOAK_ADMIN_USER",
+    "KEYCLOAK_ADMIN_PASSWORD",
+)
+
+
+def _connector_view() -> dict[str, str]:
+    return {
+        "issuer": settings.get_or_env("OIDC_ISSUER"),
+        "realm": settings.get_or_env("KEYCLOAK_REALM", "swarm-local"),
+        "client_id": settings.get_or_env("OIDC_CLIENT_ID"),
+        "admin_url": settings.get_or_env("KEYCLOAK_ADMIN_URL", "http://keycloak:8080"),
+        "admin_user": settings.get_or_env("KEYCLOAK_ADMIN_USER", "admin"),
+    }
+
+
+def _connector_values() -> dict[str, str]:
+    return {
+        "OIDC_ISSUER": settings.get_or_env("OIDC_ISSUER"),
+        "KEYCLOAK_REALM": settings.get_or_env("KEYCLOAK_REALM", "swarm-local"),
+        "OIDC_CLIENT_ID": settings.get_or_env("OIDC_CLIENT_ID"),
+        "OIDC_CLIENT_SECRET": settings.get_or_env("OIDC_CLIENT_SECRET"),
+        "KEYCLOAK_ADMIN_URL": settings.get_or_env("KEYCLOAK_ADMIN_URL", "http://keycloak:8080"),
+        "KEYCLOAK_ADMIN_USER": settings.get_or_env("KEYCLOAK_ADMIN_USER", "admin"),
+        "KEYCLOAK_ADMIN_PASSWORD": settings.get_or_env("KEYCLOAK_ADMIN_PASSWORD", "admin"),
+    }
+
+
+async def _connector_check(values: dict[str, str]) -> dict[str, bool]:
+    return await kc_admin.check_connector(
+        values["OIDC_ISSUER"],
+        values["KEYCLOAK_ADMIN_URL"],
+        values["KEYCLOAK_ADMIN_USER"],
+        values["KEYCLOAK_ADMIN_PASSWORD"],
+    )
+
+
+@app.get("/admin/auth/status", response_class=HTMLResponse)
+async def admin_auth_status(request: Request) -> HTMLResponse:
+    principal = _require_groot(request)
+    if principal is None:
+        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    status = await _connector_check(_connector_values())
+    oidc_class = "status-found" if status["oidc"] else "status-error"
+    admin_class = "status-found" if status["admin"] else "status-error"
+    oidc_label = "ok" if status["oidc"] else "unreachable"
+    admin_label = "ok" if status["admin"] else "unreachable"
+    return HTMLResponse(
+        '<div class="status-grid">'
+        f'<div><span class="badge {oidc_class}">OIDC discovery {oidc_label}</span></div>'
+        f'<div><span class="badge {admin_class}">admin token {admin_label}</span></div>'
+        "</div>"
+    )
+
+
+@app.post("/admin/auth")
+async def admin_auth(
+    request: Request,
+    issuer: str = Form(...),
+    realm: str = Form(...),
+    client_id: str = Form(...),
+    client_secret: str = Form(""),
+    admin_url: str = Form(...),
+    admin_user: str = Form(...),
+    admin_password: str = Form(""),
+    csrf: str = Form(""),
+):
+    principal = _require_groot(request)
+    if principal is None:
+        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
+    current = _connector_values()
+    candidate = {
+        "OIDC_ISSUER": issuer.strip().rstrip("/"),
+        "KEYCLOAK_REALM": realm.strip(),
+        "OIDC_CLIENT_ID": client_id.strip(),
+        "OIDC_CLIENT_SECRET": client_secret if client_secret else current["OIDC_CLIENT_SECRET"],
+        "KEYCLOAK_ADMIN_URL": admin_url.strip().rstrip("/"),
+        "KEYCLOAK_ADMIN_USER": admin_user.strip(),
+        "KEYCLOAK_ADMIN_PASSWORD": (
+            admin_password if admin_password else current["KEYCLOAK_ADMIN_PASSWORD"]
+        ),
+    }
+    if not all(candidate[k] for k in _CONNECTOR_KEYS):
+        return _admin_outcome_page(400, "auth provider config incomplete", "status-error")
+    status = await _connector_check(candidate)
+    if not status["oidc"] or not status["admin"]:
+        return _admin_outcome_page(400, "auth provider test failed", "status-error")
+    for key in _CONNECTOR_KEYS:
+        settings.put(key, candidate[key])
+    logger.info(
+        "groot %s updated Keycloak auth provider issuer=%s realm=%s client_id=%s "
+        "admin_url=%s admin_user=%s",
+        principal.viewer,
+        candidate["OIDC_ISSUER"],
+        candidate["KEYCLOAK_REALM"],
+        candidate["OIDC_CLIENT_ID"],
+        candidate["KEYCLOAK_ADMIN_URL"],
+        candidate["KEYCLOAK_ADMIN_USER"],
+    )
+    return RedirectResponse("/admin/auth", status_code=303)
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(request: Request) -> HTMLResponse:
     principal = _require_groot(request)
     if principal is None:
-        return HTMLResponse(
-            '<main class="shell"><article class="card">'
-            '<span class="badge status-error">forbidden</span></article></main>',
-            status_code=403,
+        return _admin_forbidden()
+    kernel_user_count = None
+    assertion = _admin_assertion(principal)
+    if assertion:
+        try:
+            resp = await core_client.list_users(assertion)
+            if resp.status == core_pb2.CALL_OK:
+                kernel_user_count = len(resp.users)
+        except Exception:
+            logger.exception("ListUsers failed for admin hub")
+    return templates.TemplateResponse(
+        request,
+        "admin/index.html",
+        {
+            **_admin_template_context(request, principal, "hub"),
+            "groups": auth.known_groups(),
+            "kernel_user_count": kernel_user_count,
+        },
+    )
+
+
+def _admin_forbidden() -> HTMLResponse:
+    return HTMLResponse(
+        '<main class="shell"><article class="card">'
+        '<span class="badge status-error">forbidden</span></article></main>',
+        status_code=403,
+    )
+
+
+def _admin_template_context(request: Request, principal: auth.Principal, section: str) -> dict:
+    return {
+        "authed": True,
+        "principal": principal.to_session(),
+        "admin_section": section,
+        "csrf_token": _csrf_token(request),
+    }
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users(request: Request) -> HTMLResponse:
+    principal = _require_groot(request)
+    if principal is None:
+        return _admin_forbidden()
+    kernel_users = None
+    assertion = _admin_assertion(principal)
+    if assertion:
+        try:
+            resp = await core_client.list_users(assertion)
+            kernel_users = list(resp.users) if resp.status == core_pb2.CALL_OK else None
+        except Exception:
+            logger.exception("ListUsers failed")
+            kernel_users = None
+    return templates.TemplateResponse(
+        request,
+        "admin/users.html",
+        {
+            **_admin_template_context(request, principal, "users"),
+            "kernel_users": kernel_users,
+            "local_users": localusers.list_users(),
+            "groups": auth.known_groups(),
+        },
+    )
+
+
+@app.get("/admin/users/{user_id}", response_class=HTMLResponse)
+async def admin_user_detail(request: Request, user_id: str) -> HTMLResponse:
+    principal = _require_groot(request)
+    if principal is None:
+        return _admin_forbidden()
+    kernel_users = None
+    assertion = _admin_assertion(principal)
+    if assertion:
+        try:
+            resp = await core_client.list_users(assertion)
+            kernel_users = list(resp.users) if resp.status == core_pb2.CALL_OK else None
+        except Exception:
+            logger.exception("ListUsers failed for admin user detail")
+            kernel_users = None
+    user = None
+    if kernel_users is not None:
+        # Interim roster lookup: at scale this becomes a GetUser(uuid) RPC; see
+        # board/todo/swarm-kernel-requirements-from-web.md.
+        user = next((u for u in kernel_users if u.id == user_id), None)
+    if user is None:
+        return templates.TemplateResponse(
+            request,
+            "admin/user_detail.html",
+            {
+                **_admin_template_context(request, principal, "users"),
+                "user": None,
+                "groups": auth.known_groups(),
+                "detail_error": "kernel roster unavailable"
+                if kernel_users is None
+                else "user not found",
+            },
+            status_code=404,
         )
+    return templates.TemplateResponse(
+        request,
+        "admin/user_detail.html",
+        {
+            **_admin_template_context(request, principal, "users"),
+            "user": user,
+            "groups": auth.known_groups(),
+        },
+    )
+
+
+@app.get("/admin/auth", response_class=HTMLResponse)
+async def admin_auth_page(request: Request) -> HTMLResponse:
+    principal = _require_groot(request)
+    if principal is None:
+        return _admin_forbidden()
     try:
         users = await kc_admin.list_users()
     except Exception:
@@ -818,98 +1209,45 @@ async def admin(request: Request) -> HTMLResponse:
         users = None  # template shows an honest "Keycloak unavailable"
     return templates.TemplateResponse(
         request,
-        "admin.html",
+        "admin/auth.html",
         {
-            "authed": True,
-            "principal": principal.to_session(),
+            **_admin_template_context(request, principal, "auth"),
+            "connector": _connector_view(),
             "users": users,
-            "local_users": localusers.list_users(),
-            "groups": auth.known_groups(),
-            "csrf_token": _csrf_token(request),
         },
     )
 
 
-@app.post("/admin/invite")
-async def admin_invite(
-    request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-    group: str = Form(""),
-    csrf: str = Form(""),
-):
+@app.get("/admin/connector")
+async def admin_connector_legacy(request: Request) -> Response:
     principal = _require_groot(request)
     if principal is None:
-        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
-    if not _csrf_ok(request, csrf):
-        return _csrf_reject()
-    uname, grp = username.strip(), group.strip()
-    if not uname or not password:
-        return RedirectResponse("/admin", status_code=303)
-    # Allowlist the group: only groups the channel maps to a scope may be assigned —
-    # never let groot grant an arbitrary Keycloak group (council: codex).
-    if grp and grp not in auth.known_groups():
-        logger.warning("groot %s tried to assign unknown group=%s", principal.viewer, grp)
-        return HTMLResponse(
-            '<main class="shell"><article class="card">'
-            '<span class="badge status-error">unknown group</span>'
-            '<p class="muted">That group is not in the scope map. '
-            '<a href="/admin">back</a></p></article></main>',
-            status_code=400,
-        )
-    # Audit every groot grant (no secrets logged).
-    logger.info("groot %s invites user=%s group=%s", principal.viewer, uname, grp or "(none)")
-    try:
-        await kc_admin.invite_user(uname, password, grp or None)
-    except Exception:
-        logger.exception("groot invite failed for user=%s", uname)
-        return HTMLResponse(
-            '<main class="shell"><article class="card">'
-            '<span class="badge status-error">invite failed</span>'
-            '<p class="muted">See server logs. <a href="/admin">back</a></p></article></main>',
-            status_code=502,
-        )
-    return RedirectResponse("/admin", status_code=303)
+        return _admin_forbidden()
+    return RedirectResponse("/admin/auth", status_code=303)
 
 
-@app.post("/admin/local-invite")
-async def admin_local_invite(
-    request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-    group: str = Form(""),
-    csrf: str = Form(""),
-):
-    """Create a LOCAL (non-SSO) user in the channel's own store. groot-gated."""
+@app.get("/admin/connectors", response_class=HTMLResponse)
+async def admin_connectors(request: Request) -> HTMLResponse:
     principal = _require_groot(request)
     if principal is None:
-        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
-    if not _csrf_ok(request, csrf):
-        return _csrf_reject()
-    uname, grp = username.strip(), group.strip()
-    if not uname or not password:
-        return RedirectResponse("/admin", status_code=303)
-    if grp and grp not in auth.known_groups():
-        return HTMLResponse(
-            '<main class="shell"><article class="card">'
-            '<span class="badge status-error">unknown group</span>'
-            '<p class="muted">That group is not in the scope map. '
-            '<a href="/admin">back</a></p></article></main>',
-            status_code=400,
-        )
-    scopes = [auth.scopes_for([grp])[-1]] if grp else []  # the mapped scope for the group
-    logger.info("groot %s creates LOCAL user=%s group=%s", principal.viewer, uname, grp or "(none)")
-    try:
-        localusers.create(uname, password, scopes, is_groot=False, created_by=principal.viewer)
-    except ValueError:
-        return HTMLResponse(
-            '<main class="shell"><article class="card">'
-            '<span class="badge status-error">exists</span>'
-            '<p class="muted">A local user with that name already exists. '
-            '<a href="/admin">back</a></p></article></main>',
-            status_code=409,
-        )
-    return RedirectResponse("/admin", status_code=303)
+        return _admin_forbidden()
+    return templates.TemplateResponse(
+        request,
+        "admin/connectors.html",
+        _admin_template_context(request, principal, "connectors"),
+    )
+
+
+@app.get("/admin/tools", response_class=HTMLResponse)
+async def admin_tools(request: Request) -> HTMLResponse:
+    principal = _require_groot(request)
+    if principal is None:
+        return _admin_forbidden()
+    return templates.TemplateResponse(
+        request,
+        "admin/tools.html",
+        _admin_template_context(request, principal, "tools"),
+    )
 
 
 # --- Kernel-backed admin (ADR-16 D9/D10/D11, step 6b.4) --------------------
@@ -932,7 +1270,7 @@ def _admin_outcome_page(status_code: int, label: str, css_class: str) -> HTMLRes
         '<main class="shell"><article class="card">'
         f'<span class="badge {css_class}">{label}</span>'
         '<p class="muted">The kernel rejected this action — see above.</p>'
-        '<p><a class="navlink" href="/admin">back to admin</a></p></article></main>',
+        '<p><a class="navlink" href="/admin/users">back to admin</a></p></article></main>',
         status_code=status_code,
     )
 
@@ -975,6 +1313,10 @@ async def admin_kernel_user(
     }
     if op not in op_map:
         return _admin_outcome_page(400, "bad request", "status-error")
+    grp = group.strip()
+    if op == "invite" and grp and grp not in auth.known_groups():
+        logger.warning("groot %s tried to assign unknown group=%s", principal.viewer, grp)
+        return _admin_outcome_page(400, "unknown group", "status-error")
     try:
         resp = await core_client.manage_user(
             assertion,
@@ -996,14 +1338,13 @@ async def admin_kernel_user(
         # the kernel record already exists even if this half fails; groot can
         # retry via the plain local-invite form above).
         try:
-            grp = group.strip()
             scopes = [auth.scopes_for([grp])[-1]] if grp else []
             localusers.create(
                 login.strip(), password, scopes, is_groot=False, created_by=principal.viewer
             )
         except ValueError:
             logger.warning("kernel-invited login=%s already has a local credential", login)
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse("/admin/users", status_code=303)
 
 
 @app.post("/admin/kernel/access")
@@ -1049,7 +1390,7 @@ async def admin_kernel_access(
     if resp.status != core_pb2.CALL_OK:
         label, css_class = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
         return _admin_outcome_page(409, label, css_class)
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse("/admin/users", status_code=303)
 
 
 @app.post("/admin/kernel/read-conversation", response_class=HTMLResponse)
@@ -1104,8 +1445,63 @@ async def admin_kernel_read_conversation(
     )
 
 
+@app.post("/ask/start", response_class=HTMLResponse)
+async def ask_start(
+    request: Request, q: str = Form(...), thread_id: str = Form("")
+) -> HTMLResponse:
+    """Phase 1 of an ask (thinking-block, cheap step): return the PENDING fragment
+    instantly — the question + a live honest elapsed counter — whose embedded
+    auto-firing form then runs the real (slow) /ask and replaces it with the final
+    post/reply. No cognition here: just the immediate claude.ai-style feedback."""
+    if not q.strip():
+        return HTMLResponse("")
+
+    if auth.oidc_enabled():
+        principal = _current_principal(request)
+        if principal is None:
+            return HTMLResponse(
+                '<article class="card"><span class="badge status-warn">sign in</span>'
+                '<p class="muted">Your session ended. '
+                '<a href="/login">Log in</a> to ask.</p></article>'
+            )
+        viewer = principal.viewer
+    else:
+        viewer = _viewer()
+
+    asked_at = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S")
+    qs = q.strip()
+    if thread_id.strip():
+        # Validate the thread NOW (viewer-scoped) — instant honest feedback beats
+        # a pending block that dies a minute later on an unresolvable thread.
+        try:
+            root = convlog.get(viewer, int(thread_id))
+        except Exception:
+            root = None
+        if root is None:
+            return HTMLResponse('<p class="muted">This post is gone — start a new one.</p>')
+        return templates.TemplateResponse(
+            request,
+            "_reply_pending.html",
+            {"q": qs, "thread_id": root["id"], "asked_at": asked_at},
+        )
+
+    title, rest = _split_question(qs)
+    # Mint the post's permalink slug NOW and push its URL immediately (operator:
+    # posting must land you on the post's page) — the pending form carries the slug
+    # through to /ask, which persists it, so the pushed URL and the row agree.
+    slug = convlog.new_slug()
+    return templates.TemplateResponse(
+        request,
+        "_post_pending.html",
+        {"q": qs, "q_title": title, "q_rest": rest, "asked_at": asked_at, "slug": slug},
+        headers={"HX-Push-Url": f"/p/{slug}"},
+    )
+
+
 @app.post("/ask", response_class=HTMLResponse)
-async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
+async def ask(
+    request: Request, q: str = Form(...), thread_id: str = Form(""), slug: str = Form("")
+) -> HTMLResponse:
     # The HTML `required` is client-only and bypassable; don't spend an Ask on an
     # empty/whitespace query — just clear the answer region.
     if not q.strip():
@@ -1124,12 +1520,51 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
     else:
         viewer, scopes, assertion = _viewer(), _scopes(), ""
 
+    # Post-objects rework: a bare ask = a NEW post object (fresh topic — no carried
+    # context); an ask with `thread_id` = a REPLY under that post, continuing ITS
+    # conversation (per-thread memory, epic 2). The root lookup is viewer-scoped, so
+    # a foreign/bogus thread_id resolves to nothing — an honest error, never a leak.
+    root: dict | None = None
+    if thread_id.strip():
+        try:
+            root = convlog.get(viewer, int(thread_id))
+        except Exception:  # malformed id and a DB failure alike — honest error below
+            root = None
+        if root is None:
+            return HTMLResponse('<p class="muted">This post is gone — start a new one.</p>')
+
     qs = q.strip()
     asked_at = time.time()
     started = time.monotonic()
+    if root is not None:
+        kernel_conv = root.get("kernel_conv_id", "")
+        if not kernel_conv and assertion:
+            # The thread has no kernel conversation yet (its root predates threading
+            # or its dual-write failed) — backfill the WHOLE existing thread into a
+            # fresh kernel conversation NOW, so even this FIRST reply's Ask gets real
+            # history to fold in, not just citation keys. Best-effort: on any failure
+            # the reply proceeds exactly as before (active_keys only).
+            kernel_conv = await _backfill_thread(assertion, viewer, root)
+        try:
+            # Thread context = the root's keys UNION the latest turn's keys — the
+            # thread's subject survives even when the last reply's citations drifted.
+            last = convlog.last_turn(viewer, root["id"])
+            active_keys = list(dict.fromkeys(_active_keys_of(root) + _active_keys_of(last)))
+        except Exception:
+            logger.exception("convlog read failed while computing active_keys")
+            active_keys = []
+    else:
+        kernel_conv, active_keys = "", []
+
     answer_text, tier, status_str, conf, cites, ask_ref = "", "error", "error", 0.0, [], ""
     try:
-        resp = await core_client.ask(q, scopes=scopes, viewer=assertion or viewer)
+        resp = await core_client.ask(
+            q,
+            scopes=scopes,
+            viewer=assertion or viewer,
+            active_keys=active_keys,
+            conversation_id=kernel_conv,
+        )
         answer_text, tier, conf = resp.answer, resp.tier, resp.confidence
         status_str = _STATUS_STR.get(resp.status, "unspecified")
         ask_ref = resp.ask_ref  # opaque deliberation handle; "" unless escalated (ADR-15)
@@ -1146,8 +1581,10 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
     duration_ms = int((time.monotonic() - started) * 1000)
 
     # Durable per-viewer conversation log (best-effort — must never break /ask).
+    # The returned row id is the new post's thread handle (its reply form needs it).
+    row_id: int | None = None
     try:
-        convlog.log_turn(
+        row_id = convlog.log_turn(
             viewer,
             scopes,
             qs,
@@ -1159,6 +1596,11 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
             asked_at=asked_at,
             duration_ms=duration_ms,
             ask_ref=ask_ref,
+            thread_id=root["id"] if root else None,
+            kernel_conv_id=kernel_conv,
+            # A new post keeps the slug /ask/start pre-minted (the pushed URL must
+            # resolve); a reply mints its own inside log_turn.
+            slug=slug.strip() if not root else "",
         )
     except Exception:
         logger.exception("convlog write failed")
@@ -1166,16 +1608,23 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
     # Dual-write to the kernel-owned, owner-enforced conversation store (ADR-16
     # D9/step 6b) — best-effort, must never break /ask. The LOCAL convlog above
     # remains the primary read path (it carries the answer trace — tier/confidence/
-    # citations — the kernel's Conversation model doesn't); this is what makes the
-    # per-user privacy invariant load-bearing end-to-end rather than dormant. Only
-    # possible once a signed identity exists (assertion non-empty).
+    # citations — the kernel's Conversation model doesn't). One kernel conversation
+    # per POST (post-objects rework): created on the root ask, continued by replies.
+    # Only possible once a signed identity exists (assertion non-empty).
     if assertion:
         try:
-            title, _ = _split_question(qs)
+            title, _ = _split_question(root["question"] if root else qs)
             user_msg = await core_client.log_conversation(
-                assertion, title=title, role="user", body=qs
+                assertion, conversation_id=kernel_conv, title=title, role="user", body=qs
             )
             if user_msg.status == core_pb2.CALL_OK:
+                if not kernel_conv:
+                    # A conversation was just created for this thread — remember it on
+                    # the ROOT row so the next reply continues the same memory. (For a
+                    # reply whose root predates signing, this backfills the thread.)
+                    anchor = root["id"] if root else row_id
+                    if anchor:
+                        convlog.set_kernel_conv(viewer, anchor, user_msg.conversation_id)
                 await core_client.log_conversation(
                     assertion,
                     conversation_id=user_msg.conversation_id,
@@ -1187,6 +1636,7 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
             logger.exception("kernel LogConversation failed (convlog remains the record)")
 
     turn = {
+        "id": row_id,  # a reply is a first-class post — its anchor/graph identity
         "question": qs,
         "answer": answer_text,
         "tier": tier,
@@ -1197,8 +1647,14 @@ async def ask(request: Request, q: str = Form(...)) -> HTMLResponse:
         "duration_ms": duration_ms,
         "ask_ref": ask_ref,
     }
-    # A new post for the feed (HTMX prepends it).
-    return templates.TemplateResponse(request, "_post.html", {"post": _post_view(turn)})
+    if root is not None:
+        # A reply, appended inside its post object's thread.
+        return templates.TemplateResponse(request, "_post_reply.html", {"post": _post_view(turn)})
+    # A new post object, prepended to the feed.
+    view = _post_view(turn)
+    view["thread_id"] = row_id
+    view["replies"] = []
+    return templates.TemplateResponse(request, "_post_object.html", {"post": view})
 
 
 @app.get("/healthz", response_class=PlainTextResponse)

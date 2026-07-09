@@ -74,7 +74,7 @@ def test_local_login_then_ask_uses_local_scopes_no_leak(monkeypatch) -> None:
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     captured: dict = {}
 
-    async def fake_ask(query, scopes, viewer):
+    async def fake_ask(query, scopes, viewer, **kwargs):
         captured.update(scopes=scopes, viewer=viewer)
         return core_pb2.AskResponse(answer="ok", status=core_pb2.FOUND, tier="t", confidence=0.7)
 
@@ -198,7 +198,7 @@ def test_ask_sends_signed_assertion_not_plaintext_viewer(monkeypatch) -> None:
 
     captured: dict = {}
 
-    async def fake_ask(query, scopes, viewer):
+    async def fake_ask(query, scopes, viewer, **kwargs):
         captured["viewer"] = viewer
         return core_pb2.AskResponse(answer="ok", status=core_pb2.FOUND, tier="t", confidence=0.7)
 

@@ -12,18 +12,33 @@ alias Swarm.Graph.Store
 reliability = Map.get(decoded, "reliability", 0.85)
 evidence_kind = Map.get(decoded, "evidence_kind", "observation")
 
-facts =
-  Enum.map(rf, fn f ->
-    %{
-      subject: f["subject"], subject_kind: f["subject_kind"],
-      relation: f["relation"], object: f["object"], object_kind: f["object_kind"]
-    }
+# S1: a fact may carry its own upstream `lineage` (wiki loaders emit per-PAGE lineage so different
+# pages corroborate but the same page across passes counts once). Facts are grouped by lineage and
+# written per group; a fact without `lineage` (e.g. iac) falls back to origin-derived (identity).
+node = %{id: Store.upsert_node("source", origin, scope: "group"), scope: "group"}
+
+groups =
+  rf
+  |> Enum.map(fn f ->
+    {f["lineage"],
+     %{
+       subject: f["subject"], subject_kind: f["subject_kind"],
+       relation: f["relation"], object: f["object"], object_kind: f["object_kind"]
+     }}
+  end)
+  |> Enum.group_by(fn {lin, _} -> lin end, fn {_, fact} -> fact end)
+
+{ids, lineages} =
+  Enum.reduce(groups, {[], 0}, fn {lineage, facts}, {acc, n} ->
+    written =
+      NetworkMap.write(node, facts, origin <> ":facts",
+        origin: origin,
+        lineage: lineage,
+        reliability: reliability,
+        evidence_kind: evidence_kind
+      )
+
+    {acc ++ written, n + 1}
   end)
 
-src = Store.upsert_node("source", origin, scope: "group")
-
-ids =
-  NetworkMap.write(%{id: src, scope: "group"}, facts, origin <> ":facts",
-    origin: origin, reliability: reliability, evidence_kind: evidence_kind)
-
-IO.puts("NETMAP-LOAD origin=#{origin} facts=#{length(facts)} edges=#{length(ids)} rel=#{reliability}")
+IO.puts("NETMAP-LOAD origin=#{origin} facts=#{length(rf)} lineages=#{lineages} edges=#{length(ids)} rel=#{reliability}")

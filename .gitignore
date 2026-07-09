@@ -11,6 +11,15 @@ secrets.env
 env/*.env
 !env/base.env
 
+# Curated who-map group overlay: real per-stage defs (real slugs + uid overrides) stay out of the
+# public repo; the generic template stays committed.
+env/groups.*.yaml
+!env/groups.example.yaml
+env/services.*.yaml
+!env/services.example.yaml
+env/ldap_schema.*.yaml
+!env/ldap_schema.example.yaml
+
 # Local/private runtime state.
 data/*
 !data/.gitkeep

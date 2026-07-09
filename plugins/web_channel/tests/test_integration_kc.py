@@ -1,8 +1,8 @@
 """Integration checks against a LIVE local Keycloak (excluded by default — run with
 `uv run pytest -m integration` after `docker compose up -d keycloak`).
 
-Proves the realm + real tokens map to the right scopes through auth.py, and that the
-groot invite provisions a real user in a group. Env (matches compose, host-side):
+Proves the realm + real tokens map to the right scopes through auth.py. Env
+(matches compose, host-side):
   KEYCLOAK_ADMIN_URL=http://localhost:8081 KEYCLOAK_REALM=swarm-local
   KEYCLOAK_ADMIN_USER=admin KEYCLOAK_ADMIN_PASSWORD=admin
   GROUP_SCOPE_MAP='{"confluence":"group"}'
@@ -17,7 +17,7 @@ import os
 import httpx
 import pytest
 
-from web_channel import auth, kc_admin
+from web_channel import auth
 
 pytestmark = pytest.mark.integration
 
@@ -63,13 +63,3 @@ async def test_real_token_maps_to_principal(username, expected_scopes, expected_
     assert principal.viewer == username
     assert principal.scopes == expected_scopes
     assert principal.is_groot == expected_groot
-
-
-async def test_groot_invite_provisions_user_in_group() -> None:
-    uname = "carol-itest"
-    existing = {u["username"] for u in await kc_admin.list_users()}
-    if uname not in existing:
-        await kc_admin.invite_user(uname, "TempPass123!", "confluence")
-    users = {u["username"]: u for u in await kc_admin.list_users()}
-    assert uname in users
-    assert "confluence" in users[uname]["groups"]

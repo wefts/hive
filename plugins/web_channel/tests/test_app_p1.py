@@ -16,14 +16,14 @@ client = TestClient(web.app)
 def _p1_csrf() -> str:
     import re as _re
 
-    r = client.get("/admin")
+    r = client.get("/admin/users")
     m = _re.search(r'name="csrf" value="([^"]+)"', r.text)
     assert m, "admin page must embed the csrf token"
     return m.group(1)
 
 
 def _capture_ask(captured: dict):
-    async def ask(query: str, scopes: list[str], viewer: str) -> core_pb2.AskResponse:
+    async def ask(query: str, scopes: list[str], viewer: str, **kwargs) -> core_pb2.AskResponse:
         captured.update(query=query, scopes=scopes, viewer=viewer)
         return core_pb2.AskResponse(answer="ok", confidence=0.7, tier="t", status=core_pb2.FOUND)
 
@@ -83,7 +83,7 @@ def test_index_shows_login_when_anonymous(monkeypatch) -> None:
     r = client.get("/")
     assert r.status_code == 200
     assert "/login" in r.text
-    assert 'hx-post="/ask"' not in r.text  # no ask form until signed in
+    assert 'hx-post="/ask' not in r.text  # no ask form (neither phase) until signed in
 
 
 def test_index_shows_ask_form_when_authenticated(monkeypatch) -> None:
@@ -93,7 +93,7 @@ def test_index_shows_ask_form_when_authenticated(monkeypatch) -> None:
     )
     r = client.get("/")
     assert r.status_code == 200
-    assert 'hx-post="/ask"' in r.text
+    assert 'hx-post="/ask/start"' in r.text
     assert "alice" in r.text  # identity shown
 
 
@@ -103,23 +103,64 @@ def test_admin_forbidden_for_non_groot(monkeypatch) -> None:
         web, "_current_principal", lambda request: _principal("alice", ["public", "group"])
     )
 
-    async def must_not_list():
+    async def must_not_list(*args, **kwargs):
         raise AssertionError("list_users must not be called for a non-groot")
 
     monkeypatch.setattr(kc_admin, "list_users", must_not_list)
-    r = client.get("/admin")
-    assert r.status_code == 403
-    assert "forbidden" in r.text.lower()
+    monkeypatch.setattr(core_client, "list_users", must_not_list)
+    for path in [
+        "/admin",
+        "/admin/users",
+        "/admin/users/known-id",
+        "/admin/auth",
+        "/admin/connector",
+        "/admin/connectors",
+        "/admin/tools",
+    ]:
+        r = client.get(path, follow_redirects=False)
+        assert r.status_code == 403, path
+        assert "forbidden" in r.text.lower()
 
 
 def test_admin_forbidden_for_anonymous(monkeypatch) -> None:
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(web, "_current_principal", lambda request: None)
-    r = client.get("/admin")
+    r = client.get("/admin", follow_redirects=False)
     assert r.status_code == 403
 
 
-def test_admin_allows_groot(monkeypatch) -> None:
+def test_admin_hub_renders_for_groot(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    # A signable identity (sub+provider) so the hub can mint the actor assertion
+    # ListUsers needs — a bare _principal() can't sign, so the count would stay blank.
+    signed_groot = _principal("groot", ["public"], is_groot=True)
+    signed_groot.sub, signed_groot.provider = "groot-sub", "keycloak"
+    monkeypatch.setattr(web, "_current_principal", lambda request: signed_groot)
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+
+    async def fake_kernel_list(assertion, include_deleted=False, limit=0):
+        assert assertion.count(".") == 2
+        return core_pb2.ListUsersResponse(
+            status=core_pb2.CALL_OK,
+            users=[core_pb2.UserView(id="u-1", login="alice")],
+        )
+
+    monkeypatch.setattr(core_client, "list_users", fake_kernel_list)
+    r = client.get("/admin", follow_redirects=False)
+    assert r.status_code == 200
+    assert 'action="/admin/kernel/user"' in r.text
+    assert 'value="invite"' in r.text
+    assert "jit-provision-rpc" in r.text
+    assert 'href="/admin/users"' in r.text
+    assert 'href="/admin/auth"' in r.text
+    assert 'href="/admin/connectors"' in r.text
+    assert 'href="/admin/tools"' in r.text
+    assert "Groups" in r.text and "(planned)" in r.text
+    assert "Roles" in r.text and "(planned)" in r.text
+    assert "1</span> kernel users" in r.text
+
+
+def test_auth_provider_page_allows_groot_and_lists_realm_users(monkeypatch) -> None:
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(
         web, "_current_principal", lambda request: _principal("groot", ["public"], is_groot=True)
@@ -129,12 +170,105 @@ def test_admin_allows_groot(monkeypatch) -> None:
         return [{"username": "alice", "email": "a@x", "groups": ["confluence"]}]
 
     monkeypatch.setattr(kc_admin, "list_users", fake_list)
-    r = client.get("/admin")
+    r = client.get("/admin/auth")
     assert r.status_code == 200
+    assert "Auth Provider (Keycloak / OIDC)" in r.text
+    assert 'action="/admin/auth"' in r.text
+    assert 'hx-get="/admin/auth/status"' in r.text
+    assert "Keycloak realm users" in r.text
     assert "alice" in r.text
 
 
-def test_invite_forbidden_for_non_groot_and_not_called(monkeypatch) -> None:
+def test_admin_connector_legacy_redirects_to_auth(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        web, "_current_principal", lambda request: _principal("groot", ["public"], is_groot=True)
+    )
+    r = client.get("/admin/connector", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/admin/auth"
+
+
+def test_connectors_page_is_honest_placeholder_without_backend_calls(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        web, "_current_principal", lambda request: _principal("groot", ["public"], is_groot=True)
+    )
+
+    async def must_not_call(*args, **kwargs):
+        raise AssertionError("connectors placeholder must not call backends")
+
+    monkeypatch.setattr(kc_admin, "list_users", must_not_call)
+    monkeypatch.setattr(core_client, "list_users", must_not_call)
+    r = client.get("/admin/connectors")
+    assert r.status_code == 200
+    assert "Connectors" in r.text
+    assert "planned" in r.text
+    assert "knowledge ingest sources" in r.text
+    assert "default-deny" in r.text
+
+
+def test_admin_nav_shows_redesigned_sections(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        web, "_current_principal", lambda request: _principal("groot", ["public"], is_groot=True)
+    )
+    r = client.get("/admin/users")
+    assert r.status_code == 200
+    assert "Users" in r.text
+    assert "Groups" in r.text and "(planned)" in r.text
+    assert "Roles" in r.text and "(planned)" in r.text
+    assert "Auth Provider" in r.text
+    assert "Connectors" in r.text
+    assert "Tools" in r.text
+
+
+def test_users_page_does_not_call_keycloak(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        web, "_current_principal", lambda request: _principal("groot", ["public"], is_groot=True)
+    )
+
+    async def must_not_list():
+        raise AssertionError("users page must not call Keycloak")
+
+    async def fake_kernel_list(assertion, include_deleted=False, limit=0):
+        return core_pb2.ListUsersResponse(status=core_pb2.CALL_OK)
+
+    monkeypatch.setattr(kc_admin, "list_users", must_not_list)
+    monkeypatch.setattr(core_client, "list_users", fake_kernel_list)
+    r = client.get("/admin/users")
+    assert r.status_code == 200
+    assert "Keycloak realm users" not in r.text
+
+
+def test_tools_page_contains_break_glass(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        web, "_current_principal", lambda request: _principal("groot", ["public"], is_groot=True)
+    )
+    r = client.get("/admin/tools")
+    assert r.status_code == 200
+    assert "Break-glass conversation read" in r.text
+    assert 'action="/admin/kernel/read-conversation"' in r.text
+
+
+def test_deleted_invite_routes_are_gone() -> None:
+    r = client.post(
+        "/admin/invite",
+        data={"username": "mallory", "password": "x", "group": "confluence"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 404
+    r = client.post(
+        "/admin/local-invite",
+        data={"username": "mallory", "password": "x", "group": "confluence"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 404
+
+
+def test_kernel_invite_forbidden_for_non_groot_and_not_called(monkeypatch) -> None:
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(
         web, "_current_principal", lambda request: _principal("alice", ["public", "group"])
@@ -144,17 +278,17 @@ def test_invite_forbidden_for_non_groot_and_not_called(monkeypatch) -> None:
     async def must_not_invite(*a, **k):
         called["n"] += 1
 
-    monkeypatch.setattr(kc_admin, "invite_user", must_not_invite)
+    monkeypatch.setattr(core_client, "manage_user", must_not_invite)
     r = client.post(
-        "/admin/invite",
-        data={"username": "mallory", "password": "x", "group": "confluence"},
+        "/admin/kernel/user",
+        data={"op": "invite", "login": "mallory", "password": "x", "group": "confluence"},
         follow_redirects=False,
     )
     assert r.status_code == 403
     assert called["n"] == 0  # provisioning never reached for a non-groot
 
 
-def test_invite_provisions_for_groot(monkeypatch) -> None:
+def test_kernel_invite_provisions_for_groot(monkeypatch) -> None:
     monkeypatch.setenv("GROUP_SCOPE_MAP", '{"confluence":"group"}')  # confluence is a known group
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(
@@ -162,25 +296,29 @@ def test_invite_provisions_for_groot(monkeypatch) -> None:
     )
     captured: dict = {}
 
-    async def fake_invite(username: str, password: str, group=None):
-        captured.update(username=username, password=password, group=group)
+    async def fake_manage_user(assertion, op, **kw):
+        captured.update(op=op, **kw)
+        return core_pb2.AdminActionResponse(status=core_pb2.CALL_OK)
 
-    monkeypatch.setattr(kc_admin, "invite_user", fake_invite)
+    monkeypatch.setattr(core_client, "manage_user", fake_manage_user)
     r = client.post(
-        "/admin/invite",
+        "/admin/kernel/user",
         data={
             "csrf": _p1_csrf(),
-            "username": "carol",
+            "op": "invite",
+            "login": "carol",
             "password": "TempPass1",
             "group": "confluence",
         },
         follow_redirects=False,
     )
-    assert r.status_code == 303  # redirect back to /admin
-    assert captured == {"username": "carol", "password": "TempPass1", "group": "confluence"}
+    assert r.status_code == 303
+    assert r.headers["location"] == "/admin/users"
+    assert captured["op"] == core_pb2.INVITE
+    assert captured["login"] == "carol"
 
 
-def test_invite_rejects_group_not_in_scope_map(monkeypatch) -> None:
+def test_kernel_invite_rejects_group_not_in_scope_map(monkeypatch) -> None:
     # groot may only assign groups the channel maps to a scope — never an arbitrary
     # Keycloak group (council: codex).
     monkeypatch.setenv("GROUP_SCOPE_MAP", '{"confluence":"group"}')
@@ -193,39 +331,91 @@ def test_invite_rejects_group_not_in_scope_map(monkeypatch) -> None:
     async def must_not_invite(*a, **k):
         called["n"] += 1
 
-    monkeypatch.setattr(kc_admin, "invite_user", must_not_invite)
+    monkeypatch.setattr(core_client, "manage_user", must_not_invite)
     r = client.post(
-        "/admin/invite",
+        "/admin/kernel/user",
         data={
             "csrf": _p1_csrf(),
-            "username": "x",
+            "op": "invite",
+            "login": "x",
             "password": "y",
             "group": "admins-of-everything",
         },
         follow_redirects=False,
     )
     assert r.status_code == 400
-    assert called["n"] == 0  # provisioning never reached for an unmapped group
+    assert called["n"] == 0
 
 
-def test_invite_does_not_log_password(monkeypatch, caplog) -> None:
+def test_kernel_invite_does_not_log_password(monkeypatch, caplog) -> None:
     monkeypatch.setenv("GROUP_SCOPE_MAP", '{"confluence":"group"}')
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(
         web, "_current_principal", lambda request: _principal("groot", ["public"], is_groot=True)
     )
 
-    async def fake_invite(username: str, password: str, group=None):
-        return None
+    async def fake_manage_user(assertion, op, **kw):
+        return core_pb2.AdminActionResponse(status=core_pb2.CALL_OK)
 
-    monkeypatch.setattr(kc_admin, "invite_user", fake_invite)
+    monkeypatch.setattr(core_client, "manage_user", fake_manage_user)
     with caplog.at_level("INFO", logger="web_channel"):
         client.post(
-            "/admin/invite",
-            data={"username": "carol", "password": "SuperSecret123", "group": "confluence"},
+            "/admin/kernel/user",
+            data={
+                "csrf": _p1_csrf(),
+                "op": "invite",
+                "login": "carol",
+                "password": "SuperSecret123",
+                "group": "confluence",
+            },
             follow_redirects=False,
         )
-    assert "SuperSecret123" not in caplog.text  # the audit line must not log the password
+    assert "SuperSecret123" not in caplog.text
+
+
+def test_connector_test_before_save_failure_persists_nothing(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        web, "_current_principal", lambda request: _principal("groot", ["public"], is_groot=True)
+    )
+
+    async def fail_check(values):
+        return {"oidc": True, "admin": False}
+
+    monkeypatch.setattr(web, "_connector_check", fail_check)
+    from web_channel import settings
+
+    r = client.post(
+        "/admin/auth",
+        data={
+            "csrf": _p1_csrf(),
+            "issuer": "http://kc.test/realms/swarm",
+            "realm": "swarm",
+            "client_id": "web",
+            "client_secret": "new-secret",
+            "admin_url": "http://kc-admin.test",
+            "admin_user": "admin",
+            "admin_password": "new-admin-secret",
+        },
+    )
+    assert r.status_code == 400
+    assert settings.get("OIDC_ISSUER") is None
+    assert settings.get("OIDC_CLIENT_SECRET") is None
+
+
+def test_connector_page_never_renders_secret_values(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        web, "_current_principal", lambda request: _principal("groot", ["public"], is_groot=True)
+    )
+    from web_channel import settings
+
+    settings.put("OIDC_CLIENT_SECRET", "client-secret-value")
+    settings.put("KEYCLOAK_ADMIN_PASSWORD", "admin-secret-value")
+    r = client.get("/admin/auth")
+    assert r.status_code == 200
+    assert "client-secret-value" not in r.text
+    assert "admin-secret-value" not in r.text
 
 
 def test_session_secret_never_a_committed_default(monkeypatch) -> None:

@@ -1,0 +1,17 @@
+{# The footer's body-telemetry strip (htop vibe, one quiet line): meter bars +
+   muted mono numbers. Values come structured from glances — never parsed prose. #}
+<span class="sys-item">cpu
+  <span class="meter"><span class="meter-fill{% if cpu > 85 %} hot{% endif %}" style="width: {{ cpu }}%"></span></span>
+  <span class="sys-num">{{ cpu }}%</span></span>
+<span class="sys-item">mem
+  <span class="meter"><span class="meter-fill{% if mem > 85 %} hot{% endif %}" style="width: {{ mem }}%"></span></span>
+  <span class="sys-num">{{ mem_used }}/{{ mem_total }}G</span></span>
+{% for g in gpus %}
+<span class="sys-item">gpu
+  <span class="meter"><span class="meter-fill{% if g.proc > 85 %} hot{% endif %}" style="width: {{ g.proc }}%"></span></span>
+  <span class="sys-num">{{ g.proc }}%</span>
+  {%- if g.mem is not none %} vram <span class="sys-num">{{ g.mem }}%</span>{% endif %}
+  {%- if g.temp is not none %} <span class="sys-num">{{ g.temp }}°</span>{% endif %}</span>
+{% endfor %}
+<span class="sys-item">load <span class="sys-num">{{ load1 }}</span></span>
+<span class="sys-item"><span class="sys-num">{{ procs }}</span> procs · <span class="sys-num">{{ running }}</span> running</span>

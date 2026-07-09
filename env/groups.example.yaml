@@ -1,0 +1,40 @@
+# Curated who-map group/role overlay — EXAMPLE / template (committed, generic).
+#
+# The REAL spec is a gitignored per-stage file: env/groups.staging.yaml (real slugs + uid overrides
+# stay out of git, like secrets.env / staging.env). Copy this, fill in real groups there.
+#
+# This is a KNOWLEDGE/reference overlay (a navigable map of org groups & roles) — NOT access control.
+# It is distinct from LDAP groups / Keycloak roles / Swarm user authz. See
+# board/doing/who-groups-overlay-design.md.
+#
+# Each group materializes `in_group` edges (person → who:group:<slug>) on every who reconcile, under
+# origin `curated:groups`. Truth ranking for role/function: curation > Wiki > Gescom/LDAP-title.
+#
+# A group is defined by a `rule` (predicate over the existing axes) and/or explicit include/exclude.
+#   axes:   org (subsidiary), team (department, decoded label), family (clustered role),
+#           status (employee|contractor), site, title
+#   rule:   all: [...]  (AND) · any: [...] (OR) · not: {...} · leaf {axis: value|[values]} (glob; list = OR)
+#   NOTE:   a leaf matches ONE axis. To AND two axes, nest them under `all:` — a single leaf with two
+#           keys ({org: a, team: b}) only evaluates the first. list = OR within one axis.
+#   include/exclude: explicit uids applied AFTER the rule (the tails Gescom/Wiki miss or get wrong)
+
+groups:
+  # A cross-cut group: people in one subsidiary doing one function.
+  - slug: example-entity-ops
+    name: "Example Entity — ops"
+    aliases: ["example ops", "ops example"]
+    rule:
+      all:
+        - org: "example entity"
+        - any:
+            - team: "*ops*"
+            - family: [devops, sysadmin]
+    include: []          # e.g. someone the Wiki/reality places here but Gescom's title doesn't
+    exclude: []
+
+  # A pure explicit group (no rule) — a hand-curated cohort the axes can't express.
+  - slug: example-tiger-team
+    name: "Example Tiger Team"
+    aliases: ["tiger team"]
+    include: []          # list the uids
+    exclude: []

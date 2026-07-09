@@ -17,7 +17,13 @@ client = TestClient(web.app)
 
 def _principal(viewer: str = "groot", is_groot: bool = True) -> auth.Principal:
     return auth.Principal(
-        viewer=viewer, scopes=["public"], groups=[], is_groot=is_groot, display=viewer
+        viewer=viewer,
+        scopes=["public"],
+        groups=[],
+        is_groot=is_groot,
+        display=viewer,
+        sub=viewer,
+        provider="local",
     )
 
 
@@ -27,13 +33,135 @@ def _as_groot(monkeypatch) -> None:
 
 def _csrf() -> str:
     """The session-bound admin CSRF token (the groot principal is already patched)."""
-    r = client.get("/admin")
+    r = client.get("/admin/users")
     m = re.search(r'name="csrf" value="([^"]+)"', r.text)
     assert m, "admin page must embed the csrf token"
     return m.group(1)
 
 
 # --- ManageUser --------------------------------------------------------------
+
+
+def test_admin_page_renders_kernel_users_table_and_kebab_menus(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    monkeypatch.setenv("GROUP_SCOPE_MAP", '{"confluence":"group"}')
+    _as_groot(monkeypatch)
+
+    async def fake_kernel_list(assertion, include_deleted=False, limit=0):
+        assert assertion.count(".") == 2
+        return core_pb2.ListUsersResponse(
+            status=core_pb2.CALL_OK,
+            users=[
+                core_pb2.UserView(
+                    id="12345678-aaaa-bbbb-cccc-123456789abc",
+                    login="alice",
+                    first_name="Alice",
+                    last_name="Admin",
+                    status="active",
+                    roles=["admin"],
+                    groups=["confluence"],
+                    providers=["local"],
+                    last_login_at="2026-07-08T10:00:00Z",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(core_client, "list_users", fake_kernel_list)
+    r = client.get("/admin/users")
+    assert r.status_code == 200
+    assert "kernel truth" in r.text
+    assert 'id="admin-user-search"' in r.text
+    assert "Filter the loaded list by login, name, or UUID" in r.text
+    assert "Server-side search and pagination arrive with the kernel update" in r.text
+    assert "alice" in r.text
+    assert 'href="/admin/users/12345678-aaaa-bbbb-cccc-123456789abc"' in r.text
+    assert 'title="12345678-aaaa-bbbb-cccc-123456789abc"' in r.text
+    assert 'value="12345678-aaaa-bbbb-cccc-123456789abc"' in r.text
+    assert 'role="menuitem"' in r.text
+    assert 'value="deactivate"' in r.text
+    assert 'value="delete"' in r.text
+    assert 'value="grant_role"' in r.text
+    assert 'value="grant_group"' in r.text
+    assert 'name="target_user_id" type="text"' not in r.text
+
+
+def test_admin_user_detail_renders_identity_and_actions(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    monkeypatch.setenv("GROUP_SCOPE_MAP", '{"confluence":"group"}')
+    _as_groot(monkeypatch)
+    user_id = "12345678-aaaa-bbbb-cccc-123456789abc"
+
+    async def fake_kernel_list(assertion, include_deleted=False, limit=0):
+        assert assertion.count(".") == 2
+        return core_pb2.ListUsersResponse(
+            status=core_pb2.CALL_OK,
+            users=[
+                core_pb2.UserView(
+                    id=user_id,
+                    login="alice",
+                    first_name="Alice",
+                    last_name="Admin",
+                    nickname="aa",
+                    status="active",
+                    roles=["admin"],
+                    groups=["confluence"],
+                    providers=["local"],
+                    last_login_at="2026-07-08T10:00:00Z",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(core_client, "list_users", fake_kernel_list)
+    r = client.get(f"/admin/users/{user_id}")
+    assert r.status_code == 200
+    assert "alice" in r.text
+    assert "Alice Admin" in r.text
+    assert "active" in r.text
+    assert "admin" in r.text
+    assert "confluence" in r.text
+    assert "local" in r.text
+    assert "2026-07-08T10:00:00Z" in r.text
+    assert f'<code class="hkey">{user_id}</code>' in r.text
+    assert 'action="/admin/kernel/user"' in r.text
+    assert 'action="/admin/kernel/access"' in r.text
+    assert f'name="target_user_id" value="{user_id}"' in r.text
+    assert 'value="deactivate"' in r.text
+    assert 'value="delete"' in r.text
+    assert 'value="grant_role"' in r.text
+    assert 'value="revoke_role"' in r.text
+    assert 'value="grant_group"' in r.text
+    assert 'value="revoke_group"' in r.text
+    assert "Knowledge" in r.text and "(planned)" in r.text
+    assert "LDAP" in r.text and "Confluence" in r.text
+
+
+def test_admin_user_detail_unknown_id_is_honest_404(monkeypatch) -> None:
+    monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
+    _as_groot(monkeypatch)
+
+    async def fake_kernel_list(assertion, include_deleted=False, limit=0):
+        return core_pb2.ListUsersResponse(
+            status=core_pb2.CALL_OK,
+            users=[core_pb2.UserView(id="known-id", login="alice")],
+        )
+
+    monkeypatch.setattr(core_client, "list_users", fake_kernel_list)
+    r = client.get("/admin/users/missing-id")
+    assert r.status_code == 404
+    assert "user not found" in r.text
+    assert "Could not render this kernel user detail right now." in r.text
+
+
+def test_admin_user_detail_forbidden_for_non_groot(monkeypatch) -> None:
+    monkeypatch.setattr(web, "_current_principal", lambda request: _principal(is_groot=False))
+
+    async def must_not_call(*a, **kw):
+        raise AssertionError("detail page must not list users for a non-groot")
+
+    monkeypatch.setattr(core_client, "list_users", must_not_call)
+    for user_id in ["known-id", "missing-id"]:
+        r = client.get(f"/admin/users/{user_id}")
+        assert r.status_code == 403
 
 
 def test_kernel_user_forbidden_for_non_groot(monkeypatch) -> None:

@@ -18,7 +18,7 @@ def test_index_is_dashboard_when_oidc_off(monkeypatch) -> None:
     r = client.get("/")
     assert r.status_code == 200
     assert 'hx-get="/tile/status"' in r.text  # the async state-of-memory tile
-    assert 'hx-post="/ask"' in r.text  # ask box is on the dashboard
+    assert 'hx-post="/ask/start"' in r.text  # ask box is on the dashboard
     assert "/search" in r.text  # ⌘K palette wired
 
 
@@ -113,7 +113,9 @@ def test_search_uses_principal_scopes_no_leak(monkeypatch) -> None:
 def test_ask_history_accumulates_in_session(monkeypatch) -> None:
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
 
-    async def fake_ask(query: str, scopes: list[str], viewer: str) -> core_pb2.AskResponse:
+    async def fake_ask(
+        query: str, scopes: list[str], viewer: str, **kwargs
+    ) -> core_pb2.AskResponse:
         return core_pb2.AskResponse(answer="ok", status=core_pb2.FOUND, tier="t", confidence=0.7)
 
     monkeypatch.setattr(core_client, "ask", fake_ask)
@@ -122,3 +124,42 @@ def test_ask_history_accumulates_in_session(monkeypatch) -> None:
     c.post("/ask", data={"q": "second question"})
     r = c.get("/")
     assert "first question" in r.text and "second question" in r.text
+
+
+def test_system_tile_renders_glances_stats(monkeypatch) -> None:
+    # The footer strip: structured numbers from the glances sidecar (never prose).
+    monkeypatch.setenv("GLANCES_ADDR", "http://glances:61208")
+
+    async def fake_json(client, path):
+        return {
+            "/api/4/quicklook": {"cpu": 23.4, "mem": 41.7},
+            "/api/4/mem": {"used": 48 * 1024**3, "total": 119 * 1024**3},
+            "/api/4/load": {"min1": 1.42},
+            "/api/4/processcount": {"total": 412, "running": 3},
+            "/api/4/gpu": [{"name": "GB10", "proc": 67.2, "mem": None, "temperature": 41}],
+        }[path]
+
+    monkeypatch.setattr(web, "_glances_json", fake_json)
+    r = client.get("/tile/system")
+    assert r.status_code == 200
+    assert "cpu" in r.text and "23%" in r.text
+    assert "48.0/119G" in r.text
+    assert "gpu" in r.text and "67%" in r.text
+    assert "vram" not in r.text  # GB10 unified memory: NVML mem=null ⇒ no fake 0%
+    assert "41°" in r.text
+    assert "412" in r.text and "1.42" in r.text
+
+
+def test_system_tile_honest_when_sidecar_off_or_down(monkeypatch) -> None:
+    monkeypatch.delenv("GLANCES_ADDR", raising=False)
+    r = client.get("/tile/system")
+    assert r.status_code == 200 and r.text == ""  # unconfigured ⇒ empty, footer hides
+
+    monkeypatch.setenv("GLANCES_ADDR", "http://glances:61208")
+
+    async def boom(client, path):
+        raise RuntimeError("sidecar down")
+
+    monkeypatch.setattr(web, "_glances_json", boom)
+    r2 = client.get("/tile/system")
+    assert r2.status_code == 200 and "offline" in r2.text

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="layout admin-layout">
+  <aside class="aside-col">
+    {% include "admin/_nav.html" %}
+  </aside>
+
+  <main class="main stack">
+    <div class="card">
+      <header>
+        <h2 class="card-title">Connectors <span class="badge status-warn">planned</span></h2>
+      </header>
+      <section>
+        <p class="muted">Connectors are the knowledge ingest sources for the swarm:
+          wiki, Confluence, LDAP today, and third-party sources later.</p>
+        <p class="muted">Management for these sources arrives in E4. This page is only
+          the information architecture placeholder, so it does not list fake
+          connectors or call the kernel or Keycloak.</p>
+        <p class="muted">Access will be granted per source through groups using the
+          decided default-deny authorization model.</p>
+      </section>
+    </div>
+  </main>
+</div>
+{% endblock %}

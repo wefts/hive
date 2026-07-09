@@ -1,0 +1,40 @@
+{# One POST OBJECT (post-objects rework): a bounded card — the question, the swarm's
+   answer under it, then the post's own reply thread (forum-style) and a collapsed
+   "follow up" form that continues THIS post's conversation (per-thread memory).
+   A discrete object with visible boundaries — a future attachment point (images,
+   audio…), never a segment of a continuous chat ribbon. #}
+<article class="post-object" id="post-{{ post.thread_id }}">
+  <header class="post-q">
+    <h2 class="post-title">{{ post.q_title }}</h2>
+    {% if post.q_rest_html %}<div class="post-q-rest md">{{ post.q_rest_html|safe }}</div>{% endif %}
+    <div class="meta">asked {{ post.asked_at }}</div>
+  </header>
+
+  {% include "_thinking_block.html" %}
+  {% include "_answer_block.html" %}
+
+  <div class="post-replies" id="replies-{{ post.thread_id }}">
+    {% for reply in post.replies %}
+      {% with post = reply %}{% include "_post_reply.html" %}{% endwith %}
+    {% endfor %}
+  </div>
+
+  {% if post.thread_id %}
+  {# The reply box is ALWAYS visible (Discourse-style) — a hidden affordance sent
+     follow-ups to the top compose instead, silently starting context-free NEW posts
+     (operator-observed failure). Typing HERE is what continues this post's thread. #}
+  <form class="reply-form" hx-post="/ask/start"
+        hx-target="#replies-{{ post.thread_id }}" hx-swap="beforeend"
+        hx-on::after-request="if(event.detail.successful) this.reset()"
+        autocomplete="off">
+    <input type="hidden" name="thread_id" value="{{ post.thread_id }}">
+    {# Same chat keys as the compose: Enter sends, Shift+Enter is a newline, and an
+       unclosed ``` code block holds the send (odd fence count → newline instead). #}
+    <textarea class="textarea q" name="q" rows="1" placeholder="Reply in this thread…"
+              required aria-label="follow-up question"
+              @keydown.enter="if (!$event.shiftKey && ($el.value.match(/```/g) || []).length % 2 === 0) { $event.preventDefault(); $el.form.requestSubmit() }"></textarea>
+    <button class="btn" type="submit" data-variant="outline">Reply</button>
+    <span class="htmx-indicator muted">…thinking</span>
+  </form>
+  {% endif %}
+</article>

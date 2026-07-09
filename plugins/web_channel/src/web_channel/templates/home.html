@@ -1,9 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
-{# Home = the invitation to dialogue. Observability (full stats, activity, graph)
-   lives on /dashboard. #}
+{# Home (post-objects rework): compose on TOP; each ask becomes a discrete POST
+   OBJECT prepended to the feed (question -> answer -> its own reply thread). Past
+   history lives in the SIDEBAR ("Recent conversations"), never as a wall here --
+   clicking one loads that post (with its thread) into the feed. Observability
+   (full stats, activity, graph) lives on /dashboard. #}
 <div class="layout">
   <aside class="aside-col">
+    {# One active chat per view (operator, 2026-07-08): the compose shows only while
+       the feed is empty; a fresh topic starts HERE. A plain navigation — the feed
+       resets to its start state, past threads stay one click away below. #}
+    <a class="btn new-chat" href="/">New chat</a>
     <div class="card">
       <header><h3 class="section-label">Recent conversations</h3></header>
       <section>
@@ -11,8 +18,9 @@
           <ul class="recent">
             {% for r in recent %}
               <li>
-                <a href="#" hx-get="/conversation/{{ r.id }}" hx-target="#answer" hx-swap="innerHTML"
-                   class="recent-link">{{ r.question }}</a>
+                {# A REAL permalink (operator: must open in a new tab) — plain
+                   navigation to the post's own page, no htmx fragment swap. #}
+                <a href="/p/{{ r.slug }}" class="recent-link">{{ r.title }}</a>
               </li>
             {% endfor %}
           </ul>
@@ -29,17 +37,29 @@
   </aside>
 
   <main class="main">
-    <form class="compose" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML"
+    <form class="compose" hx-post="/ask/start" hx-target="#feed" hx-swap="beforeend"
           hx-on::after-request="if(event.detail.successful) this.reset()" autocomplete="off">
-      <input class="input q" type="text" name="q" placeholder="Ask the swarm…"
-             autofocus autocomplete="off" required aria-label="question">
+      {# Basecoat .textarea auto-grows (field-sizing: content). Chat keys, the
+         Mattermost standard: Enter sends, Shift+Enter is a newline — and Enter
+         inside an UNCLOSED ``` code block is a newline too (odd fence count), so
+         a half-written block can't be posted by accident. #}
+      <textarea class="textarea q" name="q" rows="1" placeholder="Ask the swarm…"
+                autofocus required aria-label="question"
+                @keydown.enter="if (!$event.shiftKey && ($el.value.match(/```/g) || []).length % 2 === 0) { $event.preventDefault(); $el.form.requestSubmit() }"></textarea>
       <button class="btn" type="submit">Ask</button>
       <span class="htmx-indicator muted">…thinking</span>
     </form>
 
-    <section id="answer" class="answer-area" aria-live="polite">
-      <p class="invite-msg">Ask the swarm a question above — or pick a past conversation on the left.
-        See how it thinks on the <a href="/dashboard">dashboard</a>.</p>
+    <!-- Neighborhood peek from a ⌘K hit (separate from the post feed below). -->
+    <section id="answer" class="answer-area" aria-live="polite"></section>
+
+    <section id="feed" class="feed" aria-live="polite">
+      {% if post %}
+        {% include "_post_object.html" %}
+      {% else %}
+        <p class="invite-msg">Ask the swarm a question above — or pick a past conversation on the left.
+          See how it thinks on the <a href="/dashboard">dashboard</a>.</p>
+      {% endif %}
     </section>
   </main>
 </div>

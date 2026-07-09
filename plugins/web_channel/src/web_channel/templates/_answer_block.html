@@ -1,0 +1,28 @@
+{# The swarm's answer inside a post object or a reply — verbatim from typed fields.
+   The thinking (trace + full deliberation) lives in _thinking_block.html ABOVE this
+   block (claude.ai order: question → thinking → answer); here only the answer itself
+   and its "Sources" disclosure (citations, already in hand — no fetch). #}
+<div class="post-answer">
+  <div class="post-head">
+    <span class="thread-who">swarm</span>
+    <span class="badge {{ post.status_class }}">{{ post.status_label }}</span>
+    {% if post.show_confidence %}<span class="meta {{ post.confidence_class }}">confidence {{ "%.2f"|format(post.confidence) }}</span>{% endif %}
+  </div>
+
+  {# Chat-style markdown (Mattermost/Slack shape): lists/links/emphasis render;
+     `render.markdown` escapes raw HTML (html=False), so |safe is safe here. #}
+  {% if post.answer_html %}<div class="answer md">{{ post.answer_html|safe }}</div>{% endif %}
+
+  {% if post.citations %}
+    <details class="disclosure">
+      <summary>Sources ({{ post.citations|length }})</summary>
+      <ul class="citations">
+        {% for c in post.citations %}
+          <li class="chip"><span class="src">{{ c.source }}</span>
+            <span class="ref">{{ c.ref }}</span>
+            <span class="cc">{{ "%.2f"|format(c.confidence) }}</span></li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</div>

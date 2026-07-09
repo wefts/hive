@@ -1,0 +1,24 @@
+{# A PENDING post object (thinking-block, cheap step): appears the instant the
+   question is submitted — question on top, a live honest elapsed counter below
+   (no fabricated stages — the channel can't see inside an in-flight Ask), and an
+   auto-firing form that runs the real (slow) /ask and replaces this whole fragment
+   with the final post: question → thought-for-Ns → answer. #}
+<article class="post-object post-pending">
+  <header class="post-q">
+    <h2 class="post-title">{{ q_title }}</h2>
+    {% if q_rest %}<p class="post-q-rest">{{ q_rest }}</p>{% endif %}
+    <div class="meta">asked {{ asked_at }}</div>
+  </header>
+
+  <div class="thinking live" x-data="{ s: 0 }"
+       x-init="setInterval(() => s++, 1000); $el.closest('.post-object').scrollIntoView({ behavior: 'smooth', block: 'nearest' })">
+    <span class="thinking-label">thinking<span class="pulse">…</span></span>
+    <span class="meta"><span x-text="s">0</span>s</span>
+  </div>
+
+  <form hx-post="/ask" hx-trigger="load" hx-target="closest .post-pending" hx-swap="outerHTML"
+        hx-on::send-error="this.previousElementSibling.querySelector('.thinking-label').textContent = 'could not reach the server'">
+    <input type="hidden" name="q" value="{{ q }}">
+    <input type="hidden" name="slug" value="{{ slug }}">
+  </form>
+</article>

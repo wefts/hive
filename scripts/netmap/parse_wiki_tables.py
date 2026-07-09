@@ -111,19 +111,24 @@ def extract(body):
 
 def main():
     data = json.load(open(BODIES))
+    # S1: per-fact lineage = the source PAGE node (`wiki:page:<node>`), so a table fact from page A
+    # and the same fact from page B are 2 independent votes, while all passes over page A share one.
     seen, facts = set(), []
     for page in data:
+        node = page.get("node_id")
+        lineage = "wiki:page:%s" % node if node is not None else None
         for f in extract(page.get("body") or ""):
-            if f not in seen:
-                seen.add(f)
-                facts.append(f)
+            key = (f, lineage)
+            if key not in seen:
+                seen.add(key)
+                facts.append((f, lineage))
     out = {
         "origin": "wiki:tables",
         "reliability": 0.55,
         "evidence_kind": "observation",
         "facts": [
-            {"subject": s, "subject_kind": sk, "relation": r, "object": o, "object_kind": ok}
-            for (s, sk, r, o, ok) in facts
+            {"subject": s, "subject_kind": sk, "relation": r, "object": o, "object_kind": ok, "lineage": lin}
+            for ((s, sk, r, o, ok), lin) in facts
         ],
     }
     print(json.dumps(out))
