@@ -248,6 +248,17 @@ async def list_groups(assertion: str) -> core_pb2.ListGroupsResponse:
         )
 
 
+async def get_group(assertion: str, group_id: str) -> core_pb2.GetGroupResponse:
+    """One group with its members (login + providers + status) for the group detail
+    page (ADR-19). NOT_FOUND for an unknown group; same admin-cap gate as ListGroups."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.GetGroup(
+            core_pb2.GetGroupRequest(assertion=assertion, group_id=group_id),
+            timeout=read_timeout_s(),
+        )
+
+
 async def list_roles(assertion: str) -> core_pb2.ListRolesResponse:
     """Read-only role list: name, capabilities, holder_count (fixed admin set)."""
     async with aio.insecure_channel(core_addr()) as channel:

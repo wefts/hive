@@ -54,11 +54,27 @@
       </div>
 
       <div class="card">
-        <header><h2 class="card-title">Members</h2></header>
+        <header><h2 class="card-title">Members <span class="badge">{{ members|length }}</span></h2></header>
         <section>
-          <p class="muted"><span class="badge status-warn">pending kernel RPC</span>
-            The member list needs the kernel group-member RPC (Track B). Add/remove a user to this
-            group from that user's page for now.</p>
+          {% if members %}
+            <div class="table-container">
+              <table class="table">
+                <thead><tr><th>Login</th><th>Providers</th><th>Status</th></tr></thead>
+                <tbody>
+                  {% for m in members %}
+                    <tr>
+                      <td><a href="/admin/users/{{ m.user_id }}">{{ m.login or '—' }}</a></td>
+                      <td>{{ m.providers|join(', ') if m.providers else '—' }}</td>
+                      <td>{{ m.status or '—' }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="muted">No members. Add a user to this group from their page.</p>
+          {% endif %}
+          <p class="muted">Membership is managed per-user (open a member, or any user, to add/remove groups).</p>
         </section>
       </div>
     {% endif %}

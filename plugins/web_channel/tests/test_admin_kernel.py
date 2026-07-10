@@ -690,22 +690,30 @@ def test_admin_groups_shows_baseline_everyone_control(monkeypatch) -> None:
     assert "Set baseline scopes" in r.text
 
 
-def test_admin_group_detail_renders_scopes_and_pending_members(monkeypatch) -> None:
+def test_admin_group_detail_renders_scopes_and_members(monkeypatch) -> None:
     monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
     monkeypatch.setenv("KNOWN_SOURCE_SCOPES", "src:wiki,src:ldap")
     _as_groot(monkeypatch)
 
-    async def fake_list_groups(assertion):
-        return core_pb2.ListGroupsResponse(
+    async def fake_get_group(assertion, gid):
+        assert gid == "admins"
+        return core_pb2.GetGroupResponse(
             status=core_pb2.CALL_OK,
-            groups=[
-                core_pb2.GroupView(
-                    id="admins", name="Admins", member_count=2,
-                    granted_roles=["admin"], granted_scopes=["public", "src:wiki"],
-                ),
+            group=core_pb2.GroupView(
+                id="admins", name="Admins", member_count=1,
+                granted_roles=["admin"], granted_scopes=["public", "src:wiki"],
+            ),
+            members=[
+                core_pb2.GroupMember(
+                    user_id="u-1", login="alice", providers=["keycloak"], status="active"
+                )
             ],
         )
 
+    async def fake_list_groups(assertion):
+        return core_pb2.ListGroupsResponse(status=core_pb2.CALL_OK, groups=[])
+
+    monkeypatch.setattr(core_client, "get_group", fake_get_group)
     monkeypatch.setattr(core_client, "list_groups", fake_list_groups)
     r = client.get("/admin/groups/admins")
     assert r.status_code == 200
@@ -713,17 +721,19 @@ def test_admin_group_detail_renders_scopes_and_pending_members(monkeypatch) -> N
     assert "Connectors (source scopes)" in r.text
     assert 'value="set_scopes"' in r.text
     assert 'value="src:wiki" checked' in r.text and 'value="src:ldap"' in r.text
-    assert "pending kernel RPC" in r.text  # member list honest-deferred to Track B
+    # real member list (not the old "pending" placeholder), linking to the user page
+    assert "alice" in r.text and 'href="/admin/users/u-1"' in r.text
+    assert "pending kernel RPC" not in r.text
 
 
 def test_admin_group_detail_unknown_is_404(monkeypatch) -> None:
     monkeypatch.setenv("SWARM_ACTOR_SECRET", "a" * 32)
     _as_groot(monkeypatch)
 
-    async def fake_list_groups(assertion):
-        return core_pb2.ListGroupsResponse(status=core_pb2.CALL_OK, groups=[])
+    async def fake_get_group(assertion, gid):
+        return core_pb2.GetGroupResponse(status=core_pb2.CALL_NOT_FOUND)
 
-    monkeypatch.setattr(core_client, "list_groups", fake_list_groups)
+    monkeypatch.setattr(core_client, "get_group", fake_get_group)
     r = client.get("/admin/groups/nope")
     assert r.status_code == 404
     assert "group not found" in r.text

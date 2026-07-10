@@ -411,6 +411,10 @@ async def _resolve_and_gate(
         )
     principal.uuid = resp.uuid
     principal.caps = list(resp.caps)
+    # ADR-19: admin authority is KERNEL-derived. `is_groot` (the admin-console gate) is
+    # true iff the kernel granted the superadmin-exclusive cap (via Superuser membership),
+    # NOT the IdP token role or the local-credential flag.
+    principal.is_groot = "read_any_conversation" in principal.caps
     return principal, None
 
 
@@ -1426,13 +1430,13 @@ async def admin_groups(request: Request) -> HTMLResponse:
 
 @app.get("/admin/groups/{group_id}", response_class=HTMLResponse)
 async def admin_group_detail(request: Request, group_id: str) -> HTMLResponse:
-    """One group: role + connectors (source scopes) + membership. Member listing is
-    honest-pending the kernel member-list RPC (Track B). Declared after /admin/groups."""
+    """One group: role + connectors (source scopes) + its members (GetGroup, ADR-19)."""
     principal = _require_groot(request)
     if principal is None:
         return _admin_forbidden()
     assertion = _admin_assertion(principal)
     group = None
+    members: list = []
     scope_options = list(auth.known_source_scopes())
     detail_error = None
     status_code = 200
@@ -1440,20 +1444,22 @@ async def admin_group_detail(request: Request, group_id: str) -> HTMLResponse:
         detail_error, status_code = "kernel identity not resolved", 403
     else:
         try:
-            resp = await core_client.list_groups(assertion)
+            resp = await core_client.get_group(assertion, group_id)
         except Exception:
-            logger.exception("ListGroups failed for group detail")
+            logger.exception("GetGroup failed for group detail")
             resp = None
-        if resp is None or resp.status != core_pb2.CALL_OK:
-            detail_error, status_code = "kernel groups unavailable", 503
+        if resp is None:
+            detail_error, status_code = "kernel unavailable", 503
+        elif resp.status == core_pb2.CALL_NOT_FOUND:
+            detail_error, status_code = "group not found", 404
+        elif resp.status == core_pb2.CALL_OK:
+            group = resp.group
+            members = list(resp.members)
+            scope_options = await _scope_options(assertion, group.granted_scopes)
         else:
-            for g in resp.groups:
-                for s in g.granted_scopes:
-                    if s != "private" and s not in scope_options:
-                        scope_options.append(s)
-            group = next((g for g in resp.groups if g.id == group_id), None)
-            if group is None:
-                detail_error, status_code = "group not found", 404
+            label, _css = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
+            detail_error = label
+            status_code = 403 if resp.status == core_pb2.CALL_NOT_AUTHORIZED else 400
     canonical = next(
         (c for c in auth.canonical_groups() if group and c["id"] == group.id), None
     )
@@ -1463,6 +1469,7 @@ async def admin_group_detail(request: Request, group_id: str) -> HTMLResponse:
         {
             **_admin_template_context(request, principal, "groups"),
             "group": group,
+            "members": members,
             "scope_options": scope_options,
             "is_baseline": bool(group and group.id == auth.baseline_group()),
             "canonical": canonical,
@@ -1470,6 +1477,23 @@ async def admin_group_detail(request: Request, group_id: str) -> HTMLResponse:
         },
         status_code=status_code,
     )
+
+
+async def _scope_options(assertion: str, group_scopes) -> list[str]:
+    """Scope-picker candidates: known src:*/public + every scope already in use across
+    groups + this group's own scopes; `private` never offered."""
+    opts = list(auth.known_source_scopes())
+    pool: list = []
+    try:
+        lg = await core_client.list_groups(assertion)
+        if lg.status == core_pb2.CALL_OK:
+            pool = [s for g in lg.groups for s in g.granted_scopes]
+    except Exception:
+        logger.exception("ListGroups (scope options) failed")
+    for s in list(pool) + list(group_scopes):
+        if s != "private" and s not in opts:
+            opts.append(s)
+    return opts
 
 
 @app.get("/admin/roles", response_class=HTMLResponse)

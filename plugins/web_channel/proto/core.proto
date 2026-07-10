@@ -78,6 +78,9 @@ service Core {
   // Read-only role list with derived capabilities + holder counts. Any admin cap.
   rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
   rpc ManageGroup(ManageGroupRequest) returns (AdminActionResponse);
+  // One group with its MEMBERS (login + providers), for the group detail page
+  // (ADR-19). Any admin cap; NOT_FOUND for an unknown group.
+  rpc GetGroup(GetGroupRequest) returns (GetGroupResponse);
   // Incoming-SSO-group → our-group mapping (ADR-18 ps-4; Auth Provider UI). Read
   // + CRUD, `manage_access`-gated + audited. Default-deny stays — an unmapped
   // incoming group grants nothing; the mapping only routes to an existing group.
@@ -271,6 +274,24 @@ message GroupView {
 message ListGroupsResponse {
   CallStatus status = 1;             // OK | NOT_AUTHORIZED | UNAUTHENTICATED
   repeated GroupView groups = 2;
+}
+
+message GetGroupRequest {
+  string assertion = 1;
+  string group_id = 2;
+}
+
+message GroupMember {
+  string user_id = 1;
+  string login = 2;
+  repeated string providers = 3; // identity_link providers (local | keycloak | …)
+  string status = 4;             // invited | active | disabled
+}
+
+message GetGroupResponse {
+  CallStatus status = 1;          // OK | NOT_FOUND | NOT_AUTHORIZED | UNAUTHENTICATED
+  GroupView group = 2;
+  repeated GroupMember members = 3; // ordered by login
 }
 
 message ListRolesRequest { string assertion = 1; }
