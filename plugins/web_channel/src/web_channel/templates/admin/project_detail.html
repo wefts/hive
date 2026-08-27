@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="layout admin-layout">
+  <aside class="aside-col">
+    {% include "admin/_nav.html" %}
+  </aside>
+
+  <main class="main stack">
+    <p><a class="navlink" href="/admin/projects">back to projects</a></p>
+
+    {% if project is none %}
+      <div class="card">
+        <header><h2 class="card-title">Project</h2></header>
+        <section>
+          <p><span class="badge status-warn">{{ detail_error }}</span></p>
+          <p class="muted">Could not render this project right now.</p>
+        </section>
+      </div>
+    {% else %}
+      <div class="admin-detail-layout">
+        <div class="card">
+          <header>
+            <h2 class="card-title">{{ project.name }}</h2>
+            <span class="badge{% if project.visibility == 'public' %} status-warn{% endif %}">{{ project.visibility }}</span>
+          </header>
+          <section class="admin-detail-list">
+            <div><span class="section-label">Project id</span><code class="hkey">{{ project.id }}</code></div>
+            <div><span class="section-label">Description</span><span>{{ project.description or '—' }}</span></div>
+            <div><span class="section-label">Created</span><span>{{ project.created_at[:19] }}</span></div>
+          </section>
+          <section class="stack">
+            <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="op" value="rename">
+              <input type="hidden" name="project_id" value="{{ project.id }}">
+              <input class="input" type="text" name="name" value="{{ project.name }}" required aria-label="project name">
+              <button class="btn" data-size="sm" data-variant="outline" type="submit">Rename</button>
+            </form>
+            <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="op" value="describe">
+              <input type="hidden" name="project_id" value="{{ project.id }}">
+              <input class="input" type="text" name="description" value="{{ project.description }}" placeholder="description" aria-label="description">
+              <button class="btn" data-size="sm" data-variant="outline" type="submit">Describe</button>
+            </form>
+          </section>
+        </div>
+
+        <div class="card">
+          <header><h2 class="card-title">Visibility</h2></header>
+          <section>
+            <p class="muted"><code>personal</code> / <code>shared</code> are classifications; access is still
+              membership. <code>public</code> makes the Project's Sources visible to <strong>every signed-in
+              user</strong> — an elevation is required to set or unset it.</p>
+            <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="op" value="set_visibility">
+              <input type="hidden" name="project_id" value="{{ project.id }}">
+              <select class="input" name="visibility" aria-label="visibility">
+                {% for v in ['personal', 'shared'] %}
+                  <option value="{{ v }}"{% if project.visibility == v %} selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+                {% if is_elevated or project.visibility == 'public' %}
+                  <option value="public"{% if project.visibility == 'public' %} selected{% endif %}>public (elevation)</option>
+                {% endif %}
+              </select>
+              <button class="btn" data-size="sm" data-variant="outline" type="submit"{% if project.visibility == 'public' and not is_elevated %} disabled{% endif %}>Set visibility</button>
+            </form>
+            {% if project.visibility == 'public' and not is_elevated %}
+              <p class="muted">This Project is public: changing it, adding Sources or deleting it needs an elevation.</p>
+            {% endif %}
+          </section>
+        </div>
+      </div>
+
+      <div class="card">
+        <header><h2 class="card-title">Sources <span class="badge">{{ sources|length }}</span></h2></header>
+        <section>
+          <p class="muted">Each Source is a connector instance with a <strong>stable</strong> security scope
+            (<code>src:&lt;uuid&gt;</code>). <code>kind</code> and <code>label</code> are labels only — two
+            Confluence Sources never share a scope. Removing a Source makes its rows unreachable; nothing is deleted.</p>
+          {% if sources %}
+            <div class="table-container">
+              <table class="table">
+                <thead><tr><th>Label</th><th>Kind</th><th>Scope</th><th>Origin</th><th></th></tr></thead>
+                <tbody>
+                  {% for s in sources %}
+                    <tr>
+                      <td>{{ s.label }}</td>
+                      <td><code>{{ s.kind }}</code></td>
+                      <td class="mono-wrap"><code>{{ s.scope }}</code></td>
+                      <td class="muted">{{ s.origin }}</td>
+                      <td>
+                        {% if project.visibility != 'public' or is_elevated %}
+                        <form method="post" action="/admin/kernel/project" autocomplete="off">
+                          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                          <input type="hidden" name="op" value="remove_source">
+                          <input type="hidden" name="project_id" value="{{ project.id }}">
+                          <input type="hidden" name="source_id" value="{{ s.id }}">
+                          <button class="btn" data-size="sm" data-variant="outline" type="submit" onclick="return confirm('Remove this source? Its rows become unreachable.')">Remove</button>
+                        </form>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="muted">No sources yet.</p>
+          {% endif %}
+          {% if project.visibility != 'public' or is_elevated %}
+          <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+            <input type="hidden" name="csrf" value="{{ csrf_token }}">
+            <input type="hidden" name="op" value="add_source">
+            <input type="hidden" name="project_id" value="{{ project.id }}">
+            <input class="input" type="text" name="source_kind" placeholder="kind (wiki, confluence, ldap, iac…)" required pattern="[a-z][a-z0-9_-]*" aria-label="source kind">
+            <input class="input" type="text" name="source_label" placeholder="label (optional)" aria-label="source label">
+            <button class="btn" type="submit">Add source</button>
+          </form>
+          <p class="muted">The connector/loader for this Source stamps its rows with the minted scope
+            (<code>Swarm.Projects.scope!/1</code>).</p>
+          {% endif %}
+        </section>
+      </div>
+
+      <div class="card">
+        <header><h2 class="card-title">Members <span class="badge">{{ members|length }}</span></h2></header>
+        <section>
+          <p class="muted">Members derive this Project's Sources. A member is a user (by login) or one of the fixed
+            groups — <code>staff</code> shares with every internal user. Adding <em>yourself</em> (or a group you
+            belong to) needs the Project owner or an elevation.</p>
+          {% if members %}
+            <div class="table-container">
+              <table class="table">
+                <thead><tr><th>Member</th><th>Kind</th><th>Role</th><th></th></tr></thead>
+                <tbody>
+                  {% for m in members %}
+                    <tr>
+                      <td>{% if m.user_id %}<a href="/admin/users/{{ m.user_id }}">{{ m.login or m.user_id }}</a>{% else %}<a href="/admin/groups/{{ m.group_id }}">{{ m.name or m.group_id }}</a>{% endif %}</td>
+                      <td class="muted">{{ 'user' if m.user_id else 'group' }}</td>
+                      <td>{{ m.role }}</td>
+                      <td>
+                        <form method="post" action="/admin/kernel/project" autocomplete="off">
+                          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                          <input type="hidden" name="op" value="remove_member">
+                          <input type="hidden" name="project_id" value="{{ project.id }}">
+                          {% if m.user_id %}<input type="hidden" name="member_user_id" value="{{ m.user_id }}">{% else %}<input type="hidden" name="member_group_id" value="{{ m.group_id }}">{% endif %}
+                          <button class="btn" data-size="sm" data-variant="outline" type="submit">Remove</button>
+                        </form>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="muted">No members yet — nobody derives this Project's Sources.</p>
+          {% endif %}
+          <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+            <input type="hidden" name="csrf" value="{{ csrf_token }}">
+            <input type="hidden" name="op" value="add_member">
+            <input type="hidden" name="project_id" value="{{ project.id }}">
+            <input class="input" type="text" name="member_login" placeholder="user login" aria-label="user login">
+            <select class="input" name="member_group_id" aria-label="group">
+              <option value="">— or a group —</option>
+              {% for g in canonical_groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
+            </select>
+            <select class="input" name="member_role" aria-label="role">
+              <option value="member">member</option>
+              <option value="owner">owner (users only)</option>
+            </select>
+            <button class="btn" type="submit">Add member</button>
+          </form>
+        </section>
+      </div>
+
+      <div class="card">
+        <header><h2 class="card-title">Delete project</h2></header>
+        <section>
+          <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+            <input type="hidden" name="csrf" value="{{ csrf_token }}">
+            <input type="hidden" name="op" value="delete">
+            <input type="hidden" name="project_id" value="{{ project.id }}">
+            <label class="menu-check"><input type="checkbox" name="confirm" value="1"> I understand its Sources' rows become unreachable</label>
+            <button class="btn" data-variant="destructive" type="submit"{% if project.visibility == 'public' and not is_elevated %} disabled{% endif %}>Delete project</button>
+          </form>
+        </section>
+      </div>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}

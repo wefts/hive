@@ -33,7 +33,9 @@
       {% endif %}
       {% if principal %}
         <span class="muted">{{ principal.display or principal.viewer }} · {{ principal.groups|join(', ') if principal.groups else 'no groups' }} · {{ principal.scopes|length }} scope{{ '' if principal.scopes|length == 1 else 's' }}</span>
-        {% if principal.is_groot %}<a class="navlink" href="/admin">admin</a>{% endif %}
+        {% if principal.is_admin %}<a class="navlink" href="/admin">admin</a>{% endif %}
+        {% if principal.is_elevated %}<span class="badge status-warn" title="superadmin elevation active for this session">elevated</span>{% endif %}
+        {% if principal.external %}<span class="badge" title="guest account">guest</span>{% endif %}
         <a class="navlink" href="/logout">logout</a>
       {% endif %}
     </header>

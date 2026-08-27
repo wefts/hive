@@ -5,6 +5,15 @@
 Proposed (architect plan `hive/docs/design/web_channel-plan.md`; goes to an independent
 critic before any build)
 
+**Superseded in part (2026-08-27).** Decision 3 (a channel-owned user model with
+`scopes/roles`, scopes from IdP groups, a standing `groot` admin role that grants scopes) was
+first replaced by workspace ADR-16 (the KERNEL owns identity, scopes and capabilities; the
+channel only authenticates and signs an actor assertion) and then by workspace ADR-20
+(Projects are the sole data-access container; scopes derive from Project membership; the
+fixed groups `wheel`/`admins`/`staff` carry roles, never visibility; there is no standing
+superadmin — a local Wheel member ELEVATES per session with re-auth + reason). Decisions 1,
+2 and 4 stand. Current model: `docs/architecture/access-model.md` (workspace docs).
+
 ## Context
 
 The Product Owner brief (`board/ideas/hive-chat-channel.md`) wants a web operator console —

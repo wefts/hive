@@ -36,7 +36,13 @@ case DynamicSupervisor.start_link(strategy: :one_for_one, name: GRPC.Client.Supe
 end
 
 set_path = System.get_env("QUERY_SET")
-scopes = System.get_env("SCOPES", "group") |> String.split(",", trim: true)
+scopes =
+  String.split(System.get_env("SCOPES", ""), ",", trim: true)
+  |> case do
+    # ADR-20: default = public + every registered Source scope (labels are not scopes)
+    [] -> ["public" | Swarm.Repo.query!("SELECT 'src:' || id::text FROM source").rows |> List.flatten()]
+    given -> given
+  end
 k = System.get_env("RECALL_K", "10") |> String.to_integer()
 
 # TITLE_WEIGHT: override the title-arm weight for an A/B. Unset → config default

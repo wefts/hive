@@ -113,6 +113,35 @@ To flip the kernel onto the role (operator action, per stage):
 Rollback: unset the two vars, redeploy `--no-deps kernel` — the kernel is back on
 the privileged role instantly; postgres and `migrate` never moved off it.
 
+## Access administration (workspace ADR-20)
+
+Visibility is **Project membership**: a Project owns Sources (each a connector instance with
+a stable `src:<uuid>` scope), and a user's effective scopes are `public` plus the Sources of
+the Projects they are a member of — directly or through one of the fixed groups. The
+groups are exactly `wheel` / `admins` / `staff` and carry roles only (`admins` ⇒ `admin`;
+`staff` is the default internal cohort every provisioned account joins; guests are invited
+with `external`). Labels (`wiki`, `confluence`, `ldap`) are display only — two Confluence
+Sources never share a scope.
+
+- **Console:** `/admin/projects` (create, Sources, members, visibility), `/admin/users`,
+  `/admin/groups`. Any admin capability opens the console; the kernel authorizes each op and
+  audits every denial.
+- **Elevation (no standing superadmin):** a LOCAL `wheel` member opens `/admin/elevate`,
+  re-enters their password (fresh re-authentication, one-time proof) and gives a reason — the
+  elevation is bound to that browser session, time-boxed (default 15 min), audited before any
+  capability exists, and ends from the sidebar. Only under an elevation: Wheel membership, role
+  binds, auth/SSO config, `public` Projects (set/unset, add/remove Sources, delete), and the
+  audited break-glass conversation read (`/admin/tools`).
+- **Connectors / loaders stamp the registered scope:** `scripts/ingest_prod.exs`
+  (`CONF_SOURCE_ID` / `WIKI_SOURCE_ID` pick the Source when a kind has several instances),
+  `scripts/who/load_who.exs` (`WHO_SOURCE_ID`), `scripts/netmap/*.exs`
+  (`NETMAP_SOURCE_ID`). A scope that is not a registered Source is quarantined at ingest.
+- **Cutover:** the kernel migration `20260827090000_project_access` rebuilds Projects from the
+  old grant signatures with an exact-equivalence check (aborts and rolls back on any change
+  of anyone's visibility or a break-glass lockout). Run it through the `migrate` compose
+  service after a snapshot — see `swarm/docs/design/project-access.md` §10 for the recipe;
+  `scripts/migrate_identity.exs` now seeds `groot` as `wheel` ∧ `admins` (no superadmin).
+
 ## Scaling & HA
 
 `ml` is the horizontal pillar — set `deploy.replicas`. Compose DNS round-robins

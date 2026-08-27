@@ -1,10 +1,23 @@
 <nav class="card admin-nav" aria-label="Admin sections">
   <section>
+    <a class="navlink{% if admin_section == 'projects' %} active{% endif %}" href="/admin/projects">Projects</a>
     <a class="navlink{% if admin_section == 'users' %} active{% endif %}" href="/admin/users">Users</a>
     <a class="navlink{% if admin_section == 'groups' %} active{% endif %}" href="/admin/groups">Groups</a>
     <a class="navlink{% if admin_section == 'roles' %} active{% endif %}" href="/admin/roles">Roles</a>
     <a class="navlink{% if admin_section == 'auth' %} active{% endif %}" href="/admin/auth">Auth Provider</a>
-    <a class="navlink{% if admin_section == 'connectors' %} active{% endif %}" href="/admin/connectors">Connectors</a>
     <a class="navlink{% if admin_section == 'tools' %} active{% endif %}" href="/admin/tools">Tools</a>
+  </section>
+  <section aria-label="Elevation">
+    {% if is_elevated %}
+      <p><span class="badge status-warn">elevated</span>
+        <span class="muted">superadmin until <time datetime="{{ elevation_expires_at }}">{{ elevation_expires_at[:19] }}</time></span></p>
+      <form method="post" action="/admin/elevation/end" autocomplete="off">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <button class="btn" data-size="sm" data-variant="outline" type="submit">End elevation</button>
+      </form>
+    {% elif can_elevate %}
+      <p class="muted">Wheel / auth / publicness / break-glass need an elevation.</p>
+      <a class="btn" data-size="sm" data-variant="outline" href="/admin/elevate">Elevate (sudo)</a>
+    {% endif %}
   </section>
 </nav>

@@ -56,13 +56,13 @@ cookie =
 t = System.monotonic_time(:millisecond)
 conf =
   report.("confluence",
-    Sync.run(Hive.Confluence.Connector, scope: "group", limit: env.("CONF_LIMIT", "50"), max_pages: env.("CONF_MAXPAGES", "4")),
+    Sync.run(Hive.Confluence.Connector, scope: Swarm.Projects.scope_by_kind!("confluence"), limit: env.("CONF_LIMIT", "50"), max_pages: env.("CONF_MAXPAGES", "4")),
     System.monotonic_time(:millisecond) - t)
 
 t = System.monotonic_time(:millisecond)
 wiki =
   report.("mediawiki",
-    Sync.run(Hive.MediaWiki.Connector, scope: "group", cookie: cookie, gaplimit: env.("WIKI_GAPLIMIT", "30"), max_pages: env.("WIKI_MAXPAGES", "7")),
+    Sync.run(Hive.MediaWiki.Connector, scope: Swarm.Projects.scope_by_kind!("wiki"), cookie: cookie, gaplimit: env.("WIKI_GAPLIMIT", "30"), max_pages: env.("WIKI_MAXPAGES", "7")),
     System.monotonic_time(:millisecond) - t)
 
 # --- 2. embed newly-ingested content (real bge-m3) ---

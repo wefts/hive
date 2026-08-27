@@ -16,22 +16,33 @@
           <input class="input" type="password" name="password" placeholder="temporary password" required aria-label="temporary password">
           <input class="input" type="text" name="first_name" placeholder="first name" aria-label="first name">
           <input class="input" type="text" name="last_name" placeholder="last name" aria-label="last name">
+          <label class="menu-check"><input type="checkbox" name="external" value="1"> guest (external)</label>
           <button class="btn" type="submit">Invite a local user</button>
         </form>
-        <p class="muted">Creates a local credential + a kernel <code>invited</code> record. Set the
-          user's group membership on their page afterward — invite does not assign a group.
-          Known gap (<code>jit-provision-rpc</code>): no wire path yet promotes <code>invited</code>
-          → <code>active</code> other than this local credential resolving on first login.</p>
+        <p class="muted">Creates a local credential + a kernel <code>invited</code> record; the first login
+          activates it. An internal user joins the <code>staff</code> cohort automatically; a
+          <strong>guest</strong> joins nothing and sees only what a Project explicitly shares with them.</p>
       </section>
     </div>
 
     <section class="admin-card-grid" aria-label="Admin sections">
+      <a class="card admin-section-card" href="/admin/projects">
+        <header>
+          <h3 class="card-title">Projects</h3>
+          <span class="badge status-found">live</span>
+        </header>
+        <p class="muted">The sharing object: a Project owns Sources; its members see them.</p>
+        {% if project_count is not none %}
+          <p class="stat"><span class="num">{{ project_count }}</span> projects</p>
+        {% endif %}
+      </a>
+
       <a class="card admin-section-card" href="/admin/users">
         <header>
           <h3 class="card-title">Users</h3>
           <span class="badge status-found">live</span>
         </header>
-        <p class="muted">Kernel-backed roster and local credentials.</p>
+        <p class="muted">Kernel-backed roster, guests, and local credentials.</p>
         {% if kernel_user_count is not none %}
           <p class="stat"><span class="num">{{ kernel_user_count }}</span> kernel users</p>
         {% endif %}
@@ -40,9 +51,9 @@
       <a class="card admin-section-card" href="/admin/groups">
         <header>
           <h3 class="card-title">Groups</h3>
-          <span class="badge status-found">live</span>
+          <span class="badge">fixed</span>
         </header>
-        <p class="muted">Cohort bundles: per-source scopes and/or a role for their members.</p>
+        <p class="muted"><code>wheel</code> · <code>admins</code> · <code>staff</code> — roles, never visibility.</p>
       </a>
 
       <a class="card admin-section-card" href="/admin/roles">
@@ -50,29 +61,21 @@
           <h3 class="card-title">Roles</h3>
           <span class="badge status-found">live</span>
         </header>
-        <p class="muted">The fixed administration roles and their capabilities (read-only).</p>
+        <p class="muted">Administration capabilities; <code>superadmin</code> only as a live elevation.</p>
       </a>
 
       <a class="card admin-section-card" href="/admin/auth">
         <header>
           <h3 class="card-title">Auth Provider</h3>
-          <span class="badge status-found">live</span>
+          <span class="badge status-warn">elevation</span>
         </header>
-        <p class="muted">Keycloak / OIDC configuration and realm-user mirror.</p>
-      </a>
-
-      <a class="card admin-section-card" href="/admin/connectors">
-        <header>
-          <h3 class="card-title">Connectors</h3>
-          <span class="badge status-warn">planned</span>
-        </header>
-        <p class="muted">Knowledge ingest sources and per-source access grants.</p>
+        <p class="muted">Keycloak / OIDC configuration and the SSO group map.</p>
       </a>
 
       <a class="card admin-section-card" href="/admin/tools">
         <header>
           <h3 class="card-title">Tools</h3>
-          <span class="badge status-found">live</span>
+          <span class="badge status-warn">elevation</span>
         </header>
         <p class="muted">Break-glass administration workflows.</p>
       </a>

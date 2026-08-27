@@ -22,6 +22,7 @@
         <div hx-get="/admin/auth/status" hx-trigger="load" hx-swap="innerHTML" class="muted">
           <span class="badge status-warn">checking auth provider</span>
         </div>
+        {% if is_elevated %}
         <form class="invite" method="post" action="/admin/auth" autocomplete="off">
           <input type="hidden" name="csrf" value="{{ csrf_token }}">
           <input class="input" type="url" name="issuer" value="{{ connector.issuer }}" placeholder="issuer" required aria-label="issuer">
@@ -33,6 +34,10 @@
           <input class="input" type="password" name="admin_password" placeholder="admin password (blank keeps current)" aria-label="admin password">
           <button class="btn" type="submit">Save auth provider</button>
         </form>
+        {% else %}
+        <p class="muted"><span class="badge status-warn">elevation required</span> Auth-provider configuration is
+          an elevation-only control (ADR-20): <a class="navlink" href="/admin/elevate">elevate</a> to change it.</p>
+        {% endif %}
       </section>
     </div>
 
@@ -41,25 +46,30 @@
       <section class="stack">
         <div>
           <h3 class="section-label">Which claim carries groups / roles</h3>
-          <p class="muted">The channel reads these id-token claims, then maps groups → our groups below
-            and derives scope. Dotted paths allowed (e.g. <code>realm_access.roles</code>).</p>
+          <p class="muted">The channel reads the groups claim and forwards it (signed) to the kernel, which maps
+            incoming groups → our fixed groups below. IdP roles are diagnostic only — they never confer authority.
+            Dotted paths allowed (e.g. <code>realm_access.roles</code>).</p>
+          {% if is_elevated %}
           <form class="invite" method="post" action="/admin/auth/claims" autocomplete="off">
             <input type="hidden" name="csrf" value="{{ csrf_token }}">
             <input class="input" type="text" name="groups_claim" value="{{ groups_claim }}" placeholder="groups claim" aria-label="groups claim">
             <input class="input" type="text" name="roles_claim" value="{{ roles_claim }}" placeholder="roles claim" aria-label="roles claim">
             <button class="btn" type="submit">Save claim keys</button>
           </form>
+          {% else %}
+          <p class="muted">groups: <code>{{ groups_claim }}</code> · roles: <code>{{ roles_claim }}</code> — change under an elevation.</p>
+          {% endif %}
         </div>
 
         <div>
           <h3 class="section-label">Incoming SSO group → our group</h3>
-          <p class="muted">Provider <code>{{ sso_provider }}</code>. An incoming group maps to one of our
-            groups (which carries its scopes and/or role). <strong>Default-deny</strong>: an unmapped
-            incoming group grants nothing. <code>Superuser</code> is not SSO-mappable (local users only).</p>
+          <p class="muted">Provider <code>{{ sso_provider }}</code>. An incoming group maps to one of our fixed
+            groups (<code>admins</code> confers the admin role; <code>staff</code> is the internal cohort).
+            <strong>Default-deny</strong>: an unmapped incoming group grants nothing. <code>wheel</code> is never
+            SSO-mappable (local users only). Changing the map is an elevation-only control.</p>
           {% if sso_map is none %}
-            <p class="muted"><span class="badge status-warn">SSO-map RPC not available yet</span>
-              This needs the kernel update (BE-1 <code>ListSsoMap</code>/<code>ManageSsoMap</code>);
-              it goes live after the staging redeploy.</p>
+            <p class="muted"><span class="badge status-warn">SSO map unavailable</span>
+              Could not read the SSO group map from the kernel right now.</p>
           {% else %}
             <div class="table-container">
               <table class="table">
@@ -70,12 +80,14 @@
                       <td>{{ m.incoming_group }}</td>
                       <td><code>{{ m.our_group_id }}</code></td>
                       <td>
+                        {% if is_elevated %}
                         <form method="post" action="/admin/auth/sso-map" autocomplete="off">
                           <input type="hidden" name="csrf" value="{{ csrf_token }}">
                           <input type="hidden" name="op" value="delete">
                           <input type="hidden" name="incoming_group" value="{{ m.incoming_group }}">
                           <button class="btn" data-size="sm" data-variant="outline" type="submit">Remove</button>
                         </form>
+                        {% endif %}
                       </td>
                     </tr>
                   {% else %}
@@ -84,16 +96,18 @@
                 </tbody>
               </table>
             </div>
+            {% if is_elevated %}
             <form class="invite" method="post" action="/admin/auth/sso-map" autocomplete="off">
               <input type="hidden" name="csrf" value="{{ csrf_token }}">
               <input type="hidden" name="op" value="put">
               <input class="input" type="text" name="incoming_group" placeholder="incoming SSO group (e.g. DSI)" required aria-label="incoming SSO group">
               <select class="input" name="our_group_id" required aria-label="our group">
                 <option value="">map to our group…</option>
-                {% for g in our_groups if g != 'superuser' %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+                {% for g in our_groups if g != 'wheel' %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
               </select>
               <button class="btn" type="submit">Add mapping</button>
             </form>
+            {% endif %}
           {% endif %}
         </div>
       </section>

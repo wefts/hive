@@ -2,7 +2,9 @@
 # print only the next-URL's path + query KEYS + the error reason.
 alias Hive.Confluence.Connector
 
-{:ok, p1} = Connector.fetch(:start, scope: "group", limit: 25)
+# ADR-20: connectors stamp a registered Source scope (diagnostic-only here, nothing is written)
+scope = Swarm.Projects.scope_by_kind!("confluence")
+{:ok, p1} = Connector.fetch(:start, scope: scope, limit: 25)
 IO.puts("page1: events=#{length(p1.events)} cursor=#{if p1.cursor == :done, do: :done, else: :more}")
 
 case p1.cursor do
@@ -12,7 +14,7 @@ case p1.cursor do
     IO.puts("next path: #{u.path}")
     IO.puts("next query keys: #{inspect(keys)}")
 
-    case Connector.fetch(p1.cursor, scope: "group", limit: 25) do
+    case Connector.fetch(p1.cursor, scope: scope, limit: 25) do
       {:ok, p2} -> IO.puts("page2: OK events=#{length(p2.events)} cursor=#{if p2.cursor == :done, do: :done, else: :more}")
       {:error, reason} -> IO.puts("page2: ERROR #{inspect(reason)}")
     end

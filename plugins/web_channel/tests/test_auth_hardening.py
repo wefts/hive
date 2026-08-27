@@ -18,12 +18,12 @@ from web_channel import main as web
 client = TestClient(web.app)
 
 
-def _principal(viewer: str = "groot", is_groot: bool = True) -> auth.Principal:
+def _principal(viewer: str = "groot", is_admin: bool = True) -> auth.Principal:
     return auth.Principal(
         viewer=viewer,
         scopes=["public"],
         groups=[],
-        is_groot=is_groot,
+        is_admin=is_admin,
         display=viewer,
         sub=viewer,
         provider="local",

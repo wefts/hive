@@ -1,6 +1,6 @@
 ---
 date: 2026-06-25
-status: Plan — draft for independent critic (architect output; not yet built)
+status: Plan — draft for independent critic (architect output; not yet built). Identity/scope sections (§2 user scaffold, `groot` grants, group→scope mapping) are SUPERSEDED by workspace ADR-16 and ADR-20 — see docs/architecture/access-model.md; the channel no longer maps groups to scopes nor owns a user model
 owner: hive
 relates-to: board/todo/hive-chat-channel (sibling PUBLIC chat channel; shares the T9 persona skill — not superseded)
 brief: board/ideas/hive-chat-channel.md (Product Owner brief)

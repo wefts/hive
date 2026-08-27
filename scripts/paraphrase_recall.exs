@@ -23,7 +23,13 @@ alias Swarm.Repo
 {:ok, _} = DynamicSupervisor.start_link(strategy: :one_for_one, name: GRPC.Client.Supervisor)
 
 k = String.to_integer(System.get_env("RECALL_K", "5"))
-scopes = String.split(System.get_env("RECALL_SCOPES", "group"), ",", trim: true)
+scopes =
+  String.split(System.get_env("RECALL_SCOPES", ""), ",", trim: true)
+  |> case do
+    # ADR-20: default = public + every registered Source scope (labels are not scopes)
+    [] -> ["public" | Swarm.Repo.query!("SELECT 'src:' || id::text FROM source").rows |> List.flatten()]
+    given -> given
+  end
 sample = String.to_integer(System.get_env("PARA_SAMPLE", "60"))
 model = System.get_env("PARA_MODEL", "gemma4:e2b")
 

@@ -69,7 +69,8 @@ end
 
 model = System.get_env("MODEL", "qwen3:14b")
 sample = String.to_integer(System.get_env("SAMPLE", "30"))
-scope = System.get_env("SCOPE", "group")
+# ADR-20: a REGISTERED Source scope (`src:<uuid>`); default = the wiki Source
+scope = System.get_env("SCOPE") || Swarm.Projects.scope_by_kind!("wiki")
 cap = String.to_float(System.get_env("CAP", "0.3"))
 printable = scope == "public"
 

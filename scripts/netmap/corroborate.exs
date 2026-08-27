@@ -35,7 +35,15 @@ documented =
   end)
   |> Enum.reject(&is_nil/1)
 
-node = %{id: Store.upsert_node("source", "wiki:corrob", scope: "group"), scope: "group"}
+# ADR-20: corroboration facts live at the wiki Source's registered scope (WIKI_SOURCE_ID
+# picks the instance when several exist).
+wiki_scope =
+  case System.get_env("WIKI_SOURCE_ID") do
+    nil -> Swarm.Projects.scope_by_kind!("wiki")
+    id -> Swarm.Projects.scope!(id)
+  end
+
+node = %{id: Store.upsert_node("source", "wiki:corrob", scope: wiki_scope), scope: wiki_scope}
 
 ids =
   documented

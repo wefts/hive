@@ -12,12 +12,11 @@
       </header>
       <section>
         <p class="muted">Connectors are the knowledge ingest sources for the swarm:
-          wiki, Confluence, LDAP today, and third-party sources later.</p>
-        <p class="muted">Management for these sources arrives in E4. This page is only
-          the information architecture placeholder, so it does not list fake
-          connectors or call the kernel or Keycloak.</p>
-        <p class="muted">Access will be granted per source through groups using the
-          decided default-deny authorization model.</p>
+          wiki, Confluence, LDAP today, and third-party sources later. Under ADR-20 each
+          connector instance is a <strong>Source</strong> owned by a <a class="navlink" href="/admin/projects">Project</a>,
+          with a stable <code>src:&lt;uuid&gt;</code> scope; access is Project membership.</p>
+        <p class="muted">Register Sources on the Project page. Connector configuration and health
+          (E4) are not managed here yet — this page does not call the kernel or Keycloak.</p>
       </section>
     </div>
   </main>

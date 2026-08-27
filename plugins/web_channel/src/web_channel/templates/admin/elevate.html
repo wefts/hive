@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="layout admin-layout">
+  <aside class="aside-col">
+    {% include "admin/_nav.html" %}
+  </aside>
+
+  <main class="main stack">
+    <div class="card">
+      <header><h2 class="card-title">Elevate <span class="badge status-warn">sudo</span></h2></header>
+      <section>
+        <p class="muted">There is no standing superadmin. A local <code>wheel</code> member may elevate
+          for a bounded time: you re-enter your password now (fresh re-authentication), give a reason
+          (audited <em>before</em> the capability exists), and the elevation is bound to <strong>this
+          session</strong> only. It ends by itself; you can end it early from the sidebar.</p>
+        {% if error %}<p><span class="badge status-error">{{ error }}</span></p>{% endif %}
+        {% if is_elevated %}
+          <p><span class="badge status-warn">already elevated</span> <span class="muted">until {{ elevation_expires_at[:19] }}</span></p>
+        {% elif not can_elevate %}
+          <p class="muted">Only a local account can elevate (Wheel is local-only). You are signed in via
+            <code>{{ principal.provider }}</code>.</p>
+        {% else %}
+          <form class="invite" method="post" action="/admin/elevate" autocomplete="off">
+            <input type="hidden" name="csrf" value="{{ csrf_token }}">
+            <input class="input" type="text" name="reason" placeholder="reason (required, audited)" required aria-label="reason">
+            <input class="input" type="password" name="password" placeholder="your password (re-authentication)" required aria-label="password">
+            <button class="btn" type="submit">Elevate</button>
+          </form>
+        {% endif %}
+      </section>
+    </div>
+  </main>
+</div>
+{% endblock %}

@@ -17,12 +17,18 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import time
 
 AUDIENCE = "swarm.actor.v1"
 # ADR-16 D3: the JIT-provision token. Distinct audience so an actor assertion
 # cannot provision and a provision token cannot act (the kernel binds both ways).
 PROVISION_AUDIENCE = "swarm.provision.v1"
+# ADR-20 elevation: the RE-AUTHENTICATION PROOF. Signed only right after the channel
+# re-verified the local password; the kernel checks audience, subject, session, freshness
+# (`auth_time`), and consumes the one-time `jti` (a replayed proof cannot re-elevate).
+REAUTH_AUDIENCE = "swarm.reauth.v1"
+_REAUTH_EXP_S = 60
 _HEADER = {"alg": "HS256", "typ": "JWT"}
 _MAX_EXP_S = 300  # council (codex+llama3.3:70b) accepted-MVP posture: <= 5 min,
 # bounding the replay/logout-lag window (no session-revocation mechanism yet).
@@ -93,12 +99,32 @@ def sign_provision(
     )
 
 
-def _sign_payload(payload: dict) -> str | None:
+def sign_reauth(sub: str, provider: str, sid: str, auth_time: int | None = None) -> str | None:
+    """Sign the elevation re-auth proof (ADR-20 §5) for the LOCAL subject whose password
+    the channel just re-verified: `{aud, sub, provider, sid, jti, auth_time, iat, exp<=60s}`.
+    `jti` is a fresh one-time id. None when signing isn't possible or the identity is
+    incomplete. The caller MUST have verified the password immediately before."""
+    if not sub or not provider or not sid:
+        return None
+    return _sign_payload(
+        {
+            "aud": REAUTH_AUDIENCE,
+            "sub": sub,
+            "provider": provider,
+            "sid": sid,
+            "jti": secrets.token_urlsafe(18),
+            "auth_time": int(auth_time if auth_time is not None else time.time()),
+        },
+        exp_s=_REAUTH_EXP_S,
+    )
+
+
+def _sign_payload(payload: dict, exp_s: int | None = None) -> str | None:
     secret = _secret()
     if not secret:
         return None
     now = int(time.time())
-    payload = {**payload, "iat": now, "exp": now + _exp_s()}
+    payload = {**payload, "iat": now, "exp": now + (exp_s if exp_s is not None else _exp_s())}
     signing_input = (
         f"{_b64(json.dumps(_HEADER, separators=(',', ':')).encode())}."
         f"{_b64(json.dumps(payload, separators=(',', ':')).encode())}"

@@ -86,6 +86,24 @@ service Core {
   // incoming group grants nothing; the mapping only routes to an existing group.
   rpc ListSsoMap(ListSsoMapRequest) returns (ListSsoMapResponse);
   rpc ManageSsoMap(ManageSsoMapRequest) returns (AdminActionResponse);
+
+  // --- Projects + elevation (workspace ADR-20) ------------------------------
+  // Projects are the SOLE data-access container: a Project owns Sources (scope
+  // `src:<source_uuid>`); membership (a user or a fixed group) derives the scopes.
+  // Any admin cap sees every Project; any other actor sees only their own/public.
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  // One Project with its Sources + members — admin cap or member; NOT_FOUND otherwise
+  // (404-not-403: a non-member learns nothing).
+  rpc GetProject(GetProjectRequest) returns (GetProjectResponse);
+  // Project lifecycle, Sources and membership — capability-gated + audited per
+  // docs/design/project-access.md §6 (publicness needs an elevation).
+  rpc ManageProject(ManageProjectRequest) returns (AdminActionResponse);
+  // Request a time-boxed superadmin elevation: a local Wheel member presents a reason
+  // and a channel-signed re-authentication proof (aud swarm.reauth.v1, one-time jti);
+  // the kernel audits BEFORE the capability exists and binds it to the session.
+  rpc Elevate(ElevateRequest) returns (ElevateResponse);
+  // End (revoke) an elevation early — the holder, or an elevated Wheel member.
+  rpc EndElevation(EndElevationRequest) returns (AdminActionResponse);
 }
 
 // Outcome of an identity/privacy call. UNAUTHENTICATED (no/invalid assertion) is
@@ -119,6 +137,10 @@ message ResolveActorResponse {
   repeated string scopes = 3;    // DERIVED from the store (never the token)
   repeated string caps = 4;      // DERIVED capabilities (default-deny)
   string login = 5;
+  // ADR-20: the live elevation bound to THIS session, ISO-8601 expiry; "" when not elevated.
+  // `caps` already reflects it — this is for the channel to render the state.
+  string elevation_expires_at = 6;
+  bool external = 7;             // guest account (no default internal cohort)
 }
 
 message ConversationView {
@@ -182,11 +204,11 @@ message AdminReadConversationRequest {
 
 enum AccessOp {
   ACCESS_OP_UNSPECIFIED = 0;
-  GRANT_ROLE = 1;       // superadmin-only
-  REVOKE_ROLE = 2;      // superadmin-only
-  GRANT_GROUP = 3;      // manage_access
-  REVOKE_GROUP = 4;     // manage_access
-  SET_GROUP_SCOPES = 5; // manage_access
+  GRANT_ROLE = 1;       // REJECTED (BAD_REQUEST, audited): roles attach to groups (ADR-19/20)
+  REVOKE_ROLE = 2;      // REJECTED
+  GRANT_GROUP = 3;      // manage_access (admins/staff) | manage_wheel (wheel; elevation)
+  REVOKE_GROUP = 4;     // manage_access | manage_wheel; never the last Wheel member
+  SET_GROUP_SCOPES = 5; // REJECTED: groups never grant source visibility (ADR-20 D3)
 }
 
 message ManageAccessRequest {
@@ -213,6 +235,7 @@ message ManageUserRequest {
   string first_name = 5;
   string last_name = 6;
   string nickname = 7;
+  bool external = 8;             // invite a GUEST (ADR-20): no default cohort, no internal visibility
 }
 
 message ListUsersRequest {
@@ -241,6 +264,8 @@ message UserView {
   repeated string providers = 9; // identity_link providers (keycloak | local | …)
   string last_login_at = 10;     // ISO8601, "" when never
   repeated string emails = 11;   // admin-visible PII; populated ONLY by GetUser
+  bool external = 12;            // guest account (ADR-20)
+  repeated string projects = 13; // Project ids the user can see; populated ONLY by GetUser
 }
 
 message ListUsersResponse {
@@ -265,8 +290,8 @@ message ListGroupsRequest { string assertion = 1; }
 message GroupView {
   string id = 1;
   int32 member_count = 2;
-  repeated string granted_scopes = 3;
-  repeated string granted_roles = 4; // stays [] until a group->role binding exists (forward-compat)
+  reserved 3;                        // was granted_scopes — groups never grant source visibility (ADR-20)
+  repeated string granted_roles = 4; // the roles the group confers (only `admin` is bindable)
   string name = 5;
   string description = 6;
 }
@@ -309,12 +334,12 @@ message ListRolesResponse {
 
 enum GroupOp {
   GROUP_OP_UNSPECIFIED = 0;
-  GROUP_CREATE = 1;      // manage_access
-  GROUP_RENAME = 2;      // manage_access
-  GROUP_DELETE = 3;      // manage_access; non-empty needs confirm
-  GROUP_SET_ROLE = 4;    // superadmin (privilege)
-  GROUP_CLEAR_ROLE = 5;  // superadmin
-  GROUP_SET_SCOPES = 6;  // manage_access
+  GROUP_CREATE = 1;      // REJECTED (BAD_REQUEST): the group set is fixed (wheel/admins/staff)
+  GROUP_RENAME = 2;      // REJECTED
+  GROUP_DELETE = 3;      // REJECTED
+  GROUP_SET_ROLE = 4;    // manage_roles (elevation); only `admin` is bindable
+  GROUP_CLEAR_ROLE = 5;  // manage_roles (elevation)
+  GROUP_SET_SCOPES = 6;  // REJECTED: groups never grant source visibility (ADR-20 D3)
 }
 
 message ManageGroupRequest {
@@ -329,8 +354,112 @@ message ManageGroupRequest {
 }
 
 message AdminActionResponse {
-  CallStatus status = 1;         // OK | NOT_AUTHORIZED | UNAUTHENTICATED
+  CallStatus status = 1;         // OK | NOT_AUTHORIZED | UNAUTHENTICATED | NOT_FOUND | BAD_REQUEST
   string user_id = 2;            // set on INVITE (the created user's uuid)
+  string project_id = 3;         // set on PROJECT_CREATE
+  string source_id = 4;          // set on PROJECT_ADD_SOURCE
+  string scope = 5;              // set on PROJECT_ADD_SOURCE: the minted `src:<uuid>`
+}
+
+// --- Projects (ADR-20) -----------------------------------------------------
+
+message ProjectView {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string visibility = 4;         // personal | shared | public (product classification)
+  int32 source_count = 5;
+  int32 member_count = 6;
+  string created_at = 7;         // ISO-8601
+}
+
+message SourceView {
+  string id = 1;
+  string project_id = 2;
+  string kind = 3;               // label / routing hint (wiki | confluence | ldap | iac | …)
+  string label = 4;              // human label — NOT a security key
+  string scope = 5;              // the stable security coordinate: src:<source_uuid>
+  string origin = 6;             // migration | admin
+  string created_at = 7;
+}
+
+message ProjectMemberView {
+  string user_id = 1;            // exactly one of user_id / group_id is set
+  string group_id = 2;
+  string login = 3;              // for a user member
+  string name = 4;               // for a group member
+  string role = 5;               // owner | member
+}
+
+message ListProjectsRequest {
+  string assertion = 1;
+  bool mine_only = 2;            // an admin cap otherwise sees every Project
+}
+
+message ListProjectsResponse {
+  CallStatus status = 1;         // OK | UNAUTHENTICATED
+  repeated ProjectView projects = 2;
+}
+
+message GetProjectRequest {
+  string assertion = 1;
+  string project_id = 2;
+}
+
+message GetProjectResponse {
+  CallStatus status = 1;         // OK | NOT_FOUND | UNAUTHENTICATED
+  ProjectView project = 2;
+  repeated SourceView sources = 3;
+  repeated ProjectMemberView members = 4;
+}
+
+enum ProjectOp {
+  PROJECT_OP_UNSPECIFIED = 0;
+  PROJECT_CREATE = 1;          // manage_projects (creator = owner); `public` needs manage_publicness
+  PROJECT_RENAME = 2;          // manage_projects | owner
+  PROJECT_DESCRIBE = 3;        // manage_projects | owner
+  PROJECT_DELETE = 4;          // manage_projects | owner; with Sources needs confirm; public needs manage_publicness
+  PROJECT_SET_VISIBILITY = 5;  // to/from public: manage_publicness; else manage_projects | owner
+  PROJECT_ADD_SOURCE = 6;      // manage_projects | owner; on a public Project: manage_publicness
+  PROJECT_REMOVE_SOURCE = 7;   // manage_projects | owner
+  PROJECT_ADD_MEMBER = 8;      // manage_access | owner; self-grant needs owner or elevation
+  PROJECT_REMOVE_MEMBER = 9;   // manage_access | owner
+}
+
+message ManageProjectRequest {
+  string assertion = 1;
+  ProjectOp op = 2;
+  string project_id = 3;
+  string name = 4;               // CREATE / RENAME
+  string description = 5;        // CREATE / DESCRIBE
+  string visibility = 6;         // CREATE / SET_VISIBILITY
+  string source_id = 7;          // REMOVE_SOURCE
+  string source_kind = 8;        // ADD_SOURCE
+  string source_label = 9;       // ADD_SOURCE (optional)
+  string member_user_id = 10;    // ADD/REMOVE_MEMBER (a user)
+  string member_group_id = 11;   // ADD/REMOVE_MEMBER (a fixed group)
+  string member_role = 12;       // ADD_MEMBER: member (default) | owner
+  bool confirm = 13;             // DELETE of a Project that owns Sources
+}
+
+// --- Elevation (ADR-20) ----------------------------------------------------
+
+message ElevateRequest {
+  string assertion = 1;          // the actor assertion (carries the session `sid`)
+  string reason = 2;             // required, audited
+  string reauth = 3;             // channel-signed re-auth proof, aud swarm.reauth.v1
+  int32 ttl_s = 4;               // 0 ⇒ the kernel default; clamped to [60, max]
+}
+
+message ElevateResponse {
+  CallStatus status = 1;         // OK | UNAUTHENTICATED | NOT_AUTHORIZED (not Wheel/local) | BAD_REQUEST (reason/proof)
+  string elevation_id = 2;
+  string expires_at = 3;         // ISO-8601
+}
+
+message EndElevationRequest {
+  string assertion = 1;
+  string elevation_id = 2;       // "" ⇒ the actor's own live elevation for this session
 }
 
 message ListSsoMapRequest { string assertion = 1; }

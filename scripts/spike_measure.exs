@@ -15,6 +15,9 @@ Logger.configure(level: :warning)
 alias Swarm.Repo
 alias Swarm.Graph.Traverse
 
+# ADR-20: every registered Source scope + public (labels such as "group" are not scopes)
+all_scopes = ["public" | Swarm.Repo.query!("SELECT 'src:' || id::text FROM source").rows |> List.flatten()]
+
 {:ok, _} = Application.ensure_all_started(:ecto_sql)
 {:ok, _} = Application.ensure_all_started(:postgrex)
 {:ok, _} = Application.ensure_all_started(:grpc)
@@ -85,7 +88,7 @@ else
     times =
       for d <- [1, 2, 3, 4] do
         t0 = System.monotonic_time(:microsecond)
-        _ = Traverse.traverse(id, d, scopes: ["group", "public"])
+        _ = Traverse.traverse(id, d, scopes: all_scopes)
         Float.round((System.monotonic_time(:microsecond) - t0) / 1000, 2)
       end
 

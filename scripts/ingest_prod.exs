@@ -50,8 +50,19 @@ end
 IO.puts("== prod ingest (db=#{System.get_env("SWARM_DB_NAME", "?")} ml=#{System.get_env("SWARM_ML_ADDRESS", "?")}) ==")
 IO.puts("before: nodes=#{count.("SELECT count(*) FROM node")}")
 
-# --- 1. ingest both intranet sources (scope=group → privacy-gated content) ---
-IO.puts("\n-- ingest (kernel-driven Sync loop) --")
+# --- 1. ingest both intranet sources — each under ITS registered Source scope (ADR-20:
+# `src:<uuid>` from the Projects registry; the connector never invents a scope). Pick the
+# Source explicitly with CONF_SOURCE_ID / WIKI_SOURCE_ID when a kind has several instances.
+source_scope = fn kind, env_var ->
+  case System.get_env(env_var) do
+    nil -> Swarm.Projects.scope_by_kind!(kind)
+    id -> Swarm.Projects.scope!(id)
+  end
+end
+
+conf_scope = source_scope.("confluence", "CONF_SOURCE_ID")
+wiki_scope = source_scope.("wiki", "WIKI_SOURCE_ID")
+IO.puts("\n-- ingest (kernel-driven Sync loop) confluence=#{conf_scope} wiki=#{wiki_scope} --")
 
 cookie =
   case Hive.MediaWiki.Connector.login([]) do
@@ -64,7 +75,7 @@ conf =
   report.(
     "confluence",
     Sync.run(Hive.Confluence.Connector,
-      scope: "group",
+      scope: conf_scope,
       limit: env.("CONF_LIMIT", "50"),
       max_pages: env.("CONF_MAXPAGES", "30")
     ),
@@ -76,7 +87,7 @@ wiki =
   report.(
     "mediawiki",
     Sync.run(Hive.MediaWiki.Connector,
-      scope: "group",
+      scope: wiki_scope,
       cookie: cookie,
       gaplimit: env.("WIKI_GAPLIMIT", "50"),
       max_pages: env.("WIKI_MAXPAGES", "30")

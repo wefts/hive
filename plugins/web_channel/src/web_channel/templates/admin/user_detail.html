@@ -22,6 +22,7 @@
           <header>
             <h2 class="card-title">{{ user.login or 'User detail' }}</h2>
             <span class="badge">{{ user.status or 'unknown' }}</span>
+            {% if user.external %}<span class="badge status-warn">guest</span>{% endif %}
           </header>
           <section class="admin-detail-list">
             <div>
@@ -62,13 +63,17 @@
         <div class="card">
           <header><h2 class="card-title">Group membership</h2></header>
           <section>
-            <p class="muted">Access and role come from group membership — there are no per-user
-              role grants. Superuser (which confers <code>superadmin</code>) takes local users only.</p>
+            <p class="muted">Roles come from group membership — there are no per-user role grants and
+              groups grant no visibility. <code>wheel</code> takes local users only and is managed under an
+              elevation.</p>
             <div class="membership-list">
               {% for g in canonical_groups %}
                 {% set member = g.id in user.groups %}
                 {% if g.local_only and not user_is_local %}
-                  <div class="membership-row muted">{{ g.name }} <span class="muted">· {{ g.role }} · local users only</span></div>
+                  <div class="membership-row muted">{{ g.name }} <span class="muted">· local users only</span></div>
+                {% elif g.elevation_only and not is_elevated %}
+                  <div class="membership-row muted">{{ g.name }}{% if member %} <span class="badge status-found">member</span>{% endif %}
+                    <span class="muted">· requires an elevation</span></div>
                 {% else %}
                   <form method="post" action="/admin/kernel/access" autocomplete="off" class="membership-row">
                     <input type="hidden" name="csrf" value="{{ csrf_token }}">
@@ -99,9 +104,27 @@
               <input type="hidden" name="op" value="delete">
               <button class="btn" type="submit" data-variant="destructive" onclick="return confirm('Delete this user? Login dies; learned content persists.')">Delete</button>
             </form>
-            <p class="muted">Deactivate/delete kill the login; learned content persists (D11).</p>
+            <p class="muted">Deactivate/delete kill the login; learned content persists (D11).
+              {% if 'wheel' in user.groups %}A <code>wheel</code> member can only be changed under an elevation, never the last one.{% endif %}</p>
           </section>
         </div>
+      </div>
+
+      <div class="card">
+        <header><h2 class="card-title">Projects <span class="badge">{{ user_projects|length }}</span></h2></header>
+        <section>
+          <p class="muted">What this user can see: the Projects they are a member of (directly or via a
+            group) plus public Projects. Membership is managed on the Project page.</p>
+          {% if user_projects %}
+            <ul>
+              {% for p in user_projects %}
+                <li><a href="/admin/projects/{{ p.id }}">{{ p.name }}</a>{% if p.visibility %} <span class="badge">{{ p.visibility }}</span>{% endif %}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="muted">No Project — this user sees only public knowledge{% if not user.external %} and their own conversations{% endif %}.</p>
+          {% endif %}
+        </section>
       </div>
 
       <div class="card">
@@ -110,21 +133,12 @@
           {% if local_cred %}
             <div class="admin-detail-list">
               <div><span class="section-label">Username</span><span>{{ local_cred.username }}</span></div>
-              <div><span class="section-label">Scopes</span><span>{{ local_cred.scopes|join(', ') or '—' }}</span></div>
-              <div><span class="section-label">groot</span><span>{{ 'yes' if local_cred.is_groot else 'no' }}</span></div>
             </div>
             <p class="muted">Channel-local password login (bootstrap / invite bridge), separate from
-              the kernel identity and from the auth provider.</p>
+              the kernel identity and from the auth provider. It carries no authority.</p>
           {% else %}
             <p class="muted">No local channel credential for this login — signs in via the auth provider.</p>
           {% endif %}
-        </section>
-      </div>
-
-      <div class="card">
-        <header><h2 class="card-title">Knowledge <span class="muted">(planned)</span></h2></header>
-        <section>
-          <p class="muted">How this person connects to Swarm knowledge, including LDAP, wiki, Confluence mentions, and graph links, arrives later in E4.</p>
         </section>
       </div>
     {% endif %}

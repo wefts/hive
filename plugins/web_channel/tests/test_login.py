@@ -61,10 +61,15 @@ def test_local_user_no_group_is_public_only() -> None:
     assert p is not None and p.scopes == ["public"]  # default-deny
 
 
-def test_local_user_with_group_gets_mapped_scope() -> None:
-    localusers.create("heidi", "pw", ["group"], created_by="t")
+def test_local_user_scopes_are_never_channel_derived() -> None:
+    # ADR-20: the stored `scopes` column is legacy bookkeeping; a verified local principal is
+    # public-only and not an admin until the KERNEL resolves it (ResolveActor).
+    localusers.create("heidi", "pw", ["group", "src:whatever"], created_by="t")
     p = localusers.verify("heidi", "pw")
-    assert p is not None and "public" in p.scopes and "group" in p.scopes
+    assert p is not None
+    assert p.scopes == ["public"]
+    assert p.is_admin is False and p.is_elevated is False
+    assert p.provider == "local" and p.sub == "heidi"
 
 
 def test_local_login_then_ask_uses_local_scopes_no_leak(monkeypatch) -> None:

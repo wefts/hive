@@ -11,6 +11,8 @@ realm and set the real client secret (operator; real secrets live in the org's v
   the realm exists only on this dev box. The KC admin password + the client secret come from env
   (dev defaults in compose; real values via `secrets.env` in prod).
 - Users: `alice` ∈ group `confluence` (→ scope `group`), `bob` ∈ no group (→ `public` only),
-  `groot` ∈ realm role `groot` (web_channel admin). group→scope map is `GROUP_SCOPE_MAP` on the channel.
+  `groot` ∈ realm role `groot` — DIAGNOSTIC only: an IdP role confers nothing (ADR-19 D6 / ADR-20).
+  Authority is kernel-side: `admins` (role `admin`) via the kernel's SSO-group map; `wheel` is
+  local-only (an SSO account can never elevate); visibility is Project membership, never a group→scope map.
 
 Realm import is strict (no unknown top-level fields — keep notes here, not in the JSON).

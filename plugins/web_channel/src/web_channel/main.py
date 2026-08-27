@@ -221,8 +221,8 @@ _PLACEHOLDER_SECRETS = {
 
 
 def _session_secret() -> str:
-    """The session-cookie signing key. The cookie carries the principal (incl.
-    is_groot + scopes), so a known/committed key would let anyone FORGE authorization
+    """The session-cookie signing key. The cookie carries the principal (incl. the
+    kernel-derived caps + scopes), so a known/committed key would let anyone FORGE authorization
     (council: codex + 2 lenses). We therefore NEVER ship a default: a real value is
     used as-is; otherwise we mint an ephemeral random key (sessions reset on restart)."""
     configured = os.environ.get("SESSION_SECRET", "").strip()
@@ -275,7 +275,7 @@ def _viewer() -> str:
 
 def _scopes() -> list[str]:
     # P0 (OIDC off) is PRE-AUTH: hard-locked to public scope — no env may widen it.
-    # When OIDC is on, scopes come from the authenticated principal (auth.scopes_for).
+    # When OIDC is on, scopes are the kernel-DERIVED ones cached on the principal.
     return ["public"]
 
 
@@ -409,13 +409,40 @@ async def _resolve_and_gate(
         return principal, templates.TemplateResponse(
             request, "not_provisioned.html", {}, status_code=403
         )
-    principal.uuid = resp.uuid
-    principal.caps = list(resp.caps)
-    # ADR-19: admin authority is KERNEL-derived. `is_groot` (the admin-console gate) is
-    # true iff the kernel granted the superadmin-exclusive cap (via Superuser membership),
-    # NOT the IdP token role or the local-credential flag.
-    principal.is_groot = "read_any_conversation" in principal.caps
+    # ADR-20: scopes, admin authority AND the elevation state are KERNEL-derived — the
+    # channel adopts `ResolveActor`'s view wholesale (never an IdP role, never a local flag,
+    # never a channel-side group→scope map).
+    principal.apply_resolved(
+        resp.uuid,
+        list(resp.scopes),
+        list(resp.caps),
+        resp.elevation_expires_at,
+        resp.external,
+    )
     return principal, None
+
+
+async def _refresh_principal(request: Request, principal: auth.Principal) -> auth.Principal:
+    """Re-resolve the actor for THIS session (after an elevation starts or ends) and store
+    the refreshed principal in the session. Fails closed: on any error the elevation state
+    is cleared until the next successful resolve."""
+    token = actor.sign(principal.sub, principal.provider, principal.sid) if principal.sid else None
+    if token is None:
+        return principal
+    try:
+        resp = await core_client.resolve_actor(token)
+    except aio.AioRpcError:
+        logger.warning("ResolveActor unreachable during refresh — clearing the elevation state")
+        principal.is_elevated = False
+        principal.elevation_expires_at = ""
+        request.session["user"] = principal.to_session()
+        return principal
+    if resp.status == core_pb2.CALL_OK:
+        principal.apply_resolved(
+            resp.uuid, list(resp.scopes), list(resp.caps), resp.elevation_expires_at, resp.external
+        )
+    request.session["user"] = principal.to_session()
+    return principal
 
 
 def _deliberation_view(d: core_pb2.DeliberationResponse) -> dict | None:
@@ -972,10 +999,23 @@ async def logout(request: Request):
     return RedirectResponse("/")
 
 
-def _require_groot(request: Request) -> auth.Principal | None:
-    """Return the principal iff it is a logged-in `groot`, else None (caller → 403)."""
+def _require_admin(request: Request) -> auth.Principal | None:
+    """Return the principal iff it is logged in with ANY kernel-derived admin capability
+    (the console gate — ADR-20: `admins` group, or a Wheel member's daily admin), else None
+    (caller → 403). Every action is re-gated by the kernel per capability."""
     principal = _current_principal(request)
-    if principal is None or not principal.is_groot:
+    if principal is None or not principal.is_admin:
+        return None
+    return principal
+
+
+def _require_elevated(request: Request) -> auth.Principal | None:
+    """Return the principal iff it holds a LIVE elevation for this session (ADR-20 D9) —
+    the gate for auth-provider config, the SSO map, Wheel membership, publicness and
+    break-glass. Mirrors the kernel's `manage_*`/`read_any_conversation` caps; the kernel
+    enforces regardless."""
+    principal = _current_principal(request)
+    if principal is None or not principal.is_elevated:
         return None
     return principal
 
@@ -1024,7 +1064,7 @@ async def _connector_check(values: dict[str, str]) -> dict[str, bool]:
 
 @app.get("/admin/auth/status", response_class=HTMLResponse)
 async def admin_auth_status(request: Request) -> HTMLResponse:
-    principal = _require_groot(request)
+    principal = _require_admin(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
     status = await _connector_check(_connector_values())
@@ -1052,7 +1092,7 @@ async def admin_auth(
     admin_password: str = Form(""),
     csrf: str = Form(""),
 ):
-    principal = _require_groot(request)
+    principal = _require_elevated(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
     if not _csrf_ok(request, csrf):
@@ -1091,25 +1131,32 @@ async def admin_auth(
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(request: Request) -> HTMLResponse:
-    principal = _require_groot(request)
+    principal = _require_admin(request)
     if principal is None:
         return _admin_forbidden()
     kernel_user_count = None
+    project_count = None
     assertion = _admin_assertion(principal)
     if assertion:
         try:
             resp = await core_client.list_users(assertion)
             if resp.status == core_pb2.CALL_OK:
-                kernel_user_count = len(resp.users)
+                kernel_user_count = resp.total or len(resp.users)
         except Exception:
             logger.exception("ListUsers failed for admin hub")
+        try:
+            presp = await core_client.list_projects(assertion)
+            if presp.status == core_pb2.CALL_OK:
+                project_count = len(presp.projects)
+        except Exception:
+            logger.exception("ListProjects failed for admin hub")
     return templates.TemplateResponse(
         request,
         "admin/index.html",
         {
             **_admin_template_context(request, principal, "hub"),
-            "groups": auth.known_groups(),
             "kernel_user_count": kernel_user_count,
+            "project_count": project_count,
         },
     )
 
@@ -1128,6 +1175,9 @@ def _admin_template_context(request: Request, principal: auth.Principal, section
         "principal": principal.to_session(),
         "admin_section": section,
         "csrf_token": _csrf_token(request),
+        "is_elevated": principal.is_elevated,
+        "elevation_expires_at": principal.elevation_expires_at,
+        "can_elevate": principal.provider == "local",
     }
 
 
@@ -1167,13 +1217,12 @@ def _roster_context(
         "q": q,
         "offset": max(offset, 0),
         "limit": _ROSTER_PAGE,
-        "groups": auth.known_groups(),
     }
 
 
 @app.get("/admin/users", response_class=HTMLResponse)
 async def admin_users(request: Request, q: str = "", offset: int = 0) -> HTMLResponse:
-    principal = _require_groot(request)
+    principal = _require_admin(request)
     if principal is None:
         return _admin_forbidden()
     assertion = _admin_assertion(principal)
@@ -1190,7 +1239,7 @@ async def admin_users_roster(request: Request, q: str = "", offset: int = 0) -> 
     """HTMX partial: the roster table + pager for a server-side search/paginate
     (ListUsers query+offset+total) — no client-side ≤500 ceiling. Declared BEFORE
     the `{user_id}` route so "roster" is not mistaken for a uuid."""
-    principal = _require_groot(request)
+    principal = _require_admin(request)
     if principal is None:
         return _admin_forbidden()
     assertion = _admin_assertion(principal)
@@ -1204,7 +1253,7 @@ async def admin_users_roster(request: Request, q: str = "", offset: int = 0) -> 
 
 @app.get("/admin/users/{user_id}", response_class=HTMLResponse)
 async def admin_user_detail(request: Request, user_id: str) -> HTMLResponse:
-    principal = _require_groot(request)
+    principal = _require_admin(request)
     if principal is None:
         return _admin_forbidden()
     assertion = _admin_assertion(principal)
@@ -1231,11 +1280,11 @@ async def admin_user_detail(request: Request, user_id: str) -> HTMLResponse:
             status_code = 403 if resp.status == core_pb2.CALL_NOT_AUTHORIZED else 400
     local_cred = None
     user_is_local = False
+    user_projects: list = []
     if user is not None:
         user_is_local = "local" in list(user.providers)
-        local_cred = next(
-            (c for c in localusers.list_users() if c["username"] == user.login), None
-        )
+        local_cred = next((c for c in localusers.list_users() if c["username"] == user.login), None)
+        user_projects = await _project_names(assertion, list(user.projects))
     return templates.TemplateResponse(
         request,
         "admin/user_detail.html",
@@ -1244,6 +1293,7 @@ async def admin_user_detail(request: Request, user_id: str) -> HTMLResponse:
             "user": user,
             "canonical_groups": auth.canonical_groups(),
             "user_is_local": user_is_local,
+            "user_projects": user_projects,
             "local_cred": local_cred,
             "detail_error": detail_error,
         },
@@ -1251,9 +1301,29 @@ async def admin_user_detail(request: Request, user_id: str) -> HTMLResponse:
     )
 
 
+async def _project_names(assertion: str, project_ids: list[str]) -> list[dict]:
+    """Resolve Project ids to `{id, name, visibility}` for display (ListProjects, admin view)."""
+    if not project_ids or not assertion:
+        return [{"id": pid, "name": pid, "visibility": ""} for pid in project_ids]
+    try:
+        resp = await core_client.list_projects(assertion)
+    except Exception:
+        logger.exception("ListProjects failed for user detail")
+        return [{"id": pid, "name": pid, "visibility": ""} for pid in project_ids]
+    by_id = {p.id: p for p in resp.projects} if resp.status == core_pb2.CALL_OK else {}
+    return [
+        {
+            "id": pid,
+            "name": by_id[pid].name if pid in by_id else pid,
+            "visibility": by_id[pid].visibility if pid in by_id else "",
+        }
+        for pid in project_ids
+    ]
+
+
 @app.get("/admin/auth", response_class=HTMLResponse)
 async def admin_auth_page(request: Request) -> HTMLResponse:
-    principal = _require_groot(request)
+    principal = _require_admin(request)
     if principal is None:
         return _admin_forbidden()
     try:
@@ -1296,7 +1366,8 @@ async def _load_sso_map(assertion: str) -> tuple[list | None, list[str]]:
     try:
         gresp = await core_client.list_groups(assertion)
         if gresp.status == core_pb2.CALL_OK:
-            our_groups = [g.id for g in gresp.groups]
+            # wheel is local-only: never an SSO target (the kernel refuses it too)
+            our_groups = [g.id for g in gresp.groups if g.id != "wheel"]
     except Exception:
         logger.exception("ListGroups failed for SSO-map group picker")
     return mappings, our_groups
@@ -1312,7 +1383,7 @@ async def admin_auth_claims(
     """Persist WHICH id-token claim carries groups / roles (channel runtime config,
     not kernel state — it governs how the channel reads the token before it derives
     scope). Empty ⇒ fall back to the built-in default for that claim."""
-    principal = _require_groot(request)
+    principal = _require_elevated(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
     if not _csrf_ok(request, csrf):
@@ -1334,7 +1405,7 @@ async def admin_auth_sso_map(
     (ManageSsoMap, `manage_access`-gated + audited). Default-deny is unchanged — an
     unmapped incoming group still grants nothing. Provider is the channel's SSO
     provider key (must match how the kernel provisions SSO subjects)."""
-    principal = _require_groot(request)
+    principal = _require_elevated(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
     if not _csrf_ok(request, csrf):
@@ -1353,8 +1424,9 @@ async def admin_auth_sso_map(
         )
     except Exception:
         logger.exception("ManageSsoMap failed (kernel may predate BE-1)")
-        return _admin_outcome_page(502, "kernel unreachable or SSO-map RPC not deployed yet",
-                                   "status-error")
+        return _admin_outcome_page(
+            502, "kernel unreachable or SSO-map RPC not deployed yet", "status-error"
+        )
     if resp.status != core_pb2.CALL_OK:
         label, css_class = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
         return _admin_outcome_page(409, label, css_class)
@@ -1363,7 +1435,7 @@ async def admin_auth_sso_map(
 
 @app.get("/admin/connector")
 async def admin_connector_legacy(request: Request) -> Response:
-    principal = _require_groot(request)
+    principal = _require_admin(request)
     if principal is None:
         return _admin_forbidden()
     return RedirectResponse("/admin/auth", status_code=303)
@@ -1371,7 +1443,7 @@ async def admin_connector_legacy(request: Request) -> Response:
 
 @app.get("/admin/connectors", response_class=HTMLResponse)
 async def admin_connectors(request: Request) -> HTMLResponse:
-    principal = _require_groot(request)
+    principal = _require_admin(request)
     if principal is None:
         return _admin_forbidden()
     return templates.TemplateResponse(
@@ -1383,7 +1455,7 @@ async def admin_connectors(request: Request) -> HTMLResponse:
 
 @app.get("/admin/tools", response_class=HTMLResponse)
 async def admin_tools(request: Request) -> HTMLResponse:
-    principal = _require_groot(request)
+    principal = _require_admin(request)
     if principal is None:
         return _admin_forbidden()
     return templates.TemplateResponse(
@@ -1395,10 +1467,9 @@ async def admin_tools(request: Request) -> HTMLResponse:
 
 @app.get("/admin/groups", response_class=HTMLResponse)
 async def admin_groups(request: Request) -> HTMLResponse:
-    """Groups list (ListGroups) + per-row lifecycle via ManageGroup: name,
-    members, granted scopes/roles. The scope-picker offers known `src:*`/`public`
-    (never `private`) plus any scope a group already holds — no invented sources."""
-    principal = _require_groot(request)
+    """The FIXED groups (ListGroups): wheel / admins / staff — members + the role each
+    confers. Groups grant NO source visibility (ADR-20 D3): that is Project membership."""
+    principal = _require_admin(request)
     if principal is None:
         return _admin_forbidden()
     assertion = _admin_assertion(principal)
@@ -1410,34 +1481,28 @@ async def admin_groups(request: Request) -> HTMLResponse:
         except Exception:
             logger.exception("ListGroups failed")
             groups = None
-    scope_options = list(auth.known_source_scopes())
-    for g in groups or []:
-        for s in g.granted_scopes:
-            if s != "private" and s not in scope_options:
-                scope_options.append(s)
+    canonical = {c["id"]: c for c in auth.canonical_groups()}
     return templates.TemplateResponse(
         request,
         "admin/groups.html",
         {
             **_admin_template_context(request, principal, "groups"),
             "kernel_groups": groups,
-            "scope_options": scope_options,
-            "baseline_group": auth.baseline_group(),
-            "assignable_roles": ["admin", "superadmin"],
+            "canonical": canonical,
         },
     )
 
 
 @app.get("/admin/groups/{group_id}", response_class=HTMLResponse)
 async def admin_group_detail(request: Request, group_id: str) -> HTMLResponse:
-    """One group: role + connectors (source scopes) + its members (GetGroup, ADR-19)."""
-    principal = _require_groot(request)
+    """One fixed group: the role it confers + its members (GetGroup). Membership is
+    managed per user; `wheel` membership only under an elevation (kernel-enforced)."""
+    principal = _require_admin(request)
     if principal is None:
         return _admin_forbidden()
     assertion = _admin_assertion(principal)
     group = None
     members: list = []
-    scope_options = list(auth.known_source_scopes())
     detail_error = None
     status_code = 200
     if not assertion:
@@ -1455,14 +1520,11 @@ async def admin_group_detail(request: Request, group_id: str) -> HTMLResponse:
         elif resp.status == core_pb2.CALL_OK:
             group = resp.group
             members = list(resp.members)
-            scope_options = await _scope_options(assertion, group.granted_scopes)
         else:
             label, _css = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
             detail_error = label
             status_code = 403 if resp.status == core_pb2.CALL_NOT_AUTHORIZED else 400
-    canonical = next(
-        (c for c in auth.canonical_groups() if group and c["id"] == group.id), None
-    )
+    canonical = next((c for c in auth.canonical_groups() if group and c["id"] == group.id), None)
     return templates.TemplateResponse(
         request,
         "admin/group_detail.html",
@@ -1470,8 +1532,6 @@ async def admin_group_detail(request: Request, group_id: str) -> HTMLResponse:
             **_admin_template_context(request, principal, "groups"),
             "group": group,
             "members": members,
-            "scope_options": scope_options,
-            "is_baseline": bool(group and group.id == auth.baseline_group()),
             "canonical": canonical,
             "detail_error": detail_error,
         },
@@ -1479,29 +1539,12 @@ async def admin_group_detail(request: Request, group_id: str) -> HTMLResponse:
     )
 
 
-async def _scope_options(assertion: str, group_scopes) -> list[str]:
-    """Scope-picker candidates: known src:*/public + every scope already in use across
-    groups + this group's own scopes; `private` never offered."""
-    opts = list(auth.known_source_scopes())
-    pool: list = []
-    try:
-        lg = await core_client.list_groups(assertion)
-        if lg.status == core_pb2.CALL_OK:
-            pool = [s for g in lg.groups for s in g.granted_scopes]
-    except Exception:
-        logger.exception("ListGroups (scope options) failed")
-    for s in list(pool) + list(group_scopes):
-        if s != "private" and s not in opts:
-            opts.append(s)
-    return opts
-
-
 @app.get("/admin/roles", response_class=HTMLResponse)
 async def admin_roles(request: Request) -> HTMLResponse:
     """Roles list (ListRoles), READ-ONLY: the fixed user/admin/superadmin set with
-    derived capabilities + holder counts (roles are administration-only, per the
-    decided model — never grown with connectors)."""
-    principal = _require_groot(request)
+    derived capabilities + holder counts. `superadmin` holders are the LIVE elevations
+    (never a standing set); roles are administration-only (ADR-20 D8)."""
+    principal = _require_admin(request)
     if principal is None:
         return _admin_forbidden()
     assertion = _admin_assertion(principal)
@@ -1565,15 +1608,16 @@ async def admin_kernel_user(
     last_name: str = Form(""),
     nickname: str = Form(""),
     password: str = Form(""),
-    group: str = Form(""),
+    external: str = Form(""),
     csrf: str = Form(""),
 ):
     """ManageUser (invite/deactivate/delete). INVITE also provisions a channel-local
     credential in the SAME action, so the invited user can sign in immediately
-    (`Swarm.Identity.invite_user` alone leaves `status='invited'`, and no gRPC path
-    yet promotes it to 'active' — `board/todo/jit-provision-rpc` — so the FIRST
-    local login must already resolve; that gap is tracked, not silently papered over)."""
-    principal = _require_groot(request)
+    (`Swarm.Identity.invite_user` alone leaves `status='invited'`; the first local login
+    promotes it). `external` invites a GUEST (ADR-20): no default cohort, no internal
+    visibility until a Project admits them. Any lifecycle op on a Wheel member needs an
+    elevation — the kernel enforces it and the outcome is rendered honestly."""
+    principal = _require_admin(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
     if not _csrf_ok(request, csrf):
@@ -1586,10 +1630,6 @@ async def admin_kernel_user(
     }
     if op not in op_map:
         return _admin_outcome_page(400, "bad request", "status-error")
-    grp = group.strip()
-    if op == "invite" and grp and grp not in auth.known_groups():
-        logger.warning("groot %s tried to assign unknown group=%s", principal.viewer, grp)
-        return _admin_outcome_page(400, "unknown group", "status-error")
     try:
         resp = await core_client.manage_user(
             assertion,
@@ -1599,6 +1639,7 @@ async def admin_kernel_user(
             first_name=first_name.strip(),
             last_name=last_name.strip(),
             nickname=nickname.strip(),
+            external=bool(external),
         )
     except Exception:
         logger.exception("ManageUser failed")
@@ -1608,13 +1649,10 @@ async def admin_kernel_user(
         return _admin_outcome_page(409, label, css_class)
     if op == "invite" and login.strip() and password:
         # Pair the kernel identity with a channel-local credential (best-effort —
-        # the kernel record already exists even if this half fails; groot can
-        # retry via the plain local-invite form above).
+        # the kernel record already exists even if this half fails; an admin can
+        # retry). The credential row carries no authority (kernel-derived).
         try:
-            scopes = [auth.scopes_for([grp])[-1]] if grp else []
-            localusers.create(
-                login.strip(), password, scopes, is_groot=False, created_by=principal.viewer
-            )
+            localusers.create(login.strip(), password, [], created_by=principal.viewer)
         except ValueError:
             logger.warning("kernel-invited login=%s already has a local credential", login)
     return RedirectResponse("/admin/users", status_code=303)
@@ -1630,32 +1668,29 @@ async def admin_kernel_access(
     scopes: str = Form(""),
     csrf: str = Form(""),
 ):
-    """ManageAccess (grant/revoke role or group; set a group's scopes) — superadmin
-    for role ops, `manage_access` cap for group ops (kernel-enforced, not here)."""
-    principal = _require_groot(request)
+    """ManageAccess — fixed-group membership only (ADR-20): `manage_access` for
+    admins/staff, `manage_wheel` (an elevation) for wheel; kernel-enforced, not here.
+    Per-user role grants and group scope grants no longer exist (the kernel answers
+    BAD_REQUEST); the channel does not offer them."""
+    principal = _require_admin(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
     if not _csrf_ok(request, csrf):
         return _csrf_reject()
     assertion = _admin_assertion(principal)
     op_map = {
-        "grant_role": core_pb2.GRANT_ROLE,
-        "revoke_role": core_pb2.REVOKE_ROLE,
         "grant_group": core_pb2.GRANT_GROUP,
         "revoke_group": core_pb2.REVOKE_GROUP,
-        "set_group_scopes": core_pb2.SET_GROUP_SCOPES,
     }
     if op not in op_map:
         return _admin_outcome_page(400, "bad request", "status-error")
-    scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
+    _ = (role, scopes)
     try:
         resp = await core_client.manage_access(
             assertion,
             op_map[op],
             target_user_id=target_user_id.strip(),
-            role=role.strip(),
             group_id=group_id.strip(),
-            scopes=scope_list,
         )
     except Exception:
         logger.exception("ManageAccess failed")
@@ -1680,41 +1715,28 @@ async def admin_kernel_group(
     confirm: str = Form(""),
     csrf: str = Form(""),
 ):
-    """ManageGroup — first-class group lifecycle (ADR-18): create/rename/delete +
-    set/clear role + set-scopes. `manage_access` for lifecycle/scopes, superadmin
-    for role ops (kernel-enforced, not here). `scopes` arrives as repeated checkbox
-    values (read from the raw form); `private` is dropped defensively (the kernel
-    hard-denies it too)."""
-    principal = _require_groot(request)
+    """ManageGroup — the group set is FIXED (ADR-20 D7): only the `admin` role binding
+    can be set/cleared, and only under an elevation (`manage_roles`, kernel-enforced).
+    Create/rename/delete/scopes are not offered (the kernel answers BAD_REQUEST)."""
+    principal = _require_elevated(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
     if not _csrf_ok(request, csrf):
         return _csrf_reject()
     op_map = {
-        "create": core_pb2.GROUP_CREATE,
-        "rename": core_pb2.GROUP_RENAME,
-        "delete": core_pb2.GROUP_DELETE,
         "set_role": core_pb2.GROUP_SET_ROLE,
         "clear_role": core_pb2.GROUP_CLEAR_ROLE,
-        "set_scopes": core_pb2.GROUP_SET_SCOPES,
     }
     if op not in op_map:
         return _admin_outcome_page(400, "bad request", "status-error")
     assertion = _admin_assertion(principal)
-    form_data = await request.form()
-    scope_list = [
-        s.strip() for s in form_data.getlist("scopes") if s.strip() and s.strip() != "private"
-    ]
+    _ = (name, description, confirm)
     try:
         resp = await core_client.manage_group(
             assertion,
             op_map[op],
             group_id=group_id.strip(),
-            name=name.strip(),
-            description=description.strip(),
             role=role.strip(),
-            scopes=scope_list,
-            confirm=bool(confirm),
         )
     except Exception:
         logger.exception("ManageGroup failed")
@@ -1739,7 +1761,7 @@ async def admin_kernel_read_conversation(
     the wire boundary (an empty reason is CALL_BAD_REQUEST, not an unlogged read).
     Renders the audited fact visibly: the channel itself sent `reason` on this
     exact request, and the kernel's contract guarantees it logged it first."""
-    principal = _require_groot(request)
+    principal = _require_elevated(request)
     if principal is None:
         return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
     if not _csrf_ok(request, csrf):
@@ -1777,6 +1799,266 @@ async def admin_kernel_read_conversation(
             ],
         },
     )
+
+
+# --- Projects — the user-facing access / sharing object (workspace ADR-20) ------
+
+
+async def _resolve_login(assertion: str, login: str) -> str | None:
+    """Exact-login → kernel uuid via the roster search (admins act by LOGIN, not uuid)."""
+    login = login.strip()
+    if not login:
+        return None
+    try:
+        resp = await core_client.list_users(assertion, query=login, limit=50)
+    except Exception:
+        logger.exception("ListUsers failed while resolving a login")
+        return None
+    if resp.status != core_pb2.CALL_OK:
+        return None
+    return next((u.id for u in resp.users if u.login == login), None)
+
+
+@app.get("/admin/projects", response_class=HTMLResponse)
+async def admin_projects(request: Request) -> HTMLResponse:
+    """Projects (ListProjects): the SOLE data-access container — people share Projects,
+    not raw scopes. An admin sees every Project (metadata); create is `manage_projects`."""
+    principal = _require_admin(request)
+    if principal is None:
+        return _admin_forbidden()
+    assertion = _admin_assertion(principal)
+    projects = None
+    if assertion:
+        try:
+            resp = await core_client.list_projects(assertion)
+            projects = list(resp.projects) if resp.status == core_pb2.CALL_OK else None
+        except Exception:
+            logger.exception("ListProjects failed")
+            projects = None
+    return templates.TemplateResponse(
+        request,
+        "admin/projects.html",
+        {
+            **_admin_template_context(request, principal, "projects"),
+            "projects": projects,
+        },
+    )
+
+
+@app.get("/admin/projects/{project_id}", response_class=HTMLResponse)
+async def admin_project_detail(request: Request, project_id: str) -> HTMLResponse:
+    """One Project: its Sources (stable `src:<uuid>` scopes — labels are labels), its members
+    (users + fixed groups), its visibility. Publicness controls render only under an
+    elevation; the kernel enforces every action regardless."""
+    principal = _require_admin(request)
+    if principal is None:
+        return _admin_forbidden()
+    assertion = _admin_assertion(principal)
+    project = None
+    sources: list = []
+    members: list = []
+    detail_error = None
+    status_code = 200
+    if not assertion:
+        detail_error, status_code = "kernel identity not resolved", 403
+    else:
+        try:
+            resp = await core_client.get_project(assertion, project_id)
+        except Exception:
+            logger.exception("GetProject failed for project detail")
+            resp = None
+        if resp is None:
+            detail_error, status_code = "kernel unavailable", 503
+        elif resp.status == core_pb2.CALL_NOT_FOUND:
+            detail_error, status_code = "project not found", 404
+        elif resp.status == core_pb2.CALL_OK:
+            project = resp.project
+            sources = list(resp.sources)
+            members = list(resp.members)
+        else:
+            label, _css = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
+            detail_error = label
+            status_code = 403 if resp.status == core_pb2.CALL_NOT_AUTHORIZED else 400
+    return templates.TemplateResponse(
+        request,
+        "admin/project_detail.html",
+        {
+            **_admin_template_context(request, principal, "projects"),
+            "project": project,
+            "sources": sources,
+            "members": members,
+            "canonical_groups": auth.canonical_groups(),
+            "detail_error": detail_error,
+        },
+        status_code=status_code,
+    )
+
+
+_PROJECT_OPS = {
+    "create": core_pb2.PROJECT_CREATE,
+    "rename": core_pb2.PROJECT_RENAME,
+    "describe": core_pb2.PROJECT_DESCRIBE,
+    "delete": core_pb2.PROJECT_DELETE,
+    "set_visibility": core_pb2.PROJECT_SET_VISIBILITY,
+    "add_source": core_pb2.PROJECT_ADD_SOURCE,
+    "remove_source": core_pb2.PROJECT_REMOVE_SOURCE,
+    "add_member": core_pb2.PROJECT_ADD_MEMBER,
+    "remove_member": core_pb2.PROJECT_REMOVE_MEMBER,
+}
+
+
+@app.post("/admin/kernel/project", response_class=HTMLResponse)
+async def admin_kernel_project(
+    request: Request,
+    op: str = Form(...),
+    project_id: str = Form(""),
+    name: str = Form(""),
+    description: str = Form(""),
+    visibility: str = Form(""),
+    source_id: str = Form(""),
+    source_kind: str = Form(""),
+    source_label: str = Form(""),
+    member_login: str = Form(""),
+    member_user_id: str = Form(""),
+    member_group_id: str = Form(""),
+    member_role: str = Form(""),
+    confirm: str = Form(""),
+    csrf: str = Form(""),
+):
+    """ManageProject — lifecycle, Sources, membership, visibility (ADR-20 §6). The
+    kernel gates each op by capability (publicness needs an elevation; a self-grant needs
+    the Project owner or an elevation) and audits it; the channel only signs + renders
+    the typed outcome. Members may be given by LOGIN (resolved via the roster)."""
+    principal = _require_admin(request)
+    if principal is None:
+        return HTMLResponse('<span class="badge status-error">forbidden</span>', status_code=403)
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
+    if op not in _PROJECT_OPS:
+        return _admin_outcome_page(400, "bad request", "status-error")
+    assertion = _admin_assertion(principal)
+    uid = member_user_id.strip()
+    if op in ("add_member", "remove_member") and not uid and member_login.strip():
+        uid = await _resolve_login(assertion, member_login) or ""
+        if not uid and not member_group_id.strip():
+            return _admin_outcome_page(404, "no such login", "status-warn")
+    try:
+        resp = await core_client.manage_project(
+            assertion,
+            _PROJECT_OPS[op],
+            project_id=project_id.strip(),
+            name=name.strip(),
+            description=description.strip(),
+            visibility=visibility.strip(),
+            source_id=source_id.strip(),
+            source_kind=source_kind.strip().lower(),
+            source_label=source_label.strip(),
+            member_user_id=uid,
+            member_group_id=member_group_id.strip(),
+            member_role=member_role.strip(),
+            confirm=bool(confirm),
+        )
+    except Exception:
+        logger.exception("ManageProject failed")
+        return _admin_outcome_page(502, "kernel unreachable", "status-error")
+    if resp.status != core_pb2.CALL_OK:
+        label, css_class = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
+        return _admin_outcome_page(
+            404 if resp.status == core_pb2.CALL_NOT_FOUND else 409, label, css_class
+        )
+    if op == "create" and resp.project_id:
+        return RedirectResponse(f"/admin/projects/{resp.project_id}", status_code=303)
+    if op == "delete":
+        return RedirectResponse("/admin/projects", status_code=303)
+    pid = project_id.strip()
+    return RedirectResponse(f"/admin/projects/{pid}" if pid else "/admin/projects", status_code=303)
+
+
+# --- Elevation — time-boxed superadmin for local Wheel members (ADR-20 D9) ---------
+
+
+@app.get("/admin/elevate", response_class=HTMLResponse)
+async def admin_elevate_form(request: Request) -> HTMLResponse:
+    """The sudo prompt: reason + the LOCAL password (fresh re-authentication). Only a
+    local account can elevate (Wheel is local-only); the kernel decides membership."""
+    principal = _current_principal(request)
+    if principal is None:
+        return _admin_forbidden()
+    return templates.TemplateResponse(
+        request,
+        "admin/elevate.html",
+        {
+            **_admin_template_context(request, principal, "elevate"),
+            "error": None,
+        },
+    )
+
+
+@app.post("/admin/elevate", response_class=HTMLResponse)
+async def admin_elevate(
+    request: Request,
+    reason: str = Form(""),
+    password: str = Form(""),
+    csrf: str = Form(""),
+):
+    """Re-verify the local password → sign the one-time re-auth proof → `Elevate`. The
+    proof is the cryptographic record that a fresh password check happened for THIS
+    subject in THIS session; the kernel audits BEFORE the capability exists, then the
+    session is re-resolved so the caps/expiry shown are the kernel's."""
+    principal = _current_principal(request)
+    if principal is None:
+        return _admin_forbidden()
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
+
+    def form_error(msg: str, code: int) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "admin/elevate.html",
+            {**_admin_template_context(request, principal, "elevate"), "error": msg},
+            status_code=code,
+        )
+
+    if not reason.strip():
+        return form_error("A reason is required (it is audited).", 400)
+    if principal.provider != "local":
+        return form_error("Only a local Wheel account can elevate.", 403)
+    if localusers.verify(principal.viewer, password) is None:
+        logger.warning("elevation re-auth failed for %s", principal.viewer)
+        return form_error("Password check failed.", 401)
+    proof = actor.sign_reauth(principal.sub, principal.provider, principal.sid)
+    assertion = _admin_assertion(principal)
+    if not proof or not assertion:
+        return form_error("Signing is not configured on this channel.", 503)
+    try:
+        resp = await core_client.elevate(assertion, reason.strip(), proof)
+    except Exception:
+        logger.exception("Elevate failed")
+        return form_error("Kernel unreachable.", 502)
+    if resp.status != core_pb2.CALL_OK:
+        label, _css = _CALL_STATUS_LABEL.get(resp.status, ("error", "status-error"))
+        logger.warning("Elevate refused for %s: %s", principal.viewer, label)
+        return form_error(f"Elevation refused: {label}.", 403)
+    await _refresh_principal(request, principal)
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/elevation/end")
+async def admin_elevation_end(request: Request, csrf: str = Form("")):
+    """End the live elevation early (revoke), then re-resolve so the caps drop at once."""
+    principal = _current_principal(request)
+    if principal is None:
+        return _admin_forbidden()
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
+    assertion = _admin_assertion(principal)
+    if assertion:
+        try:
+            await core_client.end_elevation(assertion)
+        except Exception:
+            logger.exception("EndElevation failed")
+    await _refresh_principal(request, principal)
+    return RedirectResponse("/admin", status_code=303)
 
 
 @app.post("/ask/start", response_class=HTMLResponse)

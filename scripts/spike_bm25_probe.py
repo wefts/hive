@@ -7,7 +7,8 @@ import json, os, subprocess, sys
 
 QA = "/tmp/claude-1004/-home-sebor-Swarm/725cc3dd-d24d-4930-9a96-c9cd11307575/scratchpad/qa.json"
 BOOST = os.environ.get("BOOST", "4")
-SCOPE = os.environ.get("SCOPE", "group")
+# ADR-20: scopes are `public` or a registered `src:<uuid>`; pass the Source's scope explicitly
+SCOPE = os.environ.get("SCOPE", "public")
 K = int(os.environ.get("RECALL_K", "10"))
 
 def psql(sql):

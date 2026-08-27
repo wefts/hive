@@ -2,10 +2,10 @@
 
 Local (non-SSO) users authenticate against THIS store: pbkdf2-hashed passwords in
 the same private SQLite volume as the conversation log. A verified local user yields
-a `Principal` of the SAME shape as an OIDC one (viewer + scopes + is_groot), so the
-rest of the app (ask/search/scope no-leak) is identical regardless of auth source.
-groot manages local users. Scopes are explicit + default-deny: `public` is always
-included, nothing else unless granted.
+a `Principal` of the SAME shape as an OIDC one, so the rest of the app (ask/search/
+scope no-leak) is identical regardless of auth source. The kernel is the sole scope
+and capability authority (ADR-16 D9 / ADR-20): the row's `scopes` and `is_groot`
+columns are legacy bookkeeping kept for schema compatibility, never read as authority.
 
 pbkdf2_hmac (stdlib) keeps this dependency-free; iteration count is generous for a
 local operator console. (A prod-grade deployment would prefer argon2/bcrypt.)
@@ -151,14 +151,17 @@ def verify(username: str, password: str) -> Principal | None:
     scopes_json, is_groot, salt, pwd_hash = row
     if not hmac.compare_digest(_hash(password, salt), pwd_hash):
         return None
+    # `scopes` / `is_groot` on the row are LEGACY bookkeeping, never authority: the kernel
+    # derives scopes (Projects) and capabilities (groups + elevation) at ResolveActor
+    # (ADR-19/20). Until resolved the principal is public-only and not an admin.
+    _ = (scopes_json, is_groot)
     return Principal(
         viewer=username,
-        scopes=_safe_scopes(scopes_json),
+        scopes=[PUBLIC_SCOPE],
         groups=[],
-        is_groot=bool(is_groot),
         display=username,
         # A local account resolves kernel-side via the SAME identity_link path as
-        # SSO (`Swarm.Identity.seed_superadmin`/migration): provider "local",
+        # SSO (`Swarm.Identity.seed_wheel`/migration): provider "local",
         # subject = the username (ADR-16 D9).
         sub=username,
         provider="local",

@@ -14,8 +14,9 @@
       <section>
         <p class="muted">Roles are <strong>administration only</strong> — a fixed
           <code>user</code> / <code>admin</code> / <code>superadmin</code> set that never grows with
-          connectors. Access to knowledge is per-source scope on <a class="navlink" href="/admin/groups">groups</a>,
-          not roles.</p>
+          sources. <code>admin</code> comes from the <code>admins</code> group; <code>superadmin</code>
+          is never a standing role — its holders are the <em>live elevations</em> right now. Access to
+          knowledge is <a class="navlink" href="/admin/projects">Project</a> membership, not a role.</p>
         {% if kernel_roles is none %}
           <p class="muted"><span class="badge status-warn">kernel roles unavailable</span>
             Could not list roles right now.</p>
@@ -28,7 +29,7 @@
               <tbody>
                 {% for r in kernel_roles %}
                   <tr>
-                    <td><strong>{{ r.name }}</strong></td>
+                    <td><strong>{{ r.name }}</strong>{% if r.name == 'superadmin' %} <span class="muted">(live elevations)</span>{% endif %}</td>
                     <td>{{ r.capabilities|join(', ') if r.capabilities else '—' }}</td>
                     <td>{{ r.holder_count }}</td>
                   </tr>

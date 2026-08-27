@@ -1,8 +1,14 @@
 # ADR-16 item 2, step 6b.6 — no-lockout migration: existing local users + groot
 # (and, optionally, known SSO test users) into the kernel Identity store, BEFORE
 # the :strict cutover (step 6b.7). Idempotent — safe to re-run (upsert_from_claims
-# and seed_superadmin are both ON CONFLICT-safe); adds rows, never removes a
+# and seed_wheel are both ON CONFLICT-safe); adds rows, never removes a
 # channel credential, so nobody is locked out by running this.
+#
+# Workspace ADR-20: there is NO standing superadmin any more. groot (and any other
+# `is_groot` local account) becomes a member of the fixed groups `wheel` (may elevate,
+# local-only) and `admins` (daily `admin` role). Visibility is NOT granted here — it
+# comes from Project membership (`staff` is the default cohort every internal account
+# joins on provisioning).
 #
 # Inputs:
 #   arg 1 — path to a JSON export of web_channel's local users, produced from
@@ -13,7 +19,8 @@
 #                print(json.dumps(localusers.list_users()))" > /tmp/local_users.json
 #
 #   arg 2 — OPTIONAL path to a JSON list of known SSO users to pre-link, each
-#           {"login": "...", "sub": "...", "is_groot": bool}. `sub` is the
+#           {"login": "...", "sub": "...", "is_groot": bool} (`is_groot` ⇒ `admins`
+#           only — Wheel is local-only, an SSO account can never elevate). `sub` is the
 #           Keycloak user id (GET /admin/realms/<realm>/users — the `id` field
 #           IS the OIDC `sub`); without this, an SSO user's identity_link is
 #           only created once they actually log in AFTER 6b.6's local path is
@@ -50,21 +57,22 @@ alias Swarm.Identity
 {:ok, _} = Application.ensure_all_started(:postgrex)
 {:ok, _} = Swarm.Repo.start_link()
 
-# --- groot: the vanity superadmin (hive-local config; the concrete id/login
-# is deployment config, never a literal name in swarm — Identity.seed_superadmin/1
+# --- groot: the vanity break-glass account (hive-local config; the concrete id/login
+# is deployment config, never a literal name in swarm — Identity.seed_wheel/1
 # moduledoc). Fixed here so re-runs are idempotent and every session migrates to
-# the SAME uuid.
+# the SAME uuid. seed_wheel puts it in `wheel` ∧ `admins` ∧ `staff` — no standing
+# superadmin (ADR-20 D9): it ELEVATES per session, with re-auth + reason, when needed.
 groot_id = "01920000-0000-7000-8000-00000000da7a"
-{:ok, groot} = Identity.seed_superadmin(%{id: groot_id, login: "groot"})
-IO.puts("groot -> #{groot.id} (#{groot.status}), superadmin")
+{:ok, groot} = Identity.seed_wheel(%{id: groot_id, login: "groot"})
+IO.puts("groot -> #{groot.id} (#{groot.status}), wheel + admins")
 
 # --- existing LOCAL users (web_channel's own credential store) -------------
 # `login != "groot"` guards against double-provisioning: seed_superadmin above
 # already claims identity_link(local, "groot") — if the channel ALSO has a local
 # user literally named "groot", upsert_from_claims for it would collide on the
-# (provider, subject) unique constraint. Any OTHER is_groot local user gets an
-# explicit superadmin grant instead (they were channel-side groot-equivalent
-# before the kernel existed; the grant makes that real kernel-side).
+# (provider, subject) unique constraint. Any OTHER is_groot local user joins
+# `wheel` + `admins` instead (they were channel-side groot-equivalent before the
+# kernel existed; the memberships make that real kernel-side — elevation on demand).
 local_users_path = System.argv() |> Enum.at(0)
 
 local_users =
@@ -81,10 +89,11 @@ for %{"username" => login, "is_groot" => is_groot} <- local_users, login != "gro
   {:ok, u} = Identity.upsert_from_claims(%{provider: "local", subject: login, login: login})
 
   if is_groot do
-    :ok = Identity.grant_role(u.id, "superadmin", "direct")
+    :ok = Identity.add_to_group(u.id, "wheel")
+    :ok = Identity.add_to_group(u.id, "admins")
   end
 
-  IO.puts("local:#{login} -> #{u.id} (#{u.status})#{if is_groot, do: " [superadmin]", else: ""}")
+  IO.puts("local:#{login} -> #{u.id} (#{u.status})#{if is_groot, do: " [wheel+admins]", else: ""}")
 end
 
 # --- optional: known SSO users, pre-linked so their FIRST post-cutover login
@@ -106,8 +115,9 @@ sso_users =
 for %{"login" => login, "sub" => sub} = entry <- sso_users, login != "groot" do
   {:ok, u} = Identity.upsert_from_claims(%{provider: "keycloak", subject: sub, login: login})
 
+  # an SSO account can be an admin but never Wheel (local-only — ADR-20 D9)
   if Map.get(entry, "is_groot", false) do
-    :ok = Identity.grant_role(u.id, "superadmin", "direct")
+    :ok = Identity.add_to_group(u.id, "admins")
   end
 
   IO.puts("sso:#{login} -> #{u.id} (#{u.status})")

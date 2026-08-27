@@ -36,7 +36,8 @@ alias Swarm.ML.Generation
 log = fn ev -> Agent.update(:spike_trace, fn s -> %{s | trace: [ev | s.trace]} end) end
 bump = fn -> Agent.get_and_update(:spike_trace, fn s -> {s.calls, %{s | calls: s.calls + 1}} end) end
 maxcalls = String.to_integer(System.get_env("MAXCALLS", "8"))
-scope = System.get_env("SEED_SCOPE", "group")
+# ADR-20: seeded rows need a REGISTERED Source scope (`src:<uuid>`); default = the wiki Source
+scope = System.get_env("SEED_SCOPE") || Swarm.Projects.scope_by_kind!("wiki")
 
 defmodule SpikeEnr do
   @sys "Extract factual subject-predicate-object claims. Predicate lowercase snake_case. " <>

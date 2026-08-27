@@ -397,10 +397,13 @@ async def manage_user(
     first_name: str = "",
     last_name: str = "",
     nickname: str = "",
+    external: bool = False,
 ) -> core_pb2.AdminActionResponse:
     """User lifecycle: invite / deactivate / delete (ADR-16 D11) — capability-gated
     + audited. `op` is a `core_pb2.UserOp` value (INVITE/DEACTIVATE/DELETE).
-    Deactivate/delete kill the login immediately; learned content persists."""
+    `external=True` invites a GUEST (ADR-20: no default cohort, no internal visibility
+    until a Project admits them). Deactivate/delete kill the login immediately; learned
+    content persists. Any lifecycle op on a Wheel member needs an elevation kernel-side."""
     async with aio.insecure_channel(core_addr()) as channel:
         stub = core_pb2_grpc.CoreStub(channel)
         return await stub.ManageUser(
@@ -412,6 +415,98 @@ async def manage_user(
                 first_name=first_name,
                 last_name=last_name,
                 nickname=nickname,
+                external=external,
             ),
+            timeout=read_timeout_s(),
+        )
+
+
+# --- Projects + elevation (workspace ADR-20) ----------------------------------
+
+
+async def list_projects(assertion: str, mine_only: bool = False) -> core_pb2.ListProjectsResponse:
+    """Projects the actor can see: an admin cap sees every Project (metadata), anyone else
+    exactly the Projects they are a member of or that are public."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ListProjects(
+            core_pb2.ListProjectsRequest(assertion=assertion, mine_only=mine_only),
+            timeout=read_timeout_s(),
+        )
+
+
+async def get_project(assertion: str, project_id: str) -> core_pb2.GetProjectResponse:
+    """One Project with its Sources (stable `src:<uuid>` scopes) and members; NOT_FOUND for
+    a non-member (404-not-403) or an unknown id."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.GetProject(
+            core_pb2.GetProjectRequest(assertion=assertion, project_id=project_id),
+            timeout=read_timeout_s(),
+        )
+
+
+async def manage_project(
+    assertion: str,
+    op: core_pb2.ProjectOp,
+    project_id: str = "",
+    name: str = "",
+    description: str = "",
+    visibility: str = "",
+    source_id: str = "",
+    source_kind: str = "",
+    source_label: str = "",
+    member_user_id: str = "",
+    member_group_id: str = "",
+    member_role: str = "",
+    confirm: bool = False,
+) -> core_pb2.AdminActionResponse:
+    """Project lifecycle / Sources / membership (ADR-20 §6) — capability-gated + audited
+    kernel-side (publicness needs an elevation; a self-grant needs the owner or an
+    elevation). `op` is a `core_pb2.ProjectOp` value."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.ManageProject(
+            core_pb2.ManageProjectRequest(
+                assertion=assertion,
+                op=op,
+                project_id=project_id,
+                name=name,
+                description=description,
+                visibility=visibility,
+                source_id=source_id,
+                source_kind=source_kind,
+                source_label=source_label,
+                member_user_id=member_user_id,
+                member_group_id=member_group_id,
+                member_role=member_role,
+                confirm=confirm,
+            ),
+            timeout=read_timeout_s(),
+        )
+
+
+async def elevate(
+    assertion: str, reason: str, reauth: str, ttl_s: int = 0
+) -> core_pb2.ElevateResponse:
+    """Request a time-boxed superadmin elevation (ADR-20 D9): a local Wheel member presents
+    a reason and the channel-signed re-auth proof (`actor.sign_reauth`, minted only after a
+    fresh password check). The kernel audits BEFORE the capability exists and binds it to
+    the assertion's session. NOT_AUTHORIZED (not Wheel / not local), BAD_REQUEST (reason /
+    proof), OK with the expiry."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.Elevate(
+            core_pb2.ElevateRequest(assertion=assertion, reason=reason, reauth=reauth, ttl_s=ttl_s),
+            timeout=read_timeout_s(),
+        )
+
+
+async def end_elevation(assertion: str, elevation_id: str = "") -> core_pb2.AdminActionResponse:
+    """End (revoke) the actor's live elevation for this session early ("" = the current one)."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.EndElevation(
+            core_pb2.EndElevationRequest(assertion=assertion, elevation_id=elevation_id),
             timeout=read_timeout_s(),
         )

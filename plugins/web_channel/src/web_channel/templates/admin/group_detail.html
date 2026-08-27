@@ -21,11 +21,11 @@
         <div class="card">
           <header>
             <h2 class="card-title">{{ group.name or group.id }}</h2>
-            {% if is_baseline %}<span class="badge">baseline · Everyone</span>{% endif %}
+            {% if canonical and canonical.elevation_only %}<span class="badge status-warn">elevation-managed</span>{% endif %}
           </header>
           <section class="admin-detail-list">
             <div><span class="section-label">Group id</span><code class="hkey">{{ group.id }}</code></div>
-            <div><span class="section-label">Role</span><span>{{ group.granted_roles|join(', ') if group.granted_roles else '—' }}</span></div>
+            <div><span class="section-label">Confers</span><span>{{ group.granted_roles|join(', ') if group.granted_roles else (canonical.role if canonical else '—') }}</span></div>
             <div><span class="section-label">Members</span><span>{{ group.member_count }}</span></div>
             {% if canonical and canonical.local_only %}
               <div><span class="section-label">Membership</span><span class="muted">local-provider users only</span></div>
@@ -34,21 +34,11 @@
         </div>
 
         <div class="card">
-          <header><h2 class="card-title">Connectors (source scopes)</h2></header>
+          <header><h2 class="card-title">Visibility</h2></header>
           <section>
-            <p class="muted">Which sources this group can see. <code>src:*</code> + <code>public</code>;
-              <code>private</code> is never grantable.</p>
-            <form method="post" action="/admin/kernel/group" autocomplete="off">
-              <input type="hidden" name="csrf" value="{{ csrf_token }}">
-              <input type="hidden" name="group_id" value="{{ group.id }}">
-              <input type="hidden" name="op" value="set_scopes">
-              <div class="baseline-scopes">
-                {% for s in scope_options %}
-                  <label class="menu-check"><input type="checkbox" name="scopes" value="{{ s }}"{% if s in group.granted_scopes %} checked{% endif %}> {{ s }}</label>
-                {% endfor %}
-              </div>
-              <button class="btn" type="submit">Set connectors</button>
-            </form>
+            <p class="muted">A group grants <strong>no</strong> source visibility by itself. Add the group as a
+              member of a <a class="navlink" href="/admin/projects">Project</a> and its users inherit that
+              Project's Sources.</p>
           </section>
         </div>
       </div>
@@ -74,7 +64,8 @@
           {% else %}
             <p class="muted">No members. Add a user to this group from their page.</p>
           {% endif %}
-          <p class="muted">Membership is managed per-user (open a member, or any user, to add/remove groups).</p>
+          <p class="muted">Membership is managed per user (open a member, or any user, to add/remove groups).
+            {% if canonical and canonical.elevation_only %}Changing <code>{{ group.id }}</code> membership requires a live elevation.{% endif %}</p>
         </section>
       </div>
     {% endif %}

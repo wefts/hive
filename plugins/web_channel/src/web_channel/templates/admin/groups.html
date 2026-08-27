@@ -6,47 +6,18 @@
   </aside>
 
   <main class="main stack">
-    {% set baseline = (kernel_groups | selectattr('id', 'equalto', baseline_group) | first) if (kernel_groups and baseline_group) else none %}
-    {% if baseline_group %}
-    <div class="card">
-      <header>
-        <h2 class="card-title">Baseline access <span class="badge">Everyone</span></h2>
-      </header>
-      <section>
-        <p class="muted">What <strong>every authenticated user</strong> can see — the
-          <code>{{ baseline_group }}</code> group's scopes, inherited by all. Keep it narrow;
-          <code>private</code> is never grantable.</p>
-        {% if baseline is none %}
-          <p class="muted"><span class="badge status-warn">baseline group not found</span>
-            No <code>{{ baseline_group }}</code> group in the kernel yet.</p>
-        {% else %}
-          <p>Current: {{ baseline.granted_scopes|join(', ') if baseline.granted_scopes else 'public only' }}</p>
-          <form method="post" action="/admin/kernel/group" autocomplete="off">
-            <input type="hidden" name="csrf" value="{{ csrf_token }}">
-            <input type="hidden" name="group_id" value="{{ baseline.id }}">
-            <input type="hidden" name="op" value="set_scopes">
-            <div class="baseline-scopes">
-              {% for s in scope_options %}
-                <label class="menu-check"><input type="checkbox" name="scopes" value="{{ s }}"{% if s in baseline.granted_scopes %} checked{% endif %}> {{ s }}</label>
-              {% endfor %}
-            </div>
-            <button class="btn" type="submit">Set baseline scopes</button>
-          </form>
-        {% endif %}
-      </section>
-    </div>
-    {% endif %}
-
     <div class="card">
       <header>
         <h2 class="card-title">Groups <span class="badge status-warn">kernel truth</span></h2>
         <span class="badge">fixed set</span>
       </header>
       <section>
-        <p class="muted">Exactly three groups: <code>Superuser</code>, <code>Admins</code>,
-          <code>Everyone</code>. Roles attach to the group (never to a person); connectors
-          (source scopes) attach to the group. Membership + per-group connectors are managed
-          on each group's page.</p>
+        <p class="muted">Exactly three groups: <code>wheel</code> (local-only; members may
+          <em>elevate</em>), <code>admins</code> (confers <code>admin</code>), <code>staff</code>
+          (the default internal cohort, no role). <strong>Groups never grant visibility</strong> —
+          knowledge access is <a class="navlink" href="/admin/projects">Project</a> membership, and a
+          group can be a Project member. Membership is managed on each user's page;
+          <code>wheel</code> only under an elevation.</p>
         {% if kernel_groups is none %}
           <p class="muted"><span class="badge status-warn">kernel groups unavailable</span>
             Could not list groups right now.</p>
@@ -54,19 +25,19 @@
           <div class="table-container">
             <table class="table">
               <thead>
-                <tr><th>Group</th><th>Members</th><th>Role</th><th>Connectors (scopes)</th></tr>
+                <tr><th>Group</th><th>Members</th><th>Confers</th><th>Managed</th></tr>
               </thead>
               <tbody>
                 {% for g in kernel_groups %}
+                  {% set c = canonical.get(g.id) %}
                   <tr>
                     <td>
                       <a href="/admin/groups/{{ g.id }}">{{ g.name or g.id }}</a>
-                      {% if baseline_group and g.id == baseline_group %}<span class="badge">baseline</span>{% endif %}
                       <div class="muted mono-wrap"><code>{{ g.id }}</code></div>
                     </td>
                     <td>{{ g.member_count }}</td>
-                    <td>{{ g.granted_roles|join(', ') if g.granted_roles else '—' }}</td>
-                    <td class="mono-wrap">{{ g.granted_scopes|join(', ') if g.granted_scopes else '—' }}</td>
+                    <td>{{ g.granted_roles|join(', ') if g.granted_roles else (c.role if c else '—') }}</td>
+                    <td class="muted">{% if c and c.elevation_only %}elevation · local users only{% else %}manage_access{% endif %}</td>
                   </tr>
                 {% else %}
                   <tr><td colspan="4" class="muted">no groups yet</td></tr>

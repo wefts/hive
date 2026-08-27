@@ -62,4 +62,4 @@ async def test_real_token_maps_to_principal(username, expected_scopes, expected_
     principal = auth.principal_from_claims(_claims(await _id_token(username)))
     assert principal.viewer == username
     assert principal.scopes == expected_scopes
-    assert principal.is_groot == expected_groot
+    assert principal.is_admin == expected_groot

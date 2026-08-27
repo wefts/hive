@@ -46,7 +46,16 @@ facts =
         "OR key LIKE 'who:service:%'"
     )
 
-    anchor = %{id: Store.upsert_node("source", origin, scope: "group"), scope: "group"}
+    # ADR-20: every who node/edge lives at the registered directory Source's scope
+    # (`src:<uuid>`), never a label. WHO_SOURCE_ID picks the instance; default = the
+    # single `ldap` Source.
+    who_scope =
+      case System.get_env("WHO_SOURCE_ID") do
+        nil -> Swarm.Projects.scope_by_kind!("ldap")
+        id -> Swarm.Projects.scope!(id)
+      end
+
+    anchor = %{id: Store.upsert_node("source", origin, scope: who_scope), scope: who_scope}
 
     edge_ids =
       WhoMap.write(anchor, facts, origin <> ":facts",
@@ -58,20 +67,20 @@ facts =
 
     written =
       Enum.reduce(profiles, 0, fn prof, acc ->
-        case WhoMap.write_profile(prof, origin <> ":profile") do
+        case WhoMap.write_profile(prof, origin <> ":profile", scope: who_scope) do
           :error -> acc
           _id -> acc + 1
         end
       end)
 
       Enum.each(groups, fn g ->
-        WhoMap.write_group(g["slug"], g["name"] || g["slug"], g["aliases"] || [])
+        WhoMap.write_group(g["slug"], g["name"] || g["slug"], g["aliases"] || [], who_scope)
       end)
 
       services = Map.get(decoded, "services", [])
       teams = Map.get(decoded, "teams", [])
-      Enum.each(teams, fn tm -> WhoMap.write_group(tm["slug"], tm["name"] || tm["slug"], []) end)
-      Enum.each(services, fn s -> WhoMap.write_service(s["slug"], s["name"] || s["slug"], s["aliases"] || []) end)
+      Enum.each(teams, fn tm -> WhoMap.write_group(tm["slug"], tm["name"] || tm["slug"], [], who_scope) end)
+      Enum.each(services, fn s -> WhoMap.write_service(s["slug"], s["name"] || s["slug"], s["aliases"] || [], who_scope) end)
 
       {written, length(edge_ids), services}
     end,
