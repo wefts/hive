@@ -67,7 +67,7 @@ groot_id = "01920000-0000-7000-8000-00000000da7a"
 IO.puts("groot -> #{groot.id} (#{groot.status}), wheel + admins")
 
 # --- existing LOCAL users (web_channel's own credential store) -------------
-# `login != "groot"` guards against double-provisioning: seed_superadmin above
+# `login != "groot"` guards against double-provisioning: seed_wheel above
 # already claims identity_link(local, "groot") — if the channel ALSO has a local
 # user literally named "groot", upsert_from_claims for it would collide on the
 # (provider, subject) unique constraint. Any OTHER is_groot local user joins

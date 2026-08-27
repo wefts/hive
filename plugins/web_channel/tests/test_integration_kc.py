@@ -1,11 +1,11 @@
 """Integration checks against a LIVE local Keycloak (excluded by default — run with
 `uv run pytest -m integration` after `docker compose up -d keycloak`).
 
-Proves the realm + real tokens map to the right scopes through auth.py. Env
-(matches compose, host-side):
+Proves the realm + real tokens reach auth.py as a public-only principal whose groups are
+FORWARDED (the kernel derives scopes from Project membership — ADR-20; there is no
+channel-side group→scope map any more). Env (matches compose, host-side):
   KEYCLOAK_ADMIN_URL=http://localhost:8081 KEYCLOAK_REALM=swarm-local
   KEYCLOAK_ADMIN_USER=admin KEYCLOAK_ADMIN_PASSWORD=admin
-  GROUP_SCOPE_MAP='{"confluence":"group"}'
 """
 
 from __future__ import annotations
