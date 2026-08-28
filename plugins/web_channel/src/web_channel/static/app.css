@@ -101,12 +101,25 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
   background: var(--card);
 }
 .app-sidebar header { padding: 1.25rem 1rem 0.75rem; display: grid; gap: 0.15rem; }
-.app-sidebar nav { padding: 0.25rem 0.6rem 1rem; overflow-y: auto; flex: 1; }
+.app-sidebar nav {
+  padding: 0.25rem 0.6rem 1rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+}
 .app-nav-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.15rem; }
-.app-nav-section { margin-top: 1.35rem; }
-.app-nav-section h2 {
-  margin: 0 0 0.35rem;
-  padding: 0 0.55rem;
+.app-nav-tree > li { min-width: 0; }
+.app-nav-parent { display: grid; gap: 0.35rem; }
+.app-nav-children {
+  min-width: 0;
+  margin: 0.15rem 0 0.8rem 0.65rem;
+  padding-left: 0.65rem;
+  border-left: 1px solid var(--border);
+}
+.app-nav-label {
+  display: block;
+  margin: 0.1rem 0 0.25rem;
+  padding: 0 0.35rem;
   color: var(--muted-foreground);
   font-size: 0.76rem;
   line-height: 1.4;
@@ -121,6 +134,7 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
   color: var(--foreground);
   font-size: 0.94rem;
   font-weight: 500;
+  min-width: 0;
 }
 .app-nav-list a:hover { background: var(--accent); text-decoration: none; }
 .app-nav-list a[aria-current=page] { background: var(--accent); font-weight: 650; }
@@ -173,7 +187,7 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
   .app-sidebar header { padding-bottom: 0.35rem; }
   .app-sidebar nav { padding-top: 0; }
   .app-primary-nav { grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); }
-  .app-nav-section { display: none; }
+  .app-nav-children { display: none; }
   .app-sidebar footer { display: none; }
   .app-main { min-height: auto; }
   .app-bar { padding-inline: 1rem; }

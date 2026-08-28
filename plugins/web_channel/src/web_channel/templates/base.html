@@ -28,24 +28,26 @@
             <span class="muted">Operator console</span>
           </header>
           <nav aria-label="Application sections">
-            <ul class="app-nav-list app-primary-nav">
-              <li><a href="/"{% if current_path == '/' or current_path.startswith('/p/') %} aria-current="page"{% endif %}>Chat</a></li>
+            <ul class="app-nav-list app-primary-nav app-nav-tree">
+              <li class="app-nav-parent">
+                <a href="/"{% if current_path == '/' or current_path.startswith('/p/') %} aria-current="page"{% endif %}>Chat</a>
+                <div class="app-nav-children" aria-label="Chat history">
+                  <span class="app-nav-label">Recent conversations</span>
+                  <ul class="app-nav-list app-recent-list">
+                    {% if recent is defined and recent %}
+                      {% for r in recent[:5] %}
+                        <li><a class="app-nav-recent" href="/p/{{ r.slug }}">{{ r.title }}</a></li>
+                      {% endfor %}
+                    {% endif %}
+                    <li><a href="/history"{% if current_path.startswith('/history') %} aria-current="page"{% endif %}>All history</a></li>
+                  </ul>
+                </div>
+              </li>
               <li><a href="/dashboard"{% if current_path.startswith('/dashboard') %} aria-current="page"{% endif %}>Dashboard</a></li>
               {% if principal and principal.is_admin %}
                 <li><a href="/admin">Admin console</a></li>
               {% endif %}
             </ul>
-            <section class="app-nav-section" aria-labelledby="app-recent-title">
-              <h2 id="app-recent-title">Recent conversations</h2>
-              <ul class="app-nav-list app-recent-list">
-                {% if recent is defined and recent %}
-                  {% for r in recent[:5] %}
-                    <li><a class="app-nav-recent" href="/p/{{ r.slug }}">{{ r.title }}</a></li>
-                  {% endfor %}
-                {% endif %}
-                <li><a href="/history"{% if current_path.startswith('/history') %} aria-current="page"{% endif %}>All history</a></li>
-              </ul>
-            </section>
           </nav>
           {% if principal %}
             <footer>
