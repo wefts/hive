@@ -1,33 +1,29 @@
 {% extends "base.html" %}
-{# Admin console shell (Keycloak/Rancher pattern): a fixed left Basecoat .sidebar
-   (brand · section groups · elevation + account footer) and ONE main column with a
-   slim bar (breadcrumb / account) and the page. Basecoat's sidebar JS is not
-   vendored, so the rail is rendered open (`data-sidebar-initialized`) and below
-   48rem app.css swaps it for the plain horizontal `.admin-topnav`. #}
+{# Admin console shell: app-owned layout; Basecoat supplies components only. #}
 {% set nav_groups = [
   ('Manage', [('hub', 'Overview', '/admin'), ('projects', 'Projects', '/admin/projects')]),
   ('Access', [('users', 'Users', '/admin/users'), ('groups', 'Groups', '/admin/groups'), ('roles', 'Roles', '/admin/roles')]),
   ('Configuration', [('auth', 'Auth Provider', '/admin/auth'), ('connectors', 'Connectors', '/admin/connectors'), ('tools', 'Tools', '/admin/tools')]),
 ] %}
 {% block body %}
-<aside id="sidebar" class="sidebar" data-side="left" data-sidebar-initialized>
-  <nav aria-label="Admin sections">
+<div class="admin-shell">
+  <aside class="admin-sidebar">
     <header>
       <a class="brand" href="/">swarm</a>
       <span class="muted">Admin console</span>
     </header>
-    <section class="scrollbar-sm">
+    <nav aria-label="Admin sections">
       {% for title, items in nav_groups %}
-        <div role="group" aria-labelledby="nav-{{ loop.index }}">
-          <h3 id="nav-{{ loop.index }}">{{ title }}</h3>
-          <ul>
+        <section class="admin-nav-group" aria-labelledby="admin-nav-{{ loop.index }}">
+          <span class="admin-nav-title" id="admin-nav-{{ loop.index }}">{{ title }}</span>
+          <ul class="admin-nav-list">
             {% for key, label, href in items %}
               <li><a href="{{ href }}"{% if admin_section == key %} aria-current="page"{% endif %}><span>{{ label }}</span></a></li>
             {% endfor %}
           </ul>
-        </div>
+        </section>
       {% endfor %}
-    </section>
+    </nav>
     <footer>
       {% if is_elevated %}
         <p><span class="badge status-warn">elevated</span> <span class="muted">until <time datetime="{{ elevation_expires_at }}">{{ elevation_expires_at[11:19] }}</time></span></p>
@@ -40,23 +36,24 @@
       {% endif %}
       <p class="muted">{{ principal.display or principal.viewer }}{% if principal.groups %} · {{ principal.groups|join(', ') }}{% endif %}</p>
     </footer>
-  </nav>
-</aside>
+  </aside>
 
-<main class="admin-main">
-  <div class="admin-bar">
-    <nav class="admin-topnav" aria-label="Admin sections (compact)">
-      {% for title, items in nav_groups %}{% for key, label, href in items %}
-        <a href="{{ href }}"{% if admin_section == key %} aria-current="page"{% endif %}>{{ label }}</a>
-      {% endfor %}{% endfor %}
-    </nav>
-    <span class="spacer"></span>
-    <button class="btn" data-variant="ghost" data-size="sm" @click="palette = true" title="Search memories (⌘K)">⌘K search</button>
-    <a class="btn" data-variant="ghost" data-size="sm" href="/">Open app</a>
-    <a class="btn" data-variant="ghost" data-size="sm" href="/logout">Logout</a>
-  </div>
-  <div class="admin-content">
-    {% block admin %}{% endblock %}
-  </div>
-</main>
+  <main class="admin-main">
+    <div class="admin-bar">
+      <div class="admin-bar-inner">
+        <span class="spacer"></span>
+        <button class="btn" data-variant="ghost" data-size="sm" @click="palette = true" title="Search memories (⌘K)">⌘K search</button>
+        <a class="btn" data-variant="ghost" data-size="sm" href="/logout">Logout</a>
+      </div>
+    </div>
+    <div class="admin-content">
+      <nav class="admin-mobile-nav" aria-label="Admin sections">
+        {% for title, items in nav_groups %}{% for key, label, href in items %}
+          <a href="{{ href }}"{% if admin_section == key %} aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}{% endfor %}
+      </nav>
+      {% block admin %}{% endblock %}
+    </div>
+  </main>
+</div>
 {% endblock %}

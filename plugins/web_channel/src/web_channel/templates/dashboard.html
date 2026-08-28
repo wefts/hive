@@ -5,57 +5,61 @@
    is still a thin renderer — every datum comes from a scope-enforcing Core RPC. #}
 {{ page_head('How the swarm thinks', 'State of memory, a bounded connections explorer, and the live activity feed — all scope-filtered by the kernel.') }}
 
-<div class="dash">
-  <!-- Stats: full KbStatus, loaded async so the page never blocks on the kernel. -->
-  <div hx-get="/tile/status" hx-trigger="load">
-    <div class="card"><header><h3>State of my memory</h3></header><section><span class="muted">loading…</span></section></div>
-  </div>
-
+<div class="dash-console">
   <!-- Graph: a bounded, scope-filtered connections explorer (Neighborhood RPC,
        ≤50 nodes / depth ≤2), rendered with the vendored Cytoscape. Search an entity,
        click a node to expand. -->
-  <div class="card">
+  <div class="card dash-graph-card">
     <header>
-      <h3>Connections</h3>
-      <p>Search an entity, then click any node to expand its connections.</p>
+      <h2>Memory graph</h2>
+      <p>Search an entity, then click a node to walk its visible neighborhood.</p>
+      <span class="card-action badge" data-variant="outline">scope-filtered</span>
     </header>
     <section>
-      <form class="compose" onsubmit="return swarmGraph.search(event)" autocomplete="off">
+      <form class="graph-search" onsubmit="return swarmGraph.search(event)" autocomplete="off">
         <input class="input q" id="graph-q" type="text" placeholder="Search an entity to explore its connections…"
                autocomplete="off" aria-label="graph search">
         <button class="btn" type="submit">Search</button>
       </form>
       <ul id="graph-hits" class="hits"></ul>
       <div id="graph-meta" class="meta"></div>
-      <div id="cy" class="cy-canvas" role="img" aria-label="connections graph"></div>
-      <p id="graph-empty" class="muted">No entity selected yet.</p>
+      <div class="graph-stage">
+        <div id="cy" class="cy-canvas" role="img" aria-label="connections graph"></div>
+        <p id="graph-empty" class="graph-empty muted">No entity selected yet.</p>
+      </div>
     </section>
   </div>
 
-  <!-- Activity: the scope-safe ActivityFeed, polled with an opaque cursor (HTMX OOB). -->
-  <div class="card">
-    <header>
-      <h3>Activity</h3>
-      <p>Live · thin slice (ingest writes). Richer worker outcomes (entity-resolution, enrichment)
-        appear once the cognitive loop runs.</p>
-    </header>
-    <section>
-      <ul id="activity-events" class="act-list"></ul>
-      <span id="activity-poller"
-            hx-get="/activity?cursor=" hx-trigger="load"
-            hx-target="#activity-events" hx-swap="beforeend"></span>
-    </section>
-  </div>
+  <aside class="dash-rail">
+    <!-- Stats: full KbStatus, loaded async so the page never blocks on the kernel. -->
+    <div hx-get="/tile/status" hx-trigger="load">
+      <div class="card"><header><h3>State of my memory</h3></header><section><span class="muted">loading…</span></section></div>
+    </div>
 
-  <div class="card">
-    <header>
-      <h3>What changed · open questions · needs you</h3>
-    </header>
-    <section>
-      <p class="muted">Not available yet — needs the <code>Brief</code> kernel RPC and a running
-        cognitive loop. Shown honestly rather than faked.</p>
-    </section>
-  </div>
+    <!-- Activity: the scope-safe ActivityFeed, polled with an opaque cursor (HTMX OOB). -->
+    <div class="card">
+      <header>
+        <h3>Activity</h3>
+        <p>Live ingest and worker events visible to the current actor.</p>
+      </header>
+      <section>
+        <ul id="activity-events" class="act-list"></ul>
+        <span id="activity-poller"
+              hx-get="/activity?cursor=" hx-trigger="load"
+              hx-target="#activity-events" hx-swap="beforeend"></span>
+      </section>
+    </div>
+
+    <div class="card">
+      <header>
+        <h3>Needs attention</h3>
+      </header>
+      <section>
+        <p class="muted">Not available yet — needs the <code>Brief</code> kernel RPC and a running
+          cognitive loop. Shown honestly rather than faked.</p>
+      </section>
+    </div>
+  </aside>
 </div>
 
 <!-- Vendored, offline (see vendor/VENDORING.md). Loaded only on the dashboard. -->

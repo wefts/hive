@@ -5,13 +5,13 @@
    history lives in the SIDEBAR ("Recent conversations"), never as a wall here --
    clicking one loads that post (with its thread) into the feed. Observability
    (full stats, activity, graph) lives on /dashboard. #}
-<div class="layout">
-  <aside class="aside-col">
+<div class="home-layout">
+  <aside class="home-sidebar">
     {# One active chat per view (operator, 2026-07-08): the compose shows only while
        the feed is empty; a fresh topic starts HERE. A plain navigation — the feed
        resets to its start state, past threads stay one click away below. #}
     <a class="btn new-chat" href="/">New chat</a>
-    <div class="card">
+    <div class="card recent-card">
       <header><h3>Recent conversations</h3></header>
       <section>
         {% if recent %}
@@ -30,14 +30,13 @@
       </section>
     </div>
 
-    <!-- State of my memory: real KbStatus, loaded async so the page never blocks. -->
-    <div hx-get="/tile/status" hx-trigger="load">
+    <div class="home-memory" hx-get="/tile/status" hx-trigger="load">
       <div class="card"><header><h3>State of my memory</h3></header><section><span class="muted">loading…</span></section></div>
     </div>
   </aside>
 
-  <main class="main">
-    <form class="compose" hx-post="/ask/start" hx-target="#feed" hx-swap="beforeend"
+  <main class="main home-main">
+    <form class="compose home-compose" hx-post="/ask/start" hx-target="#feed" hx-swap="beforeend"
           hx-on::after-request="if(event.detail.successful) this.reset()" autocomplete="off">
       {# Basecoat .textarea auto-grows (field-sizing: content). Chat keys, the
          Mattermost standard: Enter sends, Shift+Enter is a newline — and Enter
@@ -57,8 +56,12 @@
       {% if post %}
         {% include "_post_object.html" %}
       {% else %}
-        <p class="invite-msg">Ask the swarm a question above — or pick a past conversation on the left.
-          See how it thinks on the <a href="/dashboard">dashboard</a>.</p>
+        <div class="invite-msg card">
+          <section>
+            <p>Ask the swarm a question above, or pick a past conversation on the left.</p>
+            <p class="muted">The dashboard shows memory state, graph exploration, and live activity.</p>
+          </section>
+        </div>
       {% endif %}
     </section>
   </main>
