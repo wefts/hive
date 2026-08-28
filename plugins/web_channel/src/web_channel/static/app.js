@@ -15,3 +15,27 @@ document.addEventListener("click", function (e) {
     window.location.assign(href);
   }
 });
+
+function scrollToAskFragment(fragment, block) {
+  if (!fragment) return;
+  var behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+  fragment.scrollIntoView({ behavior: behavior, block: block || "center" });
+}
+
+document.body.addEventListener("htmx:afterSwap", function (e) {
+  var path = e.detail && e.detail.requestConfig && e.detail.requestConfig.path;
+  if (!path) return;
+
+  if (path.endsWith("/ask/start")) {
+    var pending = e.detail.target && e.detail.target.querySelector(".post-pending:last-child");
+    scrollToAskFragment(pending, "nearest");
+    return;
+  }
+
+  if (path.endsWith("/ask")) {
+    var replies = document.querySelectorAll(".post-reply:not(.post-pending)");
+    var posts = document.querySelectorAll(".post-object:not(.post-pending)");
+    var latest = replies.length ? replies[replies.length - 1] : posts[posts.length - 1];
+    scrollToAskFragment((latest && latest.querySelector(".post-answer")) || latest, "center");
+  }
+});
