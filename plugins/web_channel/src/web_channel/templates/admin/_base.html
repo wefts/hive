@@ -14,14 +14,14 @@
     </header>
     <nav aria-label="Admin sections">
       {% for title, items in nav_groups %}
-        <section class="admin-nav-group" aria-labelledby="admin-nav-{{ loop.index }}">
-          <span class="admin-nav-title" id="admin-nav-{{ loop.index }}">{{ title }}</span>
+        <details class="admin-nav-group" open>
+          <summary>{{ title }}</summary>
           <ul class="admin-nav-list">
             {% for key, label, href in items %}
               <li><a href="{{ href }}"{% if admin_section == key %} aria-current="page"{% endif %}><span>{{ label }}</span></a></li>
             {% endfor %}
           </ul>
-        </section>
+        </details>
       {% endfor %}
     </nav>
     <footer>
