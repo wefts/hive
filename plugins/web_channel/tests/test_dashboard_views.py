@@ -5,6 +5,8 @@ passthrough, and the opaque-cursor poll loop."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from web_channel import auth, core_client
@@ -190,6 +192,8 @@ def test_dashboard_page_renders_graph_and_vendored_cytoscape(monkeypatch) -> Non
     assert '<h1 class="page-title">Memory Map</h1>' in r.text
     assert 'class="memory-map"' in r.text
     assert 'id="selected-node-panel"' in r.text
+    assert 'id="visible-relations"' in r.text
+    assert "Visible relations" in r.text
     assert 'role="status" aria-live="polite"' in r.text
     assert 'id="cy"' in r.text  # the graph canvas
     assert "/static/vendor/cytoscape.min.js" in r.text  # vendored, offline
@@ -198,6 +202,14 @@ def test_dashboard_page_renders_graph_and_vendored_cytoscape(monkeypatch) -> Non
     assert 'hx-get="/tile/status"' in r.text  # full stats here
     # offline invariant: no external URL in the <head>
     assert "https://" not in r.text.split("<body")[0].replace("initial-scale", "")
+
+
+def test_dashboard_script_uses_rail_relations_not_canvas_edge_labels() -> None:
+    js = (Path(__file__).parents[1] / "src/web_channel/static/dashboard.js").read_text()
+    assert 'label: "data(relation)"' not in js  # topology only on the canvas
+    assert "function renderVisibleRelations(c)" in js
+    assert "c.edges()" in js  # the rail mirrors the canvas, not the last fetch
+    assert "relationMetrics" in js
 
 
 def test_dashboard_search_json_scoped(monkeypatch) -> None:

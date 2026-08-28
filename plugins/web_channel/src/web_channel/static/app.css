@@ -838,7 +838,14 @@ div.thinking.live { display: flex; align-items: center; gap: 0.6rem; padding: 0.
   align-content: start;
   gap: 0.75rem;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto; /* bound to the console: never overlap the lower telemetry */
+  scrollbar-width: thin;
 }
+/* the rail is ~21rem wide: a narrower label column keeps kv panels short */
+.dash-rail .kv > div { grid-template-columns: minmax(5.5rem, 7rem) minmax(0, 1fr); padding: 0.4rem 0; }
+/* relations are itemised in the Visible relations panel; here they are a one-line index */
+#graph-relations { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-lower {
   display: grid;
   grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
@@ -854,9 +861,9 @@ div.thinking.live { display: flex; align-items: center; gap: 0.6rem; padding: 0.
 .rail-panel,
 .dash-rail > .card {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.65rem;
   min-width: 0;
-  padding-block: 0.9rem;
+  padding-block: 0.8rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--card);
@@ -873,9 +880,88 @@ div.thinking.live { display: flex; align-items: center; gap: 0.6rem; padding: 0.
   font-size: 0.95rem;
   font-weight: 650;
 }
+.node-summary {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.node-summary-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+.node-summary-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.98rem;
+}
+.node-summary-head .badge {
+  flex: 0 0 auto;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-key {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
 .node-kv dd {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   line-height: 1.45;
+}
+.visible-relations {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+}
+/* one edge = two lines: the source key, then "-> relation -> target" with metrics.
+   Every cell truncates with an ellipsis (full text on hover) so 1-2 edges read
+   cleanly in a narrow rail and nothing overflows. */
+.visible-relations li {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.visible-relations li:last-child { border-bottom: 0; }
+.rel-line {
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+  min-width: 0;
+}
+.rel-source,
+.rel-target,
+.rel-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rel-source { color: var(--foreground); font-weight: 550; }
+.rel-target { flex: 1 1 auto; }
+.rel-name {
+  flex: 0 1 auto;
+  max-width: 11rem;
+  color: var(--link);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.rel-arrow { flex: 0 0 auto; color: var(--muted-foreground); }
+.rel-metrics {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 0.5rem;
+  color: var(--muted-foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 @media (max-width: 68rem) {
   .dash-console { grid-template-columns: 1fr; height: auto; }

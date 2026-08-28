@@ -24,10 +24,7 @@
         "underlay-opacity": 0.18, "underlay-padding": 7 } },
     { selector: "edge", style: {
         width: "data(width)", "line-color": "#3a4452", "target-arrow-color": "#3a4452",
-        "target-arrow-shape": "triangle", "curve-style": "bezier",
-        label: "data(relation)", "font-size": 10, color: "#8b95a4",
-        "text-rotation": "none", "text-background-color": "#0b0e14",
-        "text-background-opacity": 0.7, "text-background-padding": 2 } },
+        "target-arrow-shape": "triangle", "curve-style": "bezier" } },
   ];
 
   var cy = null;
@@ -117,6 +114,7 @@
           selectNode(addNode(c, normalizeNode(seed, 0, true)));
           layoutGraph(c);
         }
+        renderVisibleRelations(c);
         return;
       }
       if (!expand) { c.elements().remove(); }
@@ -140,6 +138,7 @@
       selectNode(c.getElementById(String(id)));
       layoutGraph(c);
       updateMeta(g);
+      renderVisibleRelations(c);
       setText("graph-status", "Showing visible neighborhood for #" + g.center_id + ".");
     } catch (e) {
       setText("graph-status", "Graph unavailable.");
@@ -190,23 +189,72 @@
   }
 
   function renderSelected(data) {
+    var summary = document.getElementById("selected-node-summary");
     var kv = document.getElementById("selected-node-kv");
-    if (!kv) return;
+    if (!summary || !kv) return;
+    var title = data.key || data.label || ("#" + data.id);
+    setText("selected-node-title", title);
+    var titleEl = document.getElementById("selected-node-title");
+    if (titleEl) titleEl.title = title;
+    setText("selected-node-type", data.type || "node");
+    setText("selected-node-key", "#" + data.id + (data.key && data.key !== title ? " · " + data.key : ""));
     var rows = [
-      ["id", data.id],
-      ["key", data.key || data.label],
-      ["type", data.type],
-      ["scope", data.scope],
       ["confidence", formatNumber(data.confidence)],
       ["depth", data.depth],
+      ["scope", data.scope],
     ].filter(function (row) {
       return row[1] !== undefined && row[1] !== null && row[1] !== "";
     });
     kv.innerHTML = rows.map(function (row) {
       return "<div><dt>" + escapeHtml(row[0]) + "</dt><dd>" + escapeHtml(row[1]) + "</dd></div>";
     }).join("");
-    setHidden("selected-node-empty", rows.length > 0);
-    kv.hidden = rows.length === 0;
+    setHidden("selected-node-empty", true);
+    summary.hidden = false;
+  }
+
+  // The rail mirrors the CANVAS, not the last fetch: after a tap-to-expand the
+  // list must still cover every edge drawn, and a not-found expand must not wipe it.
+  function renderVisibleRelations(c) {
+    var list = document.getElementById("visible-relations");
+    if (!list) return;
+    var rows = c.edges().map(function (e) {
+      return {
+        source: nodeName(c, e.data("source")),
+        relation: e.data("relation") || "related",
+        target: nodeName(c, e.data("target")),
+        metrics: relationMetrics(e.data()),
+      };
+    }).sort(function (a, b) {
+      return (a.source + "\u0000" + a.relation + "\u0000" + a.target)
+        .localeCompare(b.source + "\u0000" + b.relation + "\u0000" + b.target);
+    });
+    list.innerHTML = "";
+    rows.forEach(function (row) {
+      var li = document.createElement("li");
+      li.innerHTML =
+        cell("rel-source", row.source) +
+        '<span class="rel-line">' +
+          '<span class="rel-arrow" aria-hidden="true">&rarr;</span>' +
+          cell("rel-name", row.relation) +
+          '<span class="rel-arrow" aria-hidden="true">&rarr;</span>' +
+          cell("rel-target", row.target) +
+          (row.metrics ? cell("rel-metrics", row.metrics) : "") +
+        "</span>";
+      list.appendChild(li);
+    });
+    setHidden("visible-relations-empty", rows.length > 0);
+    list.hidden = rows.length === 0;
+  }
+
+  function cell(cls, text) {
+    var t = escapeHtml(text);
+    return '<span class="' + cls + '" title="' + t + '">' + t + "</span>";
+  }
+
+  function nodeName(c, id) {
+    var n = c.getElementById(String(id));
+    if (!n.length) return "#" + id;
+    return n.data("key") || n.data("label") || ("#" + id);
   }
 
   function updateMeta(g) {
@@ -217,6 +265,8 @@
     setText("graph-node-count", String(nodes.length + (g.center_id ? 1 : 0)));
     setText("graph-edge-count", String(edges.length));
     setText("graph-relations", relations.length ? relations.join(", ") : "none");
+    var relEl = document.getElementById("graph-relations");
+    if (relEl) relEl.title = relations.join(", ");
     setText("graph-bounds", g.truncated ? "truncated by kernel bounds" : "visible neighborhood");
   }
 
@@ -253,6 +303,13 @@
   function formatNumber(value) {
     if (typeof value !== "number") return "";
     return value.toFixed(2);
+  }
+
+  function relationMetrics(edge) {
+    var parts = [];
+    if (typeof edge.reliability === "number") parts.push("rel " + formatNumber(edge.reliability));
+    if (typeof edge.confidence === "number") parts.push("conf " + formatNumber(edge.confidence));
+    return parts.join(" · ");
   }
 
   function layoutGraph(c) {

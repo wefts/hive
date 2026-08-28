@@ -34,7 +34,24 @@
       </header>
       <section>
         <p id="selected-node-empty" class="muted">Select a node in the map to inspect available fields.</p>
-        <dl id="selected-node-kv" class="kv node-kv" hidden></dl>
+        <div id="selected-node-summary" class="node-summary" hidden>
+          <div class="node-summary-head">
+            <strong id="selected-node-title"></strong>
+            <span id="selected-node-type" class="badge" data-variant="outline"></span>
+          </div>
+          <div id="selected-node-key" class="node-key muted"></div>
+          <dl id="selected-node-kv" class="kv node-kv"></dl>
+        </div>
+      </section>
+    </div>
+
+    <div class="rail-panel visible-relations-panel">
+      <header>
+        <h3>Visible relations</h3>
+      </header>
+      <section>
+        <p id="visible-relations-empty" class="muted">No visible relations loaded.</p>
+        <ul id="visible-relations" class="visible-relations" hidden></ul>
       </section>
     </div>
 
