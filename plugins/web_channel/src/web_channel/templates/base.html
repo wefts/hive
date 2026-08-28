@@ -71,6 +71,13 @@
                 </form>
                 <ul id="memory-search-results" class="hits header-search-results" aria-live="polite"></ul>
               {% endif %}
+              <span class="spacer"></span>
+              {% if principal %}
+                <button class="user-menu-button" type="button"
+                        title="{{ principal.display or principal.viewer }}" aria-label="User profile">
+                  {{ (principal.display or principal.viewer)[:1]|upper }}
+                </button>
+              {% endif %}
             </div>
           </div>
           <div class="app-content">
