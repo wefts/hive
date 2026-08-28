@@ -58,7 +58,21 @@
           {% endif %}
         </aside>
         <main id="main-content" class="app-main" tabindex="-1">
-          <div class="app-bar" aria-hidden="true"></div>
+          <div class="app-bar">
+            <div class="app-bar-inner">
+              {% if current_path == '/' or current_path.startswith('/p/') %}
+                <form class="header-search" role="search" autocomplete="off">
+                  <label class="sr-only" for="memory-search">Search memories</label>
+                  <input id="memory-search" class="input" type="search" name="q"
+                         placeholder="Search" autocomplete="off"
+                         hx-get="/search" hx-trigger="input changed delay:250ms, search"
+                         hx-target="#memory-search-results" hx-swap="innerHTML">
+                  <span class="header-search-hint" aria-hidden="true">⌘K</span>
+                </form>
+                <ul id="memory-search-results" class="hits header-search-results" aria-live="polite"></ul>
+              {% endif %}
+            </div>
+          </div>
           <div class="app-content">
     {% else %}
       <main id="main-content" class="auth-shell" tabindex="-1">
