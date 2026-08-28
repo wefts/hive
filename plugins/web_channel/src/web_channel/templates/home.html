@@ -16,7 +16,7 @@
       <textarea class="textarea q" name="q" rows="1" placeholder="Ask the swarm…"
                 autofocus required aria-label="question"
                 @keydown.enter="if (!$event.shiftKey && ($el.value.match(/```/g) || []).length % 2 === 0) { $event.preventDefault(); $el.form.requestSubmit() }"></textarea>
-      <button class="btn" type="submit">Ask</button>
+      <button class="btn compose-send" type="submit" aria-label="Ask">↑</button>
       <span class="htmx-indicator muted">…thinking</span>
     </form>
 

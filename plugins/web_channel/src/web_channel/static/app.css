@@ -37,6 +37,17 @@ html { font-size: 100%; }
 body { line-height: 1.6; }
 .muted { color: var(--muted-foreground); }
 :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .skip-link {
   position: fixed;
   left: 1rem;
@@ -175,6 +186,7 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
 .app-main { min-height: 100vh; min-width: 0; display: flex; flex-direction: column; }
 .app-bar {
   min-height: 4rem;
+  padding: 0 2rem;
   border-bottom: 1px solid var(--border);
 }
 .app-bar-inner {
@@ -212,10 +224,11 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
 .home-main { min-width: 0; }
 .header-search {
   position: relative;
-  width: min(100%, 44rem);
+  width: min(100%, 48rem);
 }
 .header-search .input {
   width: 100%;
+  height: 2.25rem;
   padding-right: 3.2rem;
 }
 .header-search-hint {
@@ -232,7 +245,7 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
   top: calc(100% + 0.45rem);
   left: 0;
   z-index: 20;
-  width: min(100%, 44rem);
+  width: min(100%, 48rem);
   max-height: min(24rem, 60vh);
   margin: 0;
   border: 1px solid var(--border);
@@ -241,13 +254,33 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
   box-shadow: 0 14px 36px rgba(0,0,0,0.38);
 }
 .header-search-results:empty { display: none; }
-.home-compose {
-  padding: 0.75rem;
+.compose.home-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: 1.25rem;
   background: var(--card);
 }
-.home-compose .q { min-width: 16rem; }
+.compose.home-compose .q {
+  min-width: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.compose.home-compose .q:focus-visible {
+  outline: 0;
+  border-color: transparent;
+}
+.compose-send {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 1rem;
+}
 .recent-card section { max-height: min(66vh, 42rem); overflow-y: auto; }
 .home-memory { display: none; }
 .invite-msg { max-width: 42rem; }
