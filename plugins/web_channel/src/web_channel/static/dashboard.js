@@ -53,7 +53,6 @@
     }
   }
 
-  function hide(id) { var el = document.getElementById(id); if (el) el.style.display = "none"; }
   function setText(id, t) { var el = document.getElementById(id); if (el) el.textContent = t; }
   function setHidden(id, value) { var el = document.getElementById(id); if (el) el.hidden = value; }
 
@@ -76,15 +75,14 @@
       data.hits.forEach(function (h) {
         var li = document.createElement("li");
         li.className = "hit";
-        var a = document.createElement("a");
+        var a = document.createElement("button");
+        a.type = "button";
         a.className = "hit-link";
-        a.href = "#";
+        a.title = h.key;
         a.innerHTML = '<span class="htype">' + escapeHtml(h.type) + "</span> " +
           '<span class="hkey">' + escapeHtml(h.key) + "</span>";
-        a.onclick = function (e) {
-          e.preventDefault();
-          hits.innerHTML = "";
-          hits.hidden = true;
+        a.onclick = function () {
+          closeHits();
           load(h.id, { id: h.id, key: h.key, type: h.type, score: h.score }, false);
         };
         li.appendChild(a);
@@ -100,7 +98,6 @@
 
   async function load(id, seed, expand) {
     var c = ensureCy();
-    hide("graph-empty");
     setText("graph-status", "Loading visible neighborhood...");
     try {
       var res = await fetch("/dashboard/graph/" + encodeURIComponent(id));
@@ -108,13 +105,13 @@
       if (g.status !== "found") {
         if (!expand) { c.elements().remove(); }
         setText("graph-status", g.status === "error" ? "Graph unavailable." : "Nothing connected to that entity is visible to you.");
-        updateMeta({ center_id: id, nodes: [], edges: [], relations: [], truncated: false });
         if (seed) {
           markCenter(c, String(id));
           selectNode(addNode(c, normalizeNode(seed, 0, true)));
-          layoutGraph(c);
         }
+        applyMode(c);
         renderVisibleRelations(c);
+        updateMeta({ center_id: id, truncated: false }, c);
         return;
       }
       if (!expand) { c.elements().remove(); }
@@ -136,8 +133,8 @@
       });
       markCenter(c, String(id));
       selectNode(c.getElementById(String(id)));
-      layoutGraph(c);
-      updateMeta(g);
+      applyMode(c);
+      updateMeta(g, c);
       renderVisibleRelations(c);
       setText("graph-status", "Showing visible neighborhood for #" + g.center_id + ".");
     } catch (e) {
@@ -257,13 +254,13 @@
     return n.data("key") || n.data("label") || ("#" + id);
   }
 
-  function updateMeta(g) {
-    var nodes = g.nodes || [];
-    var edges = g.edges || [];
-    var relations = g.relations || unique(edges.map(function (e) { return e.relation; }).filter(Boolean));
+  // Center/Bounds describe the kernel's answer; Nodes/Edges/Relations describe what
+  // is DRAWN, so the metadata agrees with the canvas and the rail after an expand.
+  function updateMeta(g, c) {
+    var relations = unique(c.edges().map(function (e) { return e.data("relation"); }).filter(Boolean));
     setText("graph-center", g.center_id ? "#" + g.center_id : "none");
-    setText("graph-node-count", String(nodes.length + (g.center_id ? 1 : 0)));
-    setText("graph-edge-count", String(edges.length));
+    setText("graph-node-count", String(c.nodes().length));
+    setText("graph-edge-count", String(c.edges().length));
     setText("graph-relations", relations.length ? relations.join(", ") : "none");
     var relEl = document.getElementById("graph-relations");
     if (relEl) relEl.title = relations.join(", ");
@@ -312,25 +309,55 @@
     return parts.join(" · ");
   }
 
-  function layoutGraph(c) {
+  function closeHits() {
+    var hits = document.getElementById("graph-hits");
+    if (!hits) return;
+    hits.innerHTML = "";
+    hits.hidden = true;
+  }
+
+  // The instrument adapts to what is actually drawn: one dot does not deserve a
+  // 30rem canvas, and two nodes do not deserve a zoomed-in one.
+  function modeFor(count) {
+    if (count === 0) return "empty";
+    if (count === 1) return "single";
+    if (count <= 4) return "small";
+    return "full";
+  }
+
+  function applyMode(c) {
+    var console_ = document.getElementById("dash-console");
+    var mode = modeFor(c ? c.nodes().length : 0);
+    if (console_) console_.dataset.mode = mode;
+    setHidden("map-guide", mode !== "empty");
+    setHidden("map-single", mode !== "single");
+    if (!c || mode === "empty" || mode === "single") return;
+    // the stage may have just changed size with the mode: let it settle first
+    window.requestAnimationFrame(function () {
+      c.resize();
+      layoutGraph(c, mode);
+    });
+  }
+
+  function layoutGraph(c, mode) {
     var nodes = c.nodes();
     var center = c.nodes(".center").first();
     var others = nodes.not(center);
-    var w = Math.max(c.width(), 480);
-    var h = Math.max(c.height(), 360);
+    var w = Math.max(c.width(), 320);
+    var h = Math.max(c.height(), 200);
     var cx = w / 2;
     var cyPos = h / 2;
     if (center.length) center.position({ x: cx, y: cyPos });
     if (nodes.length <= 10 && center.length) {
-      var radius = Math.max(150, Math.min(w, h) * 0.28);
+      // small: a tight ring (two nodes = one horizontal pair) at readable label distance
+      // a pair sits side by side: wide enough that two ~130px labels never collide
+      var radius = mode !== "small" ? Math.max(150, Math.min(w, h) * 0.28) : (others.length <= 2 ? 170 : 110);
       others.forEach(function (n, i) {
-        var angle = (-Math.PI / 2) + (2 * Math.PI * i / Math.max(others.length, 1));
-        n.position({
-          x: cx + Math.cos(angle) * radius,
-          y: cyPos + Math.sin(angle) * radius,
-        });
+        var angle = others.length <= 2 ? Math.PI * i : (-Math.PI / 2) + (2 * Math.PI * i / others.length);
+        n.position({ x: cx + Math.cos(angle) * radius, y: cyPos + Math.sin(angle) * radius });
       });
-      c.layout({ name: "preset", fit: true, padding: 72, animate: true, animationDuration: 220 }).run();
+      c.layout({ name: "preset", fit: false, animate: false }).run();
+      fitCapped(c);
       return;
     }
     c.layout({
@@ -338,11 +365,16 @@
       concentric: function (n) { return n.hasClass("center") ? 3 : 2 - Number(n.data("depth") || 1); },
       levelWidth: function () { return 1; },
       minNodeSpacing: 96,
-      fit: true,
-      padding: 72,
-      animate: true,
-      animationDuration: 250,
+      fit: false,
+      animate: false,
     }).run();
+    fitCapped(c);
+  }
+
+  // Fit the drawing, but never magnify it: a sparse graph stays at natural size.
+  function fitCapped(c) {
+    c.fit(undefined, 28);
+    if (c.zoom() > 1) { c.zoom(1); c.center(); }
   }
 
   function displayLabel(value, center) {
@@ -363,6 +395,9 @@
       trimActivity();
     }
   });
+
+  var q = document.getElementById("graph-q");
+  if (q) q.addEventListener("keydown", function (e) { if (e.key === "Escape") closeHits(); });
 
   window.swarmGraph = { search: search, load: load };
 })();

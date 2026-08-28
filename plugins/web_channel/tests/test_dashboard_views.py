@@ -194,6 +194,12 @@ def test_dashboard_page_renders_graph_and_vendored_cytoscape(monkeypatch) -> Non
     assert 'id="selected-node-panel"' in r.text
     assert 'id="visible-relations"' in r.text
     assert "Visible relations" in r.text
+    # adaptive modes: the page starts in the guided empty state, no blank canvas
+    assert 'id="dash-console" class="dash-console" data-mode="empty"' in r.text
+    assert 'id="map-guide"' in r.text and "Search by entity key or name" in r.text
+    assert 'id="map-single"' in r.text and "Only this entity is visible" in r.text
+    assert 'id="graph-empty"' not in r.text
+    assert 'aria-label="Search results"' in r.text
     assert 'role="status" aria-live="polite"' in r.text
     assert 'id="cy"' in r.text  # the graph canvas
     assert "/static/vendor/cytoscape.min.js" in r.text  # vendored, offline
@@ -210,6 +216,19 @@ def test_dashboard_script_uses_rail_relations_not_canvas_edge_labels() -> None:
     assert "function renderVisibleRelations(c)" in js
     assert "c.edges()" in js  # the rail mirrors the canvas, not the last fetch
     assert "relationMetrics" in js
+
+
+def test_dashboard_script_adapts_to_graph_size() -> None:
+    js = (Path(__file__).parents[1] / "src/web_channel/static/dashboard.js").read_text()
+    # empty / single / small / full thresholds, applied from the drawn node count
+    assert "function modeFor(count)" in js
+    for mode in ("empty", "single", "small", "full"):
+        assert f'return "{mode}"' in js
+    assert "console_.dataset.mode = mode" in js
+    assert "function fitCapped" in js and "c.zoom() > 1" in js  # never magnify a sparse graph
+    # search hits are real buttons (keyboard-operable), Escape closes the list
+    assert 'document.createElement("button")' in js
+    assert 'e.key === "Escape"' in js
 
 
 def test_dashboard_search_json_scoped(monkeypatch) -> None:

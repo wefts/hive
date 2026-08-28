@@ -5,7 +5,10 @@
    every datum comes from a scope-enforcing Core RPC/route already present today. #}
 {{ page_head('Memory Map', 'Search an entity, then expand the visible neighborhood from scope-filtered memory data.') }}
 
-<div class="dash-console">
+{# data-mode is set by dashboard.js from the number of nodes actually drawn:
+   empty (guidance, no canvas) / single (one entity, no canvas) / small (2-4 nodes:
+   compact canvas, relations first) / full (5+: the full Memory Map). #}
+<div id="dash-console" class="dash-console" data-mode="empty">
   <section class="memory-map" aria-labelledby="memory-map-title">
     <div class="map-toolbar">
       <h2 id="memory-map-title" class="sr-only">Visible memory</h2>
@@ -17,10 +20,21 @@
       </form>
       <span class="badge" data-variant="outline">scope-filtered</span>
     </div>
-    <ul id="graph-hits" class="hits graph-hits" aria-live="polite"></ul>
+    <ul id="graph-hits" class="hits graph-hits" aria-label="Search results" aria-live="polite"></ul>
+    <div id="map-guide" class="map-guide">
+      <h3>Search memory to draw a visible neighborhood</h3>
+      <ul class="guide-list">
+        <li>Search by entity key or name &mdash; a service, cluster, team, page, or person.</li>
+        <li>Pick a result to load what is connected to it. Everything shown is filtered to your scope.</li>
+        <li>Select a node to expand its neighborhood; the rail lists every relation drawn.</li>
+      </ul>
+    </div>
+    <div id="map-single" class="map-single muted" hidden>
+      Only this entity is visible: nothing connected to it is in your scope.
+      Its details are in the rail; search again to explore another entity.
+    </div>
     <div class="graph-stage">
       <div id="cy" class="cy-canvas" role="img" aria-label="Memory Map graph"></div>
-      <p id="graph-empty" class="graph-empty muted">Search memory to draw a visible neighborhood.</p>
     </div>
     <div id="graph-status" class="graph-status muted" role="status" aria-live="polite">
       No entity selected.

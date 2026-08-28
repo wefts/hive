@@ -816,16 +816,11 @@ div.thinking.live { display: flex; align-items: center; gap: 0.6rem; padding: 0.
 }
 /* Cytoscape needs an explicit height at init, or it renders into a 0px box. */
 .cy-canvas { height: 100%; min-height: 30rem; width: 100%; }
-.graph-empty {
-  position: absolute;
-  inset: auto 1rem 1rem;
-  margin: 0;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--card);
-  pointer-events: none;
-}
+/* empty / single-node states replace the canvas instead of leaving it blank */
+.map-guide { padding: 1.5rem 1.25rem 1.75rem; }
+.map-guide h3 { margin: 0 0 0.6rem; font-size: 1rem; font-weight: 650; }
+.guide-list { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.35rem; color: var(--muted-foreground); font-size: 0.9rem; }
+.map-single { padding: 1rem 1.25rem 1.25rem; font-size: 0.9rem; }
 .graph-status {
   min-height: 2.2rem;
   padding: 0.45rem 1rem;
@@ -852,7 +847,8 @@ div.thinking.live { display: flex; align-items: center; gap: 0.6rem; padding: 0.
   gap: 1rem;
   align-items: stretch;
 }
-.dash-lower > .rail-panel { min-height: 13rem; height: 100%; }
+.dash-lower > .rail-panel,
+.dash-lower > .card { min-height: 13rem; height: 100%; }
 .dash-lower .act-list {
   max-height: none;
   overflow: hidden;
@@ -963,12 +959,24 @@ div.thinking.live { display: flex; align-items: center; gap: 0.6rem; padding: 0.
   font-size: 0.76rem;
   white-space: nowrap;
 }
+/* --- adaptive modes (data-mode is set from the drawn node count) --------------- */
+.dash-console:not([data-mode="full"]) { height: auto; align-items: start; }
+.dash-console:not([data-mode="full"]) .memory-map { grid-template-rows: auto auto auto; align-content: start; }
+.dash-console:not([data-mode="full"]) .dash-rail { overflow: visible; }
+.dash-console[data-mode="empty"] { grid-template-columns: minmax(0, 1fr); }
+.dash-console[data-mode="empty"] .dash-rail,
+.dash-console[data-mode="empty"] .graph-stage,
+.dash-console[data-mode="single"] .graph-stage { display: none; }
+.dash-console[data-mode="small"] .graph-stage { height: 18rem; }
+.dash-console[data-mode="small"] .cy-canvas { min-height: 18rem; }
+/* 2-4 nodes: the relation list is the primary truth, so it leads the rail */
+.dash-console[data-mode="small"] .visible-relations-panel { order: -1; }
 @media (max-width: 68rem) {
   .dash-console { grid-template-columns: 1fr; height: auto; }
-  .memory-map { min-height: 32rem; }
-  .dash-rail { grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr)); }
+  .dash-console[data-mode="full"] .memory-map { min-height: 32rem; }
+  .dash-rail { grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr)); align-items: start; }
   .dash-lower { grid-template-columns: 1fr; }
-  .cy-canvas { min-height: 24rem; }
+  .dash-console[data-mode="full"] .cy-canvas { min-height: 24rem; }
 }
 @media (max-width: 36rem) {
   .graph-search { grid-template-columns: 1fr; }
