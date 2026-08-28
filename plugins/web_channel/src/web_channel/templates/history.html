@@ -1,28 +1,36 @@
 {% extends "base.html" %}
+{% from "_ui.html" import page_head, unavailable, empty, note %}
 {% block content %}
-<article class="card">
+{% call page_head('Conversation history', "The kernel's own owner-enforced record of your turns (ADR-16). Your recent answer trace on the home page is a separate, richer local log — this is the authoritative one.") %}
+  <span class="badge" data-variant="outline">kernel-owned</span>
+{% endcall %}
+<div class="card">
   <header>
-    <h2 class="card-title">Conversation history <span class="badge status-warn">kernel-owned</span></h2>
+    <h2>Your conversations</h2>
+    {% if conversations %}<span class="card-action badge" data-variant="secondary">{{ conversations|length }}</span>{% endif %}
   </header>
   <section>
-    <p class="muted">The kernel's own owner-enforced record of your turns (ADR-16). Your recent answer
-      trace on the home page is a separate, richer local log — this is the authoritative one.</p>
     {% if not signed %}
-      <p class="muted">Not available yet — your session has no verified kernel identity
-        (actor signing isn't configured, or you signed in before it was).</p>
+      {{ note('Not available yet', "Your session has no verified kernel identity (actor signing isn't configured, or you signed in before it was).") }}
     {% elif conversations is none %}
-      <p class="muted"><span class="badge status-warn">unavailable</span>
-        Could not reach the kernel right now.</p>
+      {{ unavailable('Kernel unavailable', 'Could not reach the kernel right now.') }}
     {% elif conversations %}
-      <ul class="recent">
-        {% for c in conversations %}
-          <li><a class="recent-link" href="/history/{{ c.id }}">{{ c.title or '(untitled)' }}</a>
-            <span class="meta">{{ c.created_at }}</span></li>
-        {% endfor %}
-      </ul>
+      <div class="table-container">
+        <table class="table">
+          <thead><tr><th>Conversation</th><th class="col-date">Started</th></tr></thead>
+          <tbody>
+            {% for c in conversations %}
+              <tr data-href="/history/{{ c.id }}">
+                <td><a href="/history/{{ c.id }}">{{ c.title or '(untitled)' }}</a></td>
+                <td class="col-date muted">{{ c.created_at }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     {% else %}
-      <p class="muted">No kernel-logged conversations yet — ask something first.</p>
+      {{ empty('No kernel-logged conversations yet', 'Ask something first.') }}
     {% endif %}
   </section>
-</article>
+</div>
 {% endblock %}

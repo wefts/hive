@@ -1,16 +1,27 @@
 {% extends "base.html" %}
+{% from "_ui.html" import unavailable %}
 {% block content %}
 <div class="card login">
-  <header><h2 class="card-title">Local sign in</h2></header>
+  <header>
+    <h2>Local sign in</h2>
+    <p>A channel-local account — the password is checked here, authority comes from the kernel.</p>
+  </header>
   <section>
-    {% if error %}<p class="badge status-error">{{ error }}</p>{% endif %}
-    <form class="login-form" method="post" action="/login/local" autocomplete="off">
-      <input class="input" type="text" name="identifier" value="{{ identifier }}" readonly aria-label="username">
-      <input class="input" type="password" name="password" placeholder="password"
-             autofocus required aria-label="password">
-      <button class="btn" type="submit">Sign in</button>
+    {% if error %}{{ unavailable(error) }}{% endif %}
+    <form class="form-grid" method="post" action="/login/local" autocomplete="off">
+      <div class="field">
+        <label class="label" for="login-user">Username</label>
+        <input class="input" id="login-user" type="text" name="identifier" value="{{ identifier }}" readonly>
+      </div>
+      <div class="field">
+        <label class="label" for="login-pw">Password</label>
+        <input class="input" id="login-pw" type="password" name="password" autofocus required>
+      </div>
+      <div class="form-actions">
+        <button class="btn" type="submit">Sign in</button>
+        <a class="btn" data-variant="ghost" href="/login">Use a different account</a>
+      </div>
     </form>
-    <p class="muted"><a href="/login">← use a different account</a></p>
   </section>
 </div>
 {% endblock %}

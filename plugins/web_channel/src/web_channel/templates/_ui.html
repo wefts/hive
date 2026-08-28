@@ -1,0 +1,51 @@
+{# Shared page grammar — thin Jinja macros over Basecoat components (app.css holds
+   only the layout glue). Every page uses THESE, never a one-off variant:
+     page_head  — h1 + lead + badges (call-block carries the badges)
+     crumbs     — Basecoat .breadcrumb; items = [(label, href|None), …], last = current
+     unavailable— Basecoat .alert[destructive]: a kernel/IdP source could not be read
+     note       — Basecoat .alert: a plain informational note
+     empty      — Basecoat .empty: the list is legitimately empty #}
+
+{% macro page_head(title, lead='') -%}
+<header class="page-head">
+  <div>
+    <h1 class="page-title">{{ title }}</h1>
+    {% if lead %}<p class="page-lead">{{ lead }}</p>{% endif %}
+  </div>
+  {% if caller %}<div class="page-badges">{{ caller() }}</div>{% endif %}
+</header>
+{%- endmacro %}
+
+{% macro crumbs(items) -%}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    {% for label, href in items %}
+      {% if not loop.first %}<li aria-hidden="true"><span aria-hidden="true">/</span></li>{% endif %}
+      <li>{% if href %}<a href="{{ href }}">{{ label }}</a>{% else %}<span aria-current="page">{{ label }}</span>{% endif %}</li>
+    {% endfor %}
+  </ol>
+</nav>
+{%- endmacro %}
+
+{% macro unavailable(title, text='') -%}
+<div class="alert" data-variant="destructive" role="alert">
+  <h2>{{ title }}</h2>
+  {% if text %}<section><p>{{ text }}</p></section>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro note(title, text='') -%}
+<div class="alert">
+  <h2>{{ title }}</h2>
+  {% if text or caller %}<section><p>{{ text }}{% if caller %}{{ caller() }}{% endif %}</p></section>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro empty(title, text='') -%}
+<div class="empty">
+  <header>
+    <h3>{{ title }}</h3>
+    {% if text %}<p>{{ text }}</p>{% endif %}
+  </header>
+</div>
+{%- endmacro %}

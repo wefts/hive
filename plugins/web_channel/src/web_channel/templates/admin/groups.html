@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import page_head, unavailable, empty %}
 {% block content %}
 <div class="layout admin-layout">
   <aside class="aside-col">
@@ -6,41 +7,39 @@
   </aside>
 
   <main class="main stack">
+    {% call page_head('Groups', 'Exactly three groups: wheel (local-only; members may elevate), admins (confers admin), staff (the default internal cohort, no role). Groups never grant visibility — knowledge access is Project membership, and a group can be a Project member.') %}
+      <span class="badge" data-variant="outline">kernel truth</span>
+      <span class="badge" data-variant="outline">fixed set</span>
+    {% endcall %}
+
     <div class="card">
       <header>
-        <h2 class="card-title">Groups <span class="badge status-warn">kernel truth</span></h2>
-        <span class="badge">fixed set</span>
+        <h2>All groups</h2>
+        <p>Membership is managed on each user's page; <code>wheel</code> only under an elevation.</p>
       </header>
       <section>
-        <p class="muted">Exactly three groups: <code>wheel</code> (local-only; members may
-          <em>elevate</em>), <code>admins</code> (confers <code>admin</code>), <code>staff</code>
-          (the default internal cohort, no role). <strong>Groups never grant visibility</strong> —
-          knowledge access is <a class="navlink" href="/admin/projects">Project</a> membership, and a
-          group can be a Project member. Membership is managed on each user's page;
-          <code>wheel</code> only under an elevation.</p>
         {% if kernel_groups is none %}
-          <p class="muted"><span class="badge status-warn">kernel groups unavailable</span>
-            Could not list groups right now.</p>
+          {{ unavailable('Kernel groups unavailable', 'Could not list groups right now.') }}
+        {% elif not kernel_groups %}
+          {{ empty('No groups yet', 'The kernel reported no groups.') }}
         {% else %}
           <div class="table-container">
             <table class="table">
               <thead>
-                <tr><th>Group</th><th>Members</th><th>Confers</th><th>Managed</th></tr>
+                <tr><th>Group</th><th class="col-num">Members</th><th>Confers</th><th>Managed</th></tr>
               </thead>
               <tbody>
                 {% for g in kernel_groups %}
                   {% set c = canonical.get(g.id) %}
-                  <tr>
+                  <tr data-href="/admin/groups/{{ g.id }}">
                     <td>
                       <a href="/admin/groups/{{ g.id }}">{{ g.name or g.id }}</a>
                       <div class="muted mono-wrap"><code>{{ g.id }}</code></div>
                     </td>
-                    <td>{{ g.member_count }}</td>
+                    <td class="col-num">{{ g.member_count }}</td>
                     <td>{{ g.granted_roles|join(', ') if g.granted_roles else (c.role if c else '—') }}</td>
                     <td class="muted">{% if c and c.elevation_only %}elevation · local users only{% else %}manage_access{% endif %}</td>
                   </tr>
-                {% else %}
-                  <tr><td colspan="4" class="muted">no groups yet</td></tr>
                 {% endfor %}
               </tbody>
             </table>

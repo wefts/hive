@@ -1,16 +1,20 @@
 {% extends "base.html" %}
+{% from "_ui.html" import unavailable %}
 {% block content %}
 <div class="card login">
-  <header><h2 class="card-title">Sign in</h2></header>
+  <header>
+    <h2>Sign in</h2>
+    <p>One sign-in for everyone — org accounts continue to Keycloak SSO; local accounts get a password prompt here.</p>
+  </header>
   <section>
-    {% if error %}<p class="badge status-warn">{{ error }}</p>{% endif %}
-    <form class="login-form" method="post" action="/login" autocomplete="off">
-      <input class="input" type="text" name="identifier" placeholder="username or email"
-             autofocus required aria-label="username or email">
-      <button class="btn" type="submit">Continue</button>
+    {% if error %}{{ unavailable(error) }}{% endif %}
+    <form class="form-grid" method="post" action="/login" autocomplete="off">
+      <div class="field">
+        <label class="label" for="login-id">Username or email</label>
+        <input class="input" id="login-id" type="text" name="identifier" autofocus required>
+      </div>
+      <div class="form-actions"><button class="btn" type="submit">Continue</button></div>
     </form>
-    <p class="muted">One sign-in for everyone — org accounts continue to Keycloak SSO;
-      local accounts get a password prompt here.</p>
   </section>
 </div>
 {% endblock %}

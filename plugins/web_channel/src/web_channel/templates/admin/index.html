@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import page_head %}
 {% block content %}
 <div class="layout admin-layout">
   <aside class="aside-col">
@@ -6,80 +7,101 @@
   </aside>
 
   <main class="main stack">
-    <div class="card">
-      <header><h2 class="card-title">Admin</h2></header>
-      <section>
-        <form class="invite" method="post" action="/admin/kernel/user" autocomplete="off">
-          <input type="hidden" name="csrf" value="{{ csrf_token }}">
-          <input type="hidden" name="op" value="invite">
-          <input class="input" type="text" name="login" placeholder="login" required aria-label="login">
-          <input class="input" type="password" name="password" placeholder="temporary password" required aria-label="temporary password">
-          <input class="input" type="text" name="first_name" placeholder="first name" aria-label="first name">
-          <input class="input" type="text" name="last_name" placeholder="last name" aria-label="last name">
-          <label class="menu-check"><input type="checkbox" name="external" value="1"> guest (external)</label>
-          <button class="btn" type="submit">Invite a local user</button>
-        </form>
-        <p class="muted">Creates a local credential + a kernel <code>invited</code> record; the first login
-          activates it. An internal user joins the <code>staff</code> cohort automatically; a
-          <strong>guest</strong> joins nothing and sees only what a Project explicitly shares with them.</p>
-      </section>
-    </div>
+    {{ page_head('Admin', 'Projects, people and the fixed groups — all kernel truth; elevation-only controls are marked.') }}
 
-    <section class="admin-card-grid" aria-label="Admin sections">
-      <a class="card admin-section-card" href="/admin/projects">
+    <section class="card-grid" aria-label="Admin sections">
+      <a class="card" href="/admin/projects">
         <header>
-          <h3 class="card-title">Projects</h3>
-          <span class="badge status-found">live</span>
+          <h3>Projects</h3>
+          <p>The sharing object: a Project owns Sources; its members see them.</p>
+          <span class="card-action badge status-found">live</span>
         </header>
-        <p class="muted">The sharing object: a Project owns Sources; its members see them.</p>
         {% if project_count is not none %}
-          <p class="stat"><span class="num">{{ project_count }}</span> projects</p>
+          <section><p class="stat"><span class="num">{{ project_count }}</span> projects</p></section>
         {% endif %}
       </a>
 
-      <a class="card admin-section-card" href="/admin/users">
+      <a class="card" href="/admin/users">
         <header>
-          <h3 class="card-title">Users</h3>
-          <span class="badge status-found">live</span>
+          <h3>Users</h3>
+          <p>Kernel-backed roster, guests, and local credentials.</p>
+          <span class="card-action badge status-found">live</span>
         </header>
-        <p class="muted">Kernel-backed roster, guests, and local credentials.</p>
         {% if kernel_user_count is not none %}
-          <p class="stat"><span class="num">{{ kernel_user_count }}</span> kernel users</p>
+          <section><p class="stat"><span class="num">{{ kernel_user_count }}</span> kernel users</p></section>
         {% endif %}
       </a>
 
-      <a class="card admin-section-card" href="/admin/groups">
+      <a class="card" href="/admin/groups">
         <header>
-          <h3 class="card-title">Groups</h3>
-          <span class="badge">fixed</span>
+          <h3>Groups</h3>
+          <p><code>wheel</code> · <code>admins</code> · <code>staff</code> — roles, never visibility.</p>
+          <span class="card-action badge" data-variant="outline">fixed</span>
         </header>
-        <p class="muted"><code>wheel</code> · <code>admins</code> · <code>staff</code> — roles, never visibility.</p>
       </a>
 
-      <a class="card admin-section-card" href="/admin/roles">
+      <a class="card" href="/admin/roles">
         <header>
-          <h3 class="card-title">Roles</h3>
-          <span class="badge status-found">live</span>
+          <h3>Roles</h3>
+          <p>Administration capabilities; <code>superadmin</code> only as a live elevation.</p>
+          <span class="card-action badge" data-variant="outline">read-only</span>
         </header>
-        <p class="muted">Administration capabilities; <code>superadmin</code> only as a live elevation.</p>
       </a>
 
-      <a class="card admin-section-card" href="/admin/auth">
+      <a class="card" href="/admin/auth">
         <header>
-          <h3 class="card-title">Auth Provider</h3>
-          <span class="badge status-warn">elevation</span>
+          <h3>Auth Provider</h3>
+          <p>Keycloak / OIDC configuration and the SSO group map.</p>
+          <span class="card-action badge status-warn">elevation</span>
         </header>
-        <p class="muted">Keycloak / OIDC configuration and the SSO group map.</p>
       </a>
 
-      <a class="card admin-section-card" href="/admin/tools">
+      <a class="card" href="/admin/tools">
         <header>
-          <h3 class="card-title">Tools</h3>
-          <span class="badge status-warn">elevation</span>
+          <h3>Tools</h3>
+          <p>Break-glass administration workflows.</p>
+          <span class="card-action badge status-warn">elevation</span>
         </header>
-        <p class="muted">Break-glass administration workflows.</p>
       </a>
     </section>
+
+    <div class="card">
+      <header>
+        <h2>Invite a local user</h2>
+        <p>Creates a local credential + a kernel <code>invited</code> record; the first login activates it.
+          An internal user joins the <code>staff</code> cohort automatically; a guest joins nothing and sees
+          only what a Project explicitly shares with them.</p>
+      </header>
+      <section>
+        <form class="form-grid" method="post" action="/admin/kernel/user" autocomplete="off">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="op" value="invite">
+          <div class="field">
+            <label class="label" for="inv-login">Login</label>
+            <input class="input" id="inv-login" type="text" name="login" required>
+          </div>
+          <div class="field">
+            <label class="label" for="inv-password">Temporary password</label>
+            <input class="input" id="inv-password" type="password" name="password" required>
+          </div>
+          <div class="field">
+            <label class="label" for="inv-first">First name</label>
+            <input class="input" id="inv-first" type="text" name="first_name">
+          </div>
+          <div class="field">
+            <label class="label" for="inv-last">Last name</label>
+            <input class="input" id="inv-last" type="text" name="last_name">
+          </div>
+          <div class="field" data-orientation="horizontal">
+            <input class="input" id="inv-external" type="checkbox" name="external" value="1">
+            <label class="label" for="inv-external">Guest (external)</label>
+          </div>
+          <div class="form-actions">
+            <button class="btn" type="submit">Invite a local user</button>
+          </div>
+        </form>
+      </section>
+    </div>
   </main>
 </div>
 {% endblock %}

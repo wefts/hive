@@ -1,19 +1,19 @@
 {% extends "base.html" %}
+{% from "_ui.html" import crumbs, note %}
 {% block content %}
+{{ crumbs([('Admin', '/admin'), ('Tools', '/admin/tools'), ('Break-glass read', None)]) }}
 <article class="card">
   <header>
-    <h2 class="card-title">Break-glass read <span class="badge status-warn">audited</span></h2>
+    <h2>{{ conversation.title or '(untitled)' }}</h2>
+    <p><strong>{{ actor_login }}</strong> read this conversation because: <em>{{ reason }}</em>.
+      This access was logged to the kernel's audit trail BEFORE the data was returned (ADR-16 D6).</p>
+    <span class="card-action badge status-warn">audited</span>
   </header>
   <section>
-    <p class="muted">
-      <strong>{{ actor_login }}</strong> read this conversation because: <em>{{ reason }}</em>.
-      This access was logged to the kernel's audit trail BEFORE the data was returned (ADR-16 D6).
-    </p>
-    <h3 class="section-label">{{ conversation.title or '(untitled)' }}</h3>
     <ul class="recent">
       {% for m in messages %}
         <li>
-          <span class="badge">{{ m.role }}</span>
+          <span class="badge" data-variant="outline">{{ m.role }}</span>
           <span class="meta">{{ m.created_at }}</span>
           <p class="answer">{{ m.body }}</p>
           {% if m.ask_ref %}
@@ -24,7 +24,6 @@
         <li class="muted">No messages.</li>
       {% endfor %}
     </ul>
-    <p><a class="navlink" href="/admin/tools">back to admin</a></p>
   </section>
 </article>
 {% endblock %}

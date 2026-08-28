@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import page_head, note %}
 {% block content %}
 <div class="layout admin-layout">
   <aside class="aside-col">
@@ -6,24 +7,31 @@
   </aside>
 
   <main class="main stack">
+    {% call page_head('Tools', 'Break-glass administration workflows. Each one needs a live elevation and is audited before any data is returned.') %}
+      <span class="badge status-warn">elevation</span>
+    {% endcall %}
+
     <div class="card">
-      <header><h2 class="card-title">Break-glass conversation read</h2></header>
+      <header>
+        <h2>Break-glass conversation read</h2>
+        <p>The conversation id comes from the reporting user; ownership is unknowable by design here, so
+          missing and not-owned both return 404-not-403. <code>read_any_conversation</code> exists only under an
+          elevation; every read is audited BEFORE the data is returned (D6) — the next page shows exactly what
+          was logged.</p>
+      </header>
       <section>
         {% if is_elevated %}
-        <form class="invite" method="post" action="/admin/kernel/read-conversation" autocomplete="off">
+        <form class="form-grid" method="post" action="/admin/kernel/read-conversation" autocomplete="off">
           <input type="hidden" name="csrf" value="{{ csrf_token }}">
-          <input class="input" type="text" name="conversation_id" placeholder="conversation id" required aria-label="conversation id">
-          <input class="input" type="text" name="reason" placeholder="reason (required, audited)" required aria-label="reason">
-          <button class="btn" type="submit">Read</button>
+          <div class="field"><label class="label" for="bg-conv">Conversation id</label>
+            <input class="input" id="bg-conv" type="text" name="conversation_id" required></div>
+          <div class="field"><label class="label" for="bg-reason">Reason <span class="muted">(required, audited)</span></label>
+            <input class="input" id="bg-reason" type="text" name="reason" required></div>
+          <div class="form-actions"><button class="btn" type="submit">Read</button></div>
         </form>
         {% else %}
-        <p class="muted"><span class="badge status-warn">elevation required</span>
-          Break-glass needs a live elevation of a Wheel member — <a class="navlink" href="/admin/elevate">elevate</a> first.</p>
+          {% call note('Elevation required') %}Break-glass needs a live elevation of a Wheel member — <a href="/admin/elevate">elevate</a> first.{% endcall %}
         {% endif %}
-        <p class="muted">The conversation id comes from the reporting user; ownership is
-          unknowable by design here, so missing and not-owned both return 404-not-403.
-          <code>read_any_conversation</code> exists only under an elevation; every read is audited
-          BEFORE the data is returned (D6) — the next page shows exactly what was logged.</p>
       </section>
     </div>
   </main>

@@ -1,46 +1,47 @@
 {# Server-side roster page: read-only list + pager, swapped into #roster-body by HTMX
    on search / paginate (ListUsers query+offset+total). All per-user actions live on
    the user detail page — the roster is just a scannable index that links there. #}
+{% from "_ui.html" import unavailable, empty %}
 {% if kernel_users is none %}
-  <p class="muted"><span class="badge status-warn">kernel roster unavailable</span>
-    Could not list kernel users right now.</p>
+  {{ unavailable('Kernel roster unavailable', 'Could not list kernel users right now.') }}
+{% elif not kernel_users %}
+  {% if q %}{{ empty('No users match "' ~ q ~ '"', 'Try a shorter login or name fragment.') }}
+  {% else %}{{ empty('No users yet', 'Invite a local user from the Overview page, or sign in through the auth provider.') }}{% endif %}
 {% else %}
   <div class="table-container">
     <table class="table admin-users-table">
       <thead>
         <tr>
           <th>Login</th><th>Name</th><th>Status</th><th>Roles</th><th>Groups</th>
-          <th>Providers</th><th>Last login</th>
+          <th>Providers</th><th class="col-date">Last login</th>
         </tr>
       </thead>
       <tbody>
         {% for u in kernel_users %}
-          <tr>
+          <tr data-href="/admin/users/{{ u.id }}">
             <td><a href="/admin/users/{{ u.id }}">{{ u.login or '—' }}</a></td>
             <td>{{ [u.first_name, u.last_name]|select|join(' ') or u.nickname or '—' }}</td>
-            <td>{{ u.status or '—' }}</td>
+            <td><span class="badge" data-variant="outline">{{ u.status or 'unknown' }}</span></td>
             <td>{{ u.roles|join(', ') if u.roles else '—' }}</td>
             <td>{{ u.groups|join(', ') if u.groups else '—' }}</td>
-            <td>{{ u.providers|join(', ') if u.providers else '—' }}</td>
-            <td>{% if u.last_login_at %}<span title="{{ u.last_login_at }}">{{ u.last_login_at[:10] }}</span>{% else %}never{% endif %}</td>
+            <td class="muted">{{ u.providers|join(', ') if u.providers else '—' }}</td>
+            <td class="col-date muted">{% if u.last_login_at %}<time datetime="{{ u.last_login_at }}">{{ u.last_login_at[:10] }}</time>{% else %}never{% endif %}</td>
           </tr>
-        {% else %}
-          <tr><td colspan="7" class="muted">{% if q %}no users match "{{ q }}"{% else %}none yet{% endif %}</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 
   {% if total %}
-    <nav class="roster-pager" aria-label="Roster pagination">
+    <nav class="pager" aria-label="Roster pagination">
       {% if offset > 0 %}
-        <button class="btn" data-variant="outline" type="button"
+        <button class="btn" data-size="sm" data-variant="outline" type="button"
                 hx-get="/admin/users/roster?q={{ q|urlencode }}&offset={{ [offset - limit, 0]|max }}"
                 hx-target="#roster-body" hx-swap="innerHTML">← Prev</button>
       {% endif %}
       <span class="muted">{{ offset + 1 }}–{{ [offset + limit, total]|min }} of {{ total }}</span>
       {% if offset + limit < total %}
-        <button class="btn" data-variant="outline" type="button"
+        <button class="btn" data-size="sm" data-variant="outline" type="button"
                 hx-get="/admin/users/roster?q={{ q|urlencode }}&offset={{ offset + limit }}"
                 hx-target="#roster-body" hx-swap="innerHTML">Next →</button>
       {% endif %}

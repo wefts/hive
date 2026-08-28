@@ -429,7 +429,7 @@ def test_read_conversation_needs_an_elevation_at_the_channel_gate(monkeypatch) -
     assert r.status_code == 403
     # and the Tools page shows the honest gate instead of the form
     page = client.get("/admin/tools")
-    assert "elevation required" in page.text
+    assert "elevation required" in page.text.lower()
     assert 'action="/admin/kernel/read-conversation"' not in page.text
 
 
@@ -628,7 +628,7 @@ def test_auth_page_shows_claim_config_and_mapping_forms_only_when_elevated(monke
     assert "DSI" in r.text and "admins" in r.text
     assert 'action="/admin/auth/claims"' not in r.text
     assert 'action="/admin/auth/sso-map"' not in r.text
-    assert "elevation required" in r.text
+    assert "elevation required" in r.text.lower()
 
     _as_elevated(monkeypatch)
     r = client.get("/admin/auth")

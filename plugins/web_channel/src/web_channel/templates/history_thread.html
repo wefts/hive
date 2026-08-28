@@ -1,17 +1,19 @@
 {% extends "base.html" %}
+{% from "_ui.html" import crumbs, unavailable %}
 {% block content %}
+{{ crumbs([('History', '/history'), ((conversation.title if conversation else 'Conversation'), None)]) }}
 <article class="card">
   <header>
-    <h2 class="card-title">{{ conversation.title if conversation else 'Conversation' }}</h2>
+    <h2>{{ conversation.title if conversation else 'Conversation' }}</h2>
   </header>
   <section>
     {% if messages is none %}
-      <p class="muted">Not found — not yours, or it doesn't exist (404-not-403: we don't distinguish).</p>
+      {{ unavailable('Not found', "Not yours, or it doesn't exist (404-not-403: we don't distinguish).") }}
     {% else %}
       <ul class="recent">
         {% for m in messages %}
           <li>
-            <span class="badge">{{ m.role }}</span>
+            <span class="badge" data-variant="outline">{{ m.role }}</span>
             <span class="meta">{{ m.created_at }}</span>
             <p class="answer">{{ m.body }}</p>
             {% if m.ask_ref %}
@@ -21,7 +23,6 @@
         {% endfor %}
       </ul>
     {% endif %}
-    <p><a class="navlink" href="/history">back to history</a></p>
   </section>
 </article>
 {% endblock %}

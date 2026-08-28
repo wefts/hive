@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import crumbs, unavailable, empty %}
 {% block content %}
 <div class="layout admin-layout">
   <aside class="aside-col">
@@ -6,45 +7,54 @@
   </aside>
 
   <main class="main stack">
-    <p><a class="navlink" href="/admin/groups">back to groups</a></p>
+    {{ crumbs([('Admin', '/admin'), ('Groups', '/admin/groups'), ((group.name or group.id) if group else 'Group', None)]) }}
 
     {% if group is none %}
       <div class="card">
-        <header><h2 class="card-title">Group</h2></header>
-        <section>
-          <p><span class="badge status-warn">{{ detail_error }}</span></p>
-          <p class="muted">Could not render this group right now.</p>
-        </section>
+        <header><h2>Group</h2></header>
+        <section>{{ unavailable(detail_error, 'Could not render this group right now.') }}</section>
       </div>
     {% else %}
-      <div class="admin-detail-layout">
+      <header class="page-head">
+        <div>
+          <h1 class="page-title">{{ group.name or group.id }}</h1>
+          <p class="page-lead">A group grants <strong>no</strong> source visibility by itself. Add it as a member of a
+            <a href="/admin/projects">Project</a> and its users inherit that Project's Sources.</p>
+        </div>
+        <div class="page-badges">
+          <span class="badge" data-variant="outline">fixed group</span>
+          {% if canonical and canonical.elevation_only %}<span class="badge status-warn">elevation-managed</span>{% endif %}
+        </div>
+      </header>
+
+      <div class="detail-grid">
         <div class="card">
-          <header>
-            <h2 class="card-title">{{ group.name or group.id }}</h2>
-            {% if canonical and canonical.elevation_only %}<span class="badge status-warn">elevation-managed</span>{% endif %}
-          </header>
-          <section class="admin-detail-list">
-            <div><span class="section-label">Group id</span><code class="hkey">{{ group.id }}</code></div>
-            <div><span class="section-label">Confers</span><span>{{ group.granted_roles|join(', ') if group.granted_roles else (canonical.role if canonical else '—') }}</span></div>
-            <div><span class="section-label">Members</span><span>{{ group.member_count }}</span></div>
-            {% if canonical and canonical.local_only %}
-              <div><span class="section-label">Membership</span><span class="muted">local-provider users only</span></div>
-            {% endif %}
+          <header><h2>Identity</h2></header>
+          <section>
+            <dl class="kv">
+              <dt>Group id</dt><dd><code class="hkey">{{ group.id }}</code></dd>
+              <dt>Confers</dt><dd>{{ group.granted_roles|join(', ') if group.granted_roles else (canonical.role if canonical else '—') }}</dd>
+              <dt>Members</dt><dd>{{ group.member_count }}</dd>
+              {% if canonical and canonical.local_only %}<dt>Membership</dt><dd class="muted">local-provider users only</dd>{% endif %}
+            </dl>
           </section>
         </div>
 
         <div class="card">
-          <header><h2 class="card-title">Visibility</h2></header>
-          <section>
-            <p class="muted">A group grants <strong>no</strong> source visibility by itself. Add the group as a
-              member of a <a class="navlink" href="/admin/projects">Project</a> and its users inherit that
-              Project's Sources.</p>
-          </section>
+          <header>
+            <h2>Managing membership</h2>
+            <p>Membership is managed per user — open a member, or any user, to add/remove groups.
+              {% if canonical and canonical.elevation_only %}Changing <code>{{ group.id }}</code> membership requires a live elevation.{% endif %}</p>
+          </header>
+          <footer><a class="btn" data-size="sm" data-variant="outline" href="/admin/users">Open the roster</a></footer>
         </div>
       </div>
 
       <div class="card">
-        <header><h2 class="card-title">Members <span class="badge">{{ members|length }}</span></h2></header>
+        <header>
+          <h2>Members</h2>
+          <span class="card-action badge" data-variant="secondary">{{ members|length }}</span>
+        </header>
         <section>
           {% if members %}
             <div class="table-container">
@@ -52,20 +62,18 @@
                 <thead><tr><th>Login</th><th>Providers</th><th>Status</th></tr></thead>
                 <tbody>
                   {% for m in members %}
-                    <tr>
+                    <tr data-href="/admin/users/{{ m.user_id }}">
                       <td><a href="/admin/users/{{ m.user_id }}">{{ m.login or '—' }}</a></td>
-                      <td>{{ m.providers|join(', ') if m.providers else '—' }}</td>
-                      <td>{{ m.status or '—' }}</td>
+                      <td class="muted">{{ m.providers|join(', ') if m.providers else '—' }}</td>
+                      <td><span class="badge" data-variant="outline">{{ m.status or 'unknown' }}</span></td>
                     </tr>
                   {% endfor %}
                 </tbody>
               </table>
             </div>
           {% else %}
-            <p class="muted">No members. Add a user to this group from their page.</p>
+            {{ empty('No members', 'Add a user to this group from their page.') }}
           {% endif %}
-          <p class="muted">Membership is managed per user (open a member, or any user, to add/remove groups).
-            {% if canonical and canonical.elevation_only %}Changing <code>{{ group.id }}</code> membership requires a live elevation.{% endif %}</p>
         </section>
       </div>
     {% endif %}

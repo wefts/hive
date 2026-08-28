@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import page_head, unavailable, empty %}
 {% block content %}
 <div class="layout admin-layout">
   <aside class="aside-col">
@@ -6,35 +7,39 @@
   </aside>
 
   <main class="main stack">
+    {% call page_head('Roles', 'Roles are administration only — a fixed user / admin / superadmin set that never grows with sources. Access to knowledge is Project membership, not a role.') %}
+      <span class="badge" data-variant="outline">kernel truth</span>
+      <span class="badge" data-variant="outline">read-only</span>
+    {% endcall %}
+
     <div class="card">
       <header>
-        <h2 class="card-title">Roles <span class="badge status-warn">kernel truth</span></h2>
-        <span class="badge">read-only</span>
+        <h2>All roles</h2>
+        <p><code>admin</code> comes from the <code>admins</code> <a href="/admin/groups">group</a>; <code>superadmin</code> is
+          never a standing role — its holders are the <em>live elevations</em> right now.</p>
       </header>
       <section>
-        <p class="muted">Roles are <strong>administration only</strong> — a fixed
-          <code>user</code> / <code>admin</code> / <code>superadmin</code> set that never grows with
-          sources. <code>admin</code> comes from the <code>admins</code> group; <code>superadmin</code>
-          is never a standing role — its holders are the <em>live elevations</em> right now. Access to
-          knowledge is <a class="navlink" href="/admin/projects">Project</a> membership, not a role.</p>
         {% if kernel_roles is none %}
-          <p class="muted"><span class="badge status-warn">kernel roles unavailable</span>
-            Could not list roles right now.</p>
+          {{ unavailable('Kernel roles unavailable', 'Could not list roles right now.') }}
+        {% elif not kernel_roles %}
+          {{ empty('No roles reported', 'The kernel returned an empty role set.') }}
         {% else %}
           <div class="table-container">
             <table class="table">
               <thead>
-                <tr><th>Role</th><th>Capabilities</th><th>Holders</th></tr>
+                <tr><th>Role</th><th>Capabilities</th><th class="col-num">Holders</th></tr>
               </thead>
               <tbody>
                 {% for r in kernel_roles %}
                   <tr>
-                    <td><strong>{{ r.name }}</strong>{% if r.name == 'superadmin' %} <span class="muted">(live elevations)</span>{% endif %}</td>
-                    <td>{{ r.capabilities|join(', ') if r.capabilities else '—' }}</td>
-                    <td>{{ r.holder_count }}</td>
+                    <td><strong>{{ r.name }}</strong>{% if r.name == 'superadmin' %}<div class="muted">live elevations</div>{% endif %}</td>
+                    <td>
+                      {% if r.capabilities %}
+                        <span class="badge-row">{% for c in r.capabilities %}<span class="badge" data-variant="secondary">{{ c }}</span>{% endfor %}</span>
+                      {% else %}<span class="muted">—</span>{% endif %}
+                    </td>
+                    <td class="col-num">{{ r.holder_count }}</td>
                   </tr>
-                {% else %}
-                  <tr><td colspan="3" class="muted">no roles reported</td></tr>
                 {% endfor %}
               </tbody>
             </table>

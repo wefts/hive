@@ -1,20 +1,24 @@
 {% extends "base.html" %}
+{% from "_ui.html" import page_head %}
 {% block content %}
 {# /dashboard = the observability instrument: stats · graph · activity. The channel
    is still a thin renderer — every datum comes from a scope-enforcing Core RPC. #}
-<h2 class="page-title">How the swarm thinks</h2>
+{{ page_head('How the swarm thinks', 'State of memory, a bounded connections explorer, and the live activity feed — all scope-filtered by the kernel.') }}
 
 <div class="dash">
   <!-- Stats: full KbStatus, loaded async so the page never blocks on the kernel. -->
   <div hx-get="/tile/status" hx-trigger="load">
-    <div class="card"><section><span class="muted">loading…</span></section></div>
+    <div class="card"><header><h3>State of my memory</h3></header><section><span class="muted">loading…</span></section></div>
   </div>
 
   <!-- Graph: a bounded, scope-filtered connections explorer (Neighborhood RPC,
        ≤50 nodes / depth ≤2), rendered with the vendored Cytoscape. Search an entity,
        click a node to expand. -->
   <div class="card">
-    <header><h3 class="section-label">Connections</h3></header>
+    <header>
+      <h3>Connections</h3>
+      <p>Search an entity, then click any node to expand its connections.</p>
+    </header>
     <section>
       <form class="compose" onsubmit="return swarmGraph.search(event)" autocomplete="off">
         <input class="input q" id="graph-q" type="text" placeholder="Search an entity to explore its connections…"
@@ -24,30 +28,34 @@
       <ul id="graph-hits" class="hits"></ul>
       <div id="graph-meta" class="meta"></div>
       <div id="cy" class="cy-canvas" role="img" aria-label="connections graph"></div>
-      <p id="graph-empty" class="muted">Search an entity above, then click any node to expand its connections.</p>
+      <p id="graph-empty" class="muted">No entity selected yet.</p>
     </section>
   </div>
 
   <!-- Activity: the scope-safe ActivityFeed, polled with an opaque cursor (HTMX OOB). -->
   <div class="card">
-    <header><h3 class="section-label">Activity</h3></header>
+    <header>
+      <h3>Activity</h3>
+      <p>Live · thin slice (ingest writes). Richer worker outcomes (entity-resolution, enrichment)
+        appear once the cognitive loop runs.</p>
+    </header>
     <section>
       <ul id="activity-events" class="act-list"></ul>
       <span id="activity-poller"
             hx-get="/activity?cursor=" hx-trigger="load"
             hx-target="#activity-events" hx-swap="beforeend"></span>
-      <p class="muted act-note">Live · thin slice (ingest writes). Richer worker
-        outcomes (entity-resolution, enrichment) appear once the cognitive loop runs.</p>
     </section>
   </div>
 
-  <footer class="card site-footer">
-    <header><h3 class="section-label">What changed · open questions · needs you</h3></header>
+  <div class="card">
+    <header>
+      <h3>What changed · open questions · needs you</h3>
+    </header>
     <section>
       <p class="muted">Not available yet — needs the <code>Brief</code> kernel RPC and a running
         cognitive loop. Shown honestly rather than faked.</p>
     </section>
-  </footer>
+  </div>
 </div>
 
 <!-- Vendored, offline (see vendor/VENDORING.md). Loaded only on the dashboard. -->

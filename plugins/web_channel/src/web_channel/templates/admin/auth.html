@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import page_head, unavailable, empty, note %}
 {% block content %}
 <div class="layout admin-layout">
   <aside class="aside-col">
@@ -6,129 +7,152 @@
   </aside>
 
   <main class="main stack">
+    {% call page_head('Auth Provider (Keycloak / OIDC)', 'Keycloak / OIDC connection, the claim keys the channel reads, and the incoming-group map. Every write here is an elevation-only control (ADR-20).') %}
+      <span class="badge status-warn">elevation</span>
+    {% endcall %}
+
     <div class="card">
-      <header><h2 class="card-title">Auth Provider (Keycloak / OIDC)</h2></header>
+      <header>
+        <h2>Connection</h2>
+        <span class="card-action" hx-get="/admin/auth/status" hx-trigger="load" hx-swap="innerHTML"><span class="badge status-warn">checking auth provider</span></span>
+      </header>
       <section>
-        <div class="table-container">
-          <table class="table">
-            <tbody>
-              <tr><th>Issuer</th><td>{{ connector.issuer or 'unset' }}</td></tr>
-              <tr><th>Realm</th><td>{{ connector.realm or 'unset' }}</td></tr>
-              <tr><th>Client ID</th><td>{{ connector.client_id or 'unset' }}</td></tr>
-              <tr><th>Admin URL</th><td>{{ connector.admin_url or 'unset' }}</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div hx-get="/admin/auth/status" hx-trigger="load" hx-swap="innerHTML" class="muted">
-          <span class="badge status-warn">checking auth provider</span>
-        </div>
+        <dl class="kv">
+          <dt>Issuer</dt><dd>{{ connector.issuer or 'unset' }}</dd>
+          <dt>Realm</dt><dd>{{ connector.realm or 'unset' }}</dd>
+          <dt>Client ID</dt><dd>{{ connector.client_id or 'unset' }}</dd>
+          <dt>Admin URL</dt><dd>{{ connector.admin_url or 'unset' }}</dd>
+        </dl>
         {% if is_elevated %}
-        <form class="invite" method="post" action="/admin/auth" autocomplete="off">
+        <form class="form-grid" method="post" action="/admin/auth" autocomplete="off">
           <input type="hidden" name="csrf" value="{{ csrf_token }}">
-          <input class="input" type="url" name="issuer" value="{{ connector.issuer }}" placeholder="issuer" required aria-label="issuer">
-          <input class="input" type="text" name="realm" value="{{ connector.realm }}" placeholder="realm" required aria-label="realm">
-          <input class="input" type="text" name="client_id" value="{{ connector.client_id }}" placeholder="client id" required aria-label="client id">
-          <input class="input" type="password" name="client_secret" placeholder="client secret (blank keeps current)" aria-label="client secret">
-          <input class="input" type="url" name="admin_url" value="{{ connector.admin_url }}" placeholder="admin url" required aria-label="admin url">
-          <input class="input" type="text" name="admin_user" value="{{ connector.admin_user }}" placeholder="admin user" required aria-label="admin user">
-          <input class="input" type="password" name="admin_password" placeholder="admin password (blank keeps current)" aria-label="admin password">
-          <button class="btn" type="submit">Save auth provider</button>
+          <div class="field"><label class="label" for="au-issuer">Issuer</label>
+            <input class="input" id="au-issuer" type="url" name="issuer" value="{{ connector.issuer }}" required></div>
+          <div class="field"><label class="label" for="au-realm">Realm</label>
+            <input class="input" id="au-realm" type="text" name="realm" value="{{ connector.realm }}" required></div>
+          <div class="field"><label class="label" for="au-client">Client ID</label>
+            <input class="input" id="au-client" type="text" name="client_id" value="{{ connector.client_id }}" required></div>
+          <div class="field"><label class="label" for="au-secret">Client secret <span class="muted">(blank keeps current)</span></label>
+            <input class="input" id="au-secret" type="password" name="client_secret"></div>
+          <div class="field"><label class="label" for="au-admin-url">Admin URL</label>
+            <input class="input" id="au-admin-url" type="url" name="admin_url" value="{{ connector.admin_url }}" required></div>
+          <div class="field"><label class="label" for="au-admin-user">Admin user</label>
+            <input class="input" id="au-admin-user" type="text" name="admin_user" value="{{ connector.admin_user }}" required></div>
+          <div class="field"><label class="label" for="au-admin-pw">Admin password <span class="muted">(blank keeps current)</span></label>
+            <input class="input" id="au-admin-pw" type="password" name="admin_password"></div>
+          <div class="form-actions"><button class="btn" type="submit">Save auth provider</button></div>
         </form>
         {% else %}
-        <p class="muted"><span class="badge status-warn">elevation required</span> Auth-provider configuration is
-          an elevation-only control (ADR-20): <a class="navlink" href="/admin/elevate">elevate</a> to change it.</p>
+          {% call note('Elevation required') %}Auth-provider configuration is an elevation-only control — <a href="/admin/elevate">elevate</a> to change it.{% endcall %}
         {% endif %}
       </section>
     </div>
 
     <div class="card">
-      <header><h2 class="card-title">SSO claim mappers</h2></header>
-      <section class="stack">
-        <div>
-          <h3 class="section-label">Which claim carries groups / roles</h3>
-          <p class="muted">The channel reads the groups claim and forwards it (signed) to the kernel, which maps
-            incoming groups → our fixed groups below. IdP roles are diagnostic only — they never confer authority.
-            Dotted paths allowed (e.g. <code>realm_access.roles</code>).</p>
-          {% if is_elevated %}
-          <form class="invite" method="post" action="/admin/auth/claims" autocomplete="off">
-            <input type="hidden" name="csrf" value="{{ csrf_token }}">
-            <input class="input" type="text" name="groups_claim" value="{{ groups_claim }}" placeholder="groups claim" aria-label="groups claim">
-            <input class="input" type="text" name="roles_claim" value="{{ roles_claim }}" placeholder="roles claim" aria-label="roles claim">
-            <button class="btn" type="submit">Save claim keys</button>
-          </form>
-          {% else %}
-          <p class="muted">groups: <code>{{ groups_claim }}</code> · roles: <code>{{ roles_claim }}</code> — change under an elevation.</p>
-          {% endif %}
-        </div>
-
-        <div>
-          <h3 class="section-label">Incoming SSO group → our group</h3>
-          <p class="muted">Provider <code>{{ sso_provider }}</code>. An incoming group maps to one of our fixed
-            groups (<code>admins</code> confers the admin role; <code>staff</code> is the internal cohort).
-            <strong>Default-deny</strong>: an unmapped incoming group grants nothing. <code>wheel</code> is never
-            SSO-mappable (local users only). Changing the map is an elevation-only control.</p>
-          {% if sso_map is none %}
-            <p class="muted"><span class="badge status-warn">SSO map unavailable</span>
-              Could not read the SSO group map from the kernel right now.</p>
-          {% else %}
-            <div class="table-container">
-              <table class="table">
-                <thead><tr><th>Incoming group</th><th>Maps to our group</th><th></th></tr></thead>
-                <tbody>
-                  {% for m in sso_map %}
-                    <tr>
-                      <td>{{ m.incoming_group }}</td>
-                      <td><code>{{ m.our_group_id }}</code></td>
-                      <td>
-                        {% if is_elevated %}
-                        <form method="post" action="/admin/auth/sso-map" autocomplete="off">
-                          <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                          <input type="hidden" name="op" value="delete">
-                          <input type="hidden" name="incoming_group" value="{{ m.incoming_group }}">
-                          <button class="btn" data-size="sm" data-variant="outline" type="submit">Remove</button>
-                        </form>
-                        {% endif %}
-                      </td>
-                    </tr>
-                  {% else %}
-                    <tr><td colspan="3" class="muted">no mappings yet</td></tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-            {% if is_elevated %}
-            <form class="invite" method="post" action="/admin/auth/sso-map" autocomplete="off">
-              <input type="hidden" name="csrf" value="{{ csrf_token }}">
-              <input type="hidden" name="op" value="put">
-              <input class="input" type="text" name="incoming_group" placeholder="incoming SSO group (e.g. DSI)" required aria-label="incoming SSO group">
-              <select class="input" name="our_group_id" required aria-label="our group">
-                <option value="">map to our group…</option>
-                {% for g in our_groups if g != 'wheel' %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
-              </select>
-              <button class="btn" type="submit">Add mapping</button>
-            </form>
-            {% endif %}
-          {% endif %}
-        </div>
+      <header>
+        <h2>SSO claim mappers</h2>
+        <p>The channel reads the groups claim and forwards it (signed) to the kernel, which maps incoming groups
+          → our fixed groups below. IdP roles are diagnostic only — they never confer authority. Dotted paths
+          allowed (e.g. <code>realm_access.roles</code>).</p>
+      </header>
+      <section>
+        {% if is_elevated %}
+        <form class="form-grid" method="post" action="/admin/auth/claims" autocomplete="off">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <div class="field"><label class="label" for="cl-groups">Groups claim</label>
+            <input class="input" id="cl-groups" type="text" name="groups_claim" value="{{ groups_claim }}"></div>
+          <div class="field"><label class="label" for="cl-roles">Roles claim</label>
+            <input class="input" id="cl-roles" type="text" name="roles_claim" value="{{ roles_claim }}"></div>
+          <div class="form-actions"><button class="btn" type="submit">Save claim keys</button></div>
+        </form>
+        {% else %}
+        <dl class="kv">
+          <dt>Groups claim</dt><dd><code>{{ groups_claim }}</code></dd>
+          <dt>Roles claim</dt><dd><code>{{ roles_claim }}</code></dd>
+        </dl>
+        <p class="muted">Change under an elevation.</p>
+        {% endif %}
       </section>
     </div>
 
     <div class="card">
-      <header><h3 class="card-title">Keycloak realm users <span class="badge status-found">info-only</span></h3></header>
+      <header>
+        <h2>Incoming SSO group → our group</h2>
+        <p>Provider <code>{{ sso_provider }}</code>. An incoming group maps to one of our fixed groups
+          (<code>admins</code> confers the admin role; <code>staff</code> is the internal cohort).
+          <strong>Default-deny</strong>: an unmapped incoming group grants nothing. <code>wheel</code> is never
+          SSO-mappable (local users only).</p>
+        {% if sso_map is not none %}<span class="card-action badge" data-variant="secondary">{{ sso_map|length }}</span>{% endif %}
+      </header>
+      <section>
+        {% if sso_map is none %}
+          {{ unavailable('SSO map unavailable', 'Could not read the SSO group map from the kernel right now.') }}
+        {% elif not sso_map %}
+          {{ empty('No mappings yet', 'Unmapped incoming groups grant nothing (default-deny).') }}
+        {% else %}
+          <div class="table-container">
+            <table class="table">
+              <thead><tr><th>Incoming group</th><th>Maps to our group</th>{% if is_elevated %}<th class="col-actions"><span class="sr-only">Actions</span></th>{% endif %}</tr></thead>
+              <tbody>
+                {% for m in sso_map %}
+                  <tr>
+                    <td>{{ m.incoming_group }}</td>
+                    <td><code>{{ m.our_group_id }}</code></td>
+                    {% if is_elevated %}
+                    <td class="col-actions">
+                      <form method="post" action="/admin/auth/sso-map" autocomplete="off">
+                        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                        <input type="hidden" name="op" value="delete">
+                        <input type="hidden" name="incoming_group" value="{{ m.incoming_group }}">
+                        <button class="btn" data-size="sm" data-variant="outline" type="submit">Remove</button>
+                      </form>
+                    </td>
+                    {% endif %}
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+        {% if is_elevated and sso_map is not none %}
+        <form class="form-grid" method="post" action="/admin/auth/sso-map" autocomplete="off">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="op" value="put">
+          <div class="field"><label class="label" for="sm-in">Incoming SSO group</label>
+            <input class="input" id="sm-in" type="text" name="incoming_group" placeholder="e.g. DSI" required></div>
+          <div class="field"><label class="label" for="sm-our">Our group</label>
+            <select class="select" id="sm-our" name="our_group_id" required>
+              <option value="">choose…</option>
+              {% for g in our_groups if g != 'wheel' %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+            </select></div>
+          <div class="form-actions"><button class="btn" type="submit">Add mapping</button></div>
+        </form>
+        {% endif %}
+      </section>
+    </div>
+
+    <div class="card">
+      <header>
+        <h2>Keycloak realm users</h2>
+        <p>Read straight from the realm; a row opens the kernel roster filtered to that login.</p>
+        <span class="card-action badge" data-variant="outline">info-only</span>
+      </header>
       <section>
         {% if users is none %}
-          <p class="muted"><span class="badge status-warn">Keycloak unavailable</span>
-            Could not list SSO users right now.</p>
+          {{ unavailable('Keycloak unavailable', 'Could not list SSO users right now.') }}
+        {% elif not users %}
+          {{ empty('No realm users yet') }}
         {% else %}
           <div class="table-container">
             <table class="table">
               <thead><tr><th>Username</th><th>Email</th><th>Groups</th></tr></thead>
               <tbody>
                 {% for u in users %}
-                  <tr><td>{{ u.username }}</td><td class="muted">{{ u.email }}</td>
-                    <td>{{ u.groups|join(', ') if u.groups else '—' }}</td></tr>
-                {% else %}
-                  <tr><td colspan="3" class="muted">none yet</td></tr>
+                  <tr data-href="/admin/users?q={{ u.username|urlencode }}">
+                    <td><a href="/admin/users?q={{ u.username|urlencode }}">{{ u.username }}</a></td>
+                    <td class="muted">{{ u.email }}</td>
+                    <td>{{ u.groups|join(', ') if u.groups else '—' }}</td>
+                  </tr>
                 {% endfor %}
               </tbody>
             </table>

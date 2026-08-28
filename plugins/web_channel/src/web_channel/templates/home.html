@@ -12,7 +12,7 @@
        resets to its start state, past threads stay one click away below. #}
     <a class="btn new-chat" href="/">New chat</a>
     <div class="card">
-      <header><h3 class="section-label">Recent conversations</h3></header>
+      <header><h3>Recent conversations</h3></header>
       <section>
         {% if recent %}
           <ul class="recent">
@@ -32,7 +32,7 @@
 
     <!-- State of my memory: real KbStatus, loaded async so the page never blocks. -->
     <div hx-get="/tile/status" hx-trigger="load">
-      <div class="card"><section><span class="muted">loading…</span></section></div>
+      <div class="card"><header><h3>State of my memory</h3></header><section><span class="muted">loading…</span></section></div>
     </div>
   </aside>
 

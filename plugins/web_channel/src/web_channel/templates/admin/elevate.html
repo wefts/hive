@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import page_head, unavailable, note %}
 {% block content %}
 <div class="layout admin-layout">
   <aside class="aside-col">
@@ -6,25 +7,26 @@
   </aside>
 
   <main class="main stack">
+    {% call page_head('Elevate', 'There is no standing superadmin. A local wheel member may elevate for a bounded time: re-enter your password now (fresh re-authentication), give a reason (audited before the capability exists), and the elevation is bound to this session only. It ends by itself; you can end it early from the sidebar.') %}
+      <span class="badge status-warn">sudo</span>
+    {% endcall %}
+
     <div class="card">
-      <header><h2 class="card-title">Elevate <span class="badge status-warn">sudo</span></h2></header>
+      <header><h2>Start an elevation</h2></header>
       <section>
-        <p class="muted">There is no standing superadmin. A local <code>wheel</code> member may elevate
-          for a bounded time: you re-enter your password now (fresh re-authentication), give a reason
-          (audited <em>before</em> the capability exists), and the elevation is bound to <strong>this
-          session</strong> only. It ends by itself; you can end it early from the sidebar.</p>
-        {% if error %}<p><span class="badge status-error">{{ error }}</span></p>{% endif %}
+        {% if error %}{{ unavailable(error) }}{% endif %}
         {% if is_elevated %}
-          <p><span class="badge status-warn">already elevated</span> <span class="muted">until {{ elevation_expires_at[:19] }}</span></p>
+          {{ note('Already elevated', 'until ' ~ elevation_expires_at[:19]) }}
         {% elif not can_elevate %}
-          <p class="muted">Only a local account can elevate (Wheel is local-only). You are signed in via
-            <code>{{ principal.provider }}</code>.</p>
+          {{ note('Local accounts only', 'Only a local account can elevate (Wheel is local-only). You are signed in via ' ~ principal.provider ~ '.') }}
         {% else %}
-          <form class="invite" method="post" action="/admin/elevate" autocomplete="off">
+          <form class="form-grid" method="post" action="/admin/elevate" autocomplete="off">
             <input type="hidden" name="csrf" value="{{ csrf_token }}">
-            <input class="input" type="text" name="reason" placeholder="reason (required, audited)" required aria-label="reason">
-            <input class="input" type="password" name="password" placeholder="your password (re-authentication)" required aria-label="password">
-            <button class="btn" type="submit">Elevate</button>
+            <div class="field"><label class="label" for="el-reason">Reason <span class="muted">(required, audited)</span></label>
+              <input class="input" id="el-reason" type="text" name="reason" required></div>
+            <div class="field"><label class="label" for="el-pw">Your password <span class="muted">(re-authentication)</span></label>
+              <input class="input" id="el-pw" type="password" name="password" required></div>
+            <div class="form-actions"><button class="btn" type="submit">Elevate</button></div>
           </form>
         {% endif %}
       </section>

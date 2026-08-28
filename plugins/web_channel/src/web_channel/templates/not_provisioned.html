@@ -1,13 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
-<article class="card">
+<article class="card login">
   <header>
-    <h2 class="card-title">Not provisioned <span class="badge status-warn">no access yet</span></h2>
+    <h2>Not provisioned</h2>
+    <p>Your account authenticated, but the kernel has no record of it yet. Ask an administrator to invite you.</p>
+    <span class="card-action badge status-warn">no access yet</span>
   </header>
-  <section>
-    <p class="muted">Your account authenticated, but the kernel has no record of it yet.
-      Ask an administrator to invite you.</p>
-    <p><a class="navlink" href="/login">Back to sign in</a></p>
-  </section>
+  <footer><a class="btn" data-variant="outline" href="/login">Back to sign in</a></footer>
 </article>
 {% endblock %}

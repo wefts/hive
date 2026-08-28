@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import page_head, unavailable %}
 {% block content %}
 <div class="layout admin-layout">
   <aside class="aside-col">
@@ -6,23 +7,27 @@
   </aside>
 
   <main class="main stack">
+    {% call page_head('Users', 'Kernel-side search over the whole roster (login + names), 50 per page. Open a user to manage groups, credentials, and lifecycle.') %}
+      <span class="badge" data-variant="outline">kernel truth</span>
+    {% endcall %}
+
     <div class="card">
       <header>
-        <h2 class="card-title">Users <span class="badge status-warn">kernel truth</span></h2>
+        <h2>Roster</h2>
+        {% if total %}<span class="card-action badge" data-variant="secondary">{{ total }}</span>{% endif %}
       </header>
       <section>
-        {% if not principal.uuid %}<p class="muted"><span class="badge status-warn">kernel identity not resolved yet</span>
-          actions will be rejected until signing is configured and this account is migrated into the kernel identity store.</p>{% endif %}
-        <div class="admin-roster-search">
-          <label class="section-label" for="admin-user-search">Search users</label>
+        {% if not principal.uuid %}
+          {{ unavailable('Kernel identity not resolved yet', 'Actions will be rejected until signing is configured and this account is migrated into the kernel identity store.') }}
+        {% endif %}
+        <div class="field">
+          <label class="label" for="admin-user-search">Search users</label>
           <input id="admin-user-search" class="input" type="search" name="q" value="{{ q }}"
-                 placeholder="Search by login, name, or nickname"
+                 placeholder="login, name, or nickname"
                  autocomplete="off"
                  hx-get="/admin/users/roster"
                  hx-trigger="input changed delay:300ms, search"
                  hx-target="#roster-body" hx-swap="innerHTML">
-          <p class="muted">Kernel-side search over the whole roster (login + names), 50 per page.
-            Open a user to manage groups, credentials, and lifecycle.</p>
         </div>
         <div id="roster-body">
           {% include "admin/_users_roster.html" %}

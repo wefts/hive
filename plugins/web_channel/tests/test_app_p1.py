@@ -196,7 +196,7 @@ def test_auth_provider_page_allows_admin_and_lists_realm_users(monkeypatch) -> N
     assert "alice" in r.text
     # the config form is elevation-only (ADR-20): a plain admin sees the honest gate
     assert 'action="/admin/auth"' not in r.text
-    assert "elevation required" in r.text
+    assert "elevation required" in r.text.lower()
 
     monkeypatch.setattr(
         web,
@@ -282,7 +282,7 @@ def test_tools_page_contains_break_glass_only_when_elevated(monkeypatch) -> None
     assert r.status_code == 200
     assert "Break-glass conversation read" in r.text
     assert 'action="/admin/kernel/read-conversation"' not in r.text
-    assert "elevation required" in r.text
+    assert "elevation required" in r.text.lower()
 
     monkeypatch.setattr(
         web,

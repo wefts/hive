@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import crumbs, unavailable, empty, note %}
 {% block content %}
 <div class="layout admin-layout">
   <aside class="aside-col">
@@ -6,140 +7,142 @@
   </aside>
 
   <main class="main stack">
-    <p><a class="navlink" href="/admin/users">back to users</a></p>
+    {{ crumbs([('Admin', '/admin'), ('Users', '/admin/users'), ((user.login if user else 'User'), None)]) }}
 
     {% if user is none %}
       <div class="card">
-        <header><h2 class="card-title">User detail</h2></header>
-        <section>
-          <p><span class="badge status-warn">{{ detail_error }}</span></p>
-          <p class="muted">Could not render this kernel user detail right now.</p>
-        </section>
+        <header><h2>User</h2></header>
+        <section>{{ unavailable(detail_error, 'Could not render this kernel user detail right now.') }}</section>
       </div>
     {% else %}
-      <div class="admin-detail-layout">
-        <div class="card">
-          <header>
-            <h2 class="card-title">{{ user.login or 'User detail' }}</h2>
-            <span class="badge">{{ user.status or 'unknown' }}</span>
-            {% if user.external %}<span class="badge status-warn">guest</span>{% endif %}
-          </header>
-          <section class="admin-detail-list">
-            <div>
-              <span class="section-label">Login</span>
-              <span>{{ user.login or '—' }}</span>
-            </div>
-            <div>
-              <span class="section-label">Full name</span>
-              <span>{{ [user.first_name, user.last_name]|select|join(' ') or user.nickname or '—' }}</span>
-            </div>
-            <div>
-              <span class="section-label">Roles</span>
-              <span>{{ user.roles|join(', ') if user.roles else '—' }}</span>
-            </div>
-            <div>
-              <span class="section-label">Groups</span>
-              <span>{{ user.groups|join(', ') if user.groups else '—' }}</span>
-            </div>
-            <div>
-              <span class="section-label">Providers</span>
-              <span>{{ user.providers|join(', ') if user.providers else '—' }}</span>
-            </div>
-            <div>
-              <span class="section-label">Emails</span>
-              <span>{{ user.emails|join(', ') if user.emails else '—' }}</span>
-            </div>
-            <div>
-              <span class="section-label">Last login</span>
-              <span>{{ user.last_login_at or 'never' }}</span>
-            </div>
-            <div>
-              <span class="section-label">Full UUID</span>
-              <code class="hkey">{{ user.id }}</code>
-            </div>
-          </section>
+      <header class="page-head">
+        <div>
+          <h1 class="page-title">{{ user.login or 'User detail' }}</h1>
+          <p class="page-lead">{{ [user.first_name, user.last_name]|select|join(' ') or user.nickname or 'kernel user' }}</p>
+        </div>
+        <div class="page-badges">
+          <span class="badge" data-variant="outline">{{ user.status or 'unknown' }}</span>
+          {% if user.external %}<span class="badge status-warn">guest</span>{% endif %}
+        </div>
+      </header>
+
+      <div class="detail-grid">
+        <div class="stack">
+          <div class="card">
+            <header><h2>Identity</h2></header>
+            <section>
+              <dl class="kv">
+                <dt>Login</dt><dd>{{ user.login or '—' }}</dd>
+                <dt>Full name</dt><dd>{{ [user.first_name, user.last_name]|select|join(' ') or user.nickname or '—' }}</dd>
+                <dt>Roles</dt><dd>{{ user.roles|join(', ') if user.roles else '—' }}</dd>
+                <dt>Groups</dt><dd>{{ user.groups|join(', ') if user.groups else '—' }}</dd>
+                <dt>Providers</dt><dd>{{ user.providers|join(', ') if user.providers else '—' }}</dd>
+                <dt>Emails</dt><dd>{{ user.emails|join(', ') if user.emails else '—' }}</dd>
+                <dt>Last login</dt><dd>{{ user.last_login_at or 'never' }}</dd>
+                <dt>Full UUID</dt><dd><code class="hkey">{{ user.id }}</code></dd>
+              </dl>
+            </section>
+          </div>
+
+          <div class="card">
+            <header>
+              <h2>Projects</h2>
+              <p>What this user can see: the Projects they are a member of (directly or via a group) plus
+                public Projects. Membership is managed on the Project page.</p>
+              <span class="card-action badge" data-variant="secondary">{{ user_projects|length }}</span>
+            </header>
+            <section>
+              {% if user_projects %}
+                <div class="table-container">
+                  <table class="table">
+                    <thead><tr><th>Project</th><th>Visibility</th></tr></thead>
+                    <tbody>
+                      {% for p in user_projects %}
+                        <tr data-href="/admin/projects/{{ p.id }}">
+                          <td><a href="/admin/projects/{{ p.id }}">{{ p.name }}</a></td>
+                          <td>{% if p.visibility %}<span class="badge{% if p.visibility == 'public' %} status-warn{% endif %}"{% if p.visibility != 'public' %} data-variant="outline"{% endif %}>{{ p.visibility }}</span>{% else %}—{% endif %}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% else %}
+                {{ empty('No Project', 'This user sees only public knowledge' ~ ('' if user.external else ' and their own conversations') ~ '.') }}
+              {% endif %}
+            </section>
+          </div>
+
+          <div class="card">
+            <header>
+              <h2>Local channel credential</h2>
+              <p>Channel-local password login (bootstrap / invite bridge), separate from the kernel identity
+                and from the auth provider. It carries no authority.</p>
+            </header>
+            <section>
+              {% if local_cred %}
+                <dl class="kv"><dt>Username</dt><dd>{{ local_cred.username }}</dd></dl>
+              {% else %}
+                <p class="muted">No local channel credential for this login — signs in via the auth provider.</p>
+              {% endif %}
+            </section>
+          </div>
         </div>
 
-        <div class="card">
-          <header><h2 class="card-title">Group membership</h2></header>
-          <section>
-            <p class="muted">Roles come from group membership — there are no per-user role grants and
-              groups grant no visibility. <code>wheel</code> takes local users only and is managed under an
-              elevation.</p>
-            <div class="membership-list">
-              {% for g in canonical_groups %}
-                {% set member = g.id in user.groups %}
-                {% if g.local_only and not user_is_local %}
-                  <div class="membership-row muted">{{ g.name }} <span class="muted">· local users only</span></div>
-                {% elif g.elevation_only and not is_elevated %}
-                  <div class="membership-row muted">{{ g.name }}{% if member %} <span class="badge status-found">member</span>{% endif %}
-                    <span class="muted">· requires an elevation</span></div>
-                {% else %}
-                  <form method="post" action="/admin/kernel/access" autocomplete="off" class="membership-row">
-                    <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                    <input type="hidden" name="target_user_id" value="{{ user.id }}">
-                    <input type="hidden" name="op" value="{{ 'revoke_group' if member else 'grant_group' }}">
-                    <input type="hidden" name="group_id" value="{{ g.id }}">
-                    <span>{{ g.name }} <span class="muted">· {{ g.role }}</span>{% if member %} <span class="badge status-found">member</span>{% endif %}</span>
-                    <button class="btn" data-size="sm" data-variant="outline" type="submit">{{ 'Remove' if member else 'Add' }}</button>
-                  </form>
-                {% endif %}
-              {% endfor %}
-            </div>
-          </section>
+        <div class="stack">
+          <div class="card">
+            <header>
+              <h2>Group membership</h2>
+              <p>Roles come from group membership — there are no per-user role grants and groups grant no
+                visibility. <code>wheel</code> takes local users only and is managed under an elevation.</p>
+            </header>
+            <section>
+              <ul class="row-list">
+                {% for g in canonical_groups %}
+                  {% set member = g.id in user.groups %}
+                  {% if g.local_only and not user_is_local %}
+                    <li class="muted">{{ g.name }} <span class="muted">· local users only</span></li>
+                  {% elif g.elevation_only and not is_elevated %}
+                    <li class="muted"><span>{{ g.name }}{% if member %} <span class="badge status-found">member</span>{% endif %}</span>
+                      <span class="muted">requires an elevation</span></li>
+                  {% else %}
+                    <li>
+                      <form method="post" action="/admin/kernel/access" autocomplete="off">
+                        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                        <input type="hidden" name="target_user_id" value="{{ user.id }}">
+                        <input type="hidden" name="op" value="{{ 'revoke_group' if member else 'grant_group' }}">
+                        <input type="hidden" name="group_id" value="{{ g.id }}">
+                        <span>{{ g.name }} <span class="muted">· {{ g.role }}</span>{% if member %} <span class="badge status-found">member</span>{% endif %}</span>
+                        <button class="btn" data-size="sm" data-variant="outline" type="submit">{{ 'Remove' if member else 'Add' }}</button>
+                      </form>
+                    </li>
+                  {% endif %}
+                {% endfor %}
+              </ul>
+            </section>
+          </div>
+
+          <div class="card">
+            <header>
+              <h2>Lifecycle</h2>
+              <p>Deactivate/delete kill the login; learned content persists (D11).
+                {% if 'wheel' in user.groups %}A <code>wheel</code> member can only be changed under an elevation, never the last one.{% endif %}</p>
+            </header>
+            <footer>
+              <form method="post" action="/admin/kernel/user" autocomplete="off">
+                <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                <input type="hidden" name="target_user_id" value="{{ user.id }}">
+                <input type="hidden" name="op" value="deactivate">
+                <button class="btn" data-size="sm" type="submit" data-variant="outline">Deactivate</button>
+              </form>
+              <form method="post" action="/admin/kernel/user" autocomplete="off">
+                <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                <input type="hidden" name="target_user_id" value="{{ user.id }}">
+                <input type="hidden" name="op" value="delete">
+                <button class="btn" data-size="sm" type="submit" data-variant="destructive" onclick="return confirm('Delete this user? Login dies; learned content persists.')">Delete</button>
+              </form>
+            </footer>
+          </div>
         </div>
-
-        <div class="card">
-          <header><h2 class="card-title">Lifecycle</h2></header>
-          <section class="admin-actions-panel">
-            <form method="post" action="/admin/kernel/user" autocomplete="off">
-              <input type="hidden" name="csrf" value="{{ csrf_token }}">
-              <input type="hidden" name="target_user_id" value="{{ user.id }}">
-              <input type="hidden" name="op" value="deactivate">
-              <button class="btn" type="submit" data-variant="outline">Deactivate</button>
-            </form>
-            <form method="post" action="/admin/kernel/user" autocomplete="off">
-              <input type="hidden" name="csrf" value="{{ csrf_token }}">
-              <input type="hidden" name="target_user_id" value="{{ user.id }}">
-              <input type="hidden" name="op" value="delete">
-              <button class="btn" type="submit" data-variant="destructive" onclick="return confirm('Delete this user? Login dies; learned content persists.')">Delete</button>
-            </form>
-            <p class="muted">Deactivate/delete kill the login; learned content persists (D11).
-              {% if 'wheel' in user.groups %}A <code>wheel</code> member can only be changed under an elevation, never the last one.{% endif %}</p>
-          </section>
-        </div>
-      </div>
-
-      <div class="card">
-        <header><h2 class="card-title">Projects <span class="badge">{{ user_projects|length }}</span></h2></header>
-        <section>
-          <p class="muted">What this user can see: the Projects they are a member of (directly or via a
-            group) plus public Projects. Membership is managed on the Project page.</p>
-          {% if user_projects %}
-            <ul>
-              {% for p in user_projects %}
-                <li><a href="/admin/projects/{{ p.id }}">{{ p.name }}</a>{% if p.visibility %} <span class="badge">{{ p.visibility }}</span>{% endif %}</li>
-              {% endfor %}
-            </ul>
-          {% else %}
-            <p class="muted">No Project — this user sees only public knowledge{% if not user.external %} and their own conversations{% endif %}.</p>
-          {% endif %}
-        </section>
-      </div>
-
-      <div class="card">
-        <header><h2 class="card-title">Local channel credential</h2></header>
-        <section>
-          {% if local_cred %}
-            <div class="admin-detail-list">
-              <div><span class="section-label">Username</span><span>{{ local_cred.username }}</span></div>
-            </div>
-            <p class="muted">Channel-local password login (bootstrap / invite bridge), separate from
-              the kernel identity and from the auth provider. It carries no authority.</p>
-          {% else %}
-            <p class="muted">No local channel credential for this login — signs in via the auth provider.</p>
-          {% endif %}
-        </section>
       </div>
     {% endif %}
   </main>

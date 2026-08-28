@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import crumbs, unavailable, empty, note %}
 {% block content %}
 <div class="layout admin-layout">
   <aside class="aside-col">
@@ -6,92 +7,112 @@
   </aside>
 
   <main class="main stack">
-    <p><a class="navlink" href="/admin/projects">back to projects</a></p>
+    {{ crumbs([('Admin', '/admin'), ('Projects', '/admin/projects'), ((project.name if project else 'Project'), None)]) }}
 
     {% if project is none %}
       <div class="card">
-        <header><h2 class="card-title">Project</h2></header>
-        <section>
-          <p><span class="badge status-warn">{{ detail_error }}</span></p>
-          <p class="muted">Could not render this project right now.</p>
-        </section>
+        <header><h2>Project</h2></header>
+        <section>{{ unavailable(detail_error, 'Could not render this project right now.') }}</section>
       </div>
     {% else %}
-      <div class="admin-detail-layout">
+      {% set locked = project.visibility == 'public' and not is_elevated %}
+      <header class="page-head">
+        <div>
+          <h1 class="page-title">{{ project.name }}</h1>
+          <p class="page-lead">{{ project.description or 'No description yet.' }}</p>
+        </div>
+        <div class="page-badges">
+          <span class="badge{% if project.visibility == 'public' %} status-warn{% endif %}"{% if project.visibility != 'public' %} data-variant="outline"{% endif %}>{{ project.visibility }}</span>
+          {% if locked %}<span class="badge status-warn">elevation to change</span>{% endif %}
+        </div>
+      </header>
+
+      <div class="detail-grid">
         <div class="card">
-          <header>
-            <h2 class="card-title">{{ project.name }}</h2>
-            <span class="badge{% if project.visibility == 'public' %} status-warn{% endif %}">{{ project.visibility }}</span>
-          </header>
-          <section class="admin-detail-list">
-            <div><span class="section-label">Project id</span><code class="hkey">{{ project.id }}</code></div>
-            <div><span class="section-label">Description</span><span>{{ project.description or '—' }}</span></div>
-            <div><span class="section-label">Created</span><span>{{ project.created_at[:19] }}</span></div>
-          </section>
-          <section class="stack">
-            <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+          <header><h2>Identity</h2></header>
+          <section>
+            <dl class="kv">
+              <dt>Project id</dt><dd><code class="hkey">{{ project.id }}</code></dd>
+              <dt>Description</dt><dd>{{ project.description or '—' }}</dd>
+              <dt>Created</dt><dd>{{ project.created_at[:19] }}</dd>
+            </dl>
+            <form class="form-inline" method="post" action="/admin/kernel/project" autocomplete="off">
               <input type="hidden" name="csrf" value="{{ csrf_token }}">
               <input type="hidden" name="op" value="rename">
               <input type="hidden" name="project_id" value="{{ project.id }}">
-              <input class="input" type="text" name="name" value="{{ project.name }}" required aria-label="project name">
+              <div class="field">
+                <label class="label" for="pr-name">Name</label>
+                <input class="input" id="pr-name" type="text" name="name" value="{{ project.name }}" required>
+              </div>
               <button class="btn" data-size="sm" data-variant="outline" type="submit">Rename</button>
             </form>
-            <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+            <form class="form-inline" method="post" action="/admin/kernel/project" autocomplete="off">
               <input type="hidden" name="csrf" value="{{ csrf_token }}">
               <input type="hidden" name="op" value="describe">
               <input type="hidden" name="project_id" value="{{ project.id }}">
-              <input class="input" type="text" name="description" value="{{ project.description }}" placeholder="description" aria-label="description">
+              <div class="field">
+                <label class="label" for="pr-desc">Description</label>
+                <input class="input" id="pr-desc" type="text" name="description" value="{{ project.description }}">
+              </div>
               <button class="btn" data-size="sm" data-variant="outline" type="submit">Describe</button>
             </form>
           </section>
         </div>
 
         <div class="card">
-          <header><h2 class="card-title">Visibility</h2></header>
+          <header>
+            <h2>Visibility</h2>
+            <p><code>personal</code> / <code>shared</code> are classifications; access is still membership.
+              <code>public</code> makes the Project's Sources visible to <strong>every signed-in user</strong> —
+              an elevation is required to set or unset it.</p>
+          </header>
           <section>
-            <p class="muted"><code>personal</code> / <code>shared</code> are classifications; access is still
-              membership. <code>public</code> makes the Project's Sources visible to <strong>every signed-in
-              user</strong> — an elevation is required to set or unset it.</p>
-            <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+            <form class="form-inline" method="post" action="/admin/kernel/project" autocomplete="off">
               <input type="hidden" name="csrf" value="{{ csrf_token }}">
               <input type="hidden" name="op" value="set_visibility">
               <input type="hidden" name="project_id" value="{{ project.id }}">
-              <select class="input" name="visibility" aria-label="visibility">
-                {% for v in ['personal', 'shared'] %}
-                  <option value="{{ v }}"{% if project.visibility == v %} selected{% endif %}>{{ v }}</option>
-                {% endfor %}
-                {% if is_elevated or project.visibility == 'public' %}
-                  <option value="public"{% if project.visibility == 'public' %} selected{% endif %}>public (elevation)</option>
-                {% endif %}
-              </select>
-              <button class="btn" data-size="sm" data-variant="outline" type="submit"{% if project.visibility == 'public' and not is_elevated %} disabled{% endif %}>Set visibility</button>
+              <div class="field">
+                <label class="label" for="pr-vis">Visibility</label>
+                <select class="select" id="pr-vis" name="visibility"{% if locked %} disabled{% endif %}>
+                  {% for v in ['personal', 'shared'] %}
+                    <option value="{{ v }}"{% if project.visibility == v %} selected{% endif %}>{{ v }}</option>
+                  {% endfor %}
+                  {% if is_elevated or project.visibility == 'public' %}
+                    <option value="public"{% if project.visibility == 'public' %} selected{% endif %}>public (elevation)</option>
+                  {% endif %}
+                </select>
+              </div>
+              <button class="btn" data-size="sm" data-variant="outline" type="submit"{% if locked %} disabled{% endif %}>Set visibility</button>
             </form>
-            {% if project.visibility == 'public' and not is_elevated %}
-              <p class="muted">This Project is public: changing it, adding Sources or deleting it needs an elevation.</p>
+            {% if locked %}
+              {{ note('This Project is public', 'Changing it, adding Sources or deleting it needs an elevation.') }}
             {% endif %}
           </section>
         </div>
       </div>
 
       <div class="card">
-        <header><h2 class="card-title">Sources <span class="badge">{{ sources|length }}</span></h2></header>
+        <header>
+          <h2>Sources</h2>
+          <p>Each Source is a connector instance with a <strong>stable</strong> security scope
+            (<code>src:&lt;uuid&gt;</code>). <code>kind</code> and <code>label</code> are labels only — two Confluence
+            Sources never share a scope. Removing a Source makes its rows unreachable; nothing is deleted.</p>
+          <span class="card-action badge" data-variant="secondary">{{ sources|length }}</span>
+        </header>
         <section>
-          <p class="muted">Each Source is a connector instance with a <strong>stable</strong> security scope
-            (<code>src:&lt;uuid&gt;</code>). <code>kind</code> and <code>label</code> are labels only — two
-            Confluence Sources never share a scope. Removing a Source makes its rows unreachable; nothing is deleted.</p>
           {% if sources %}
             <div class="table-container">
               <table class="table">
-                <thead><tr><th>Label</th><th>Kind</th><th>Scope</th><th>Origin</th><th></th></tr></thead>
+                <thead><tr><th>Label</th><th>Kind</th><th>Scope</th><th>Origin</th>{% if not locked %}<th class="col-actions"><span class="sr-only">Actions</span></th>{% endif %}</tr></thead>
                 <tbody>
                   {% for s in sources %}
                     <tr>
-                      <td>{{ s.label }}</td>
+                      <td>{{ s.label or '—' }}</td>
                       <td><code>{{ s.kind }}</code></td>
                       <td class="mono-wrap"><code>{{ s.scope }}</code></td>
                       <td class="muted">{{ s.origin }}</td>
-                      <td>
-                        {% if project.visibility != 'public' or is_elevated %}
+                      {% if not locked %}
+                      <td class="col-actions">
                         <form method="post" action="/admin/kernel/project" autocomplete="off">
                           <input type="hidden" name="csrf" value="{{ csrf_token }}">
                           <input type="hidden" name="op" value="remove_source">
@@ -99,48 +120,59 @@
                           <input type="hidden" name="source_id" value="{{ s.id }}">
                           <button class="btn" data-size="sm" data-variant="outline" type="submit" onclick="return confirm('Remove this source? Its rows become unreachable.')">Remove</button>
                         </form>
-                        {% endif %}
                       </td>
+                      {% endif %}
                     </tr>
                   {% endfor %}
                 </tbody>
               </table>
             </div>
           {% else %}
-            <p class="muted">No sources yet.</p>
+            {{ empty('No sources yet', 'Register the first connector instance below.') }}
           {% endif %}
-          {% if project.visibility != 'public' or is_elevated %}
-          <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+          {% if not locked %}
+          <form class="form-grid" method="post" action="/admin/kernel/project" autocomplete="off">
             <input type="hidden" name="csrf" value="{{ csrf_token }}">
             <input type="hidden" name="op" value="add_source">
             <input type="hidden" name="project_id" value="{{ project.id }}">
-            <input class="input" type="text" name="source_kind" placeholder="kind (wiki, confluence, ldap, iac…)" required pattern="[a-z][a-z0-9_-]*" aria-label="source kind">
-            <input class="input" type="text" name="source_label" placeholder="label (optional)" aria-label="source label">
-            <button class="btn" type="submit">Add source</button>
+            <div class="field">
+              <label class="label" for="src-kind">Kind</label>
+              <input class="input" id="src-kind" type="text" name="source_kind" placeholder="wiki, confluence, ldap, iac…" required pattern="[a-z][a-z0-9_-]*">
+            </div>
+            <div class="field">
+              <label class="label" for="src-label">Label <span class="muted">(optional)</span></label>
+              <input class="input" id="src-label" type="text" name="source_label">
+            </div>
+            <div class="form-actions">
+              <button class="btn" type="submit">Add source</button>
+              <span class="muted">The connector/loader stamps its rows with the minted scope (<code>Swarm.Projects.scope!/1</code>).</span>
+            </div>
           </form>
-          <p class="muted">The connector/loader for this Source stamps its rows with the minted scope
-            (<code>Swarm.Projects.scope!/1</code>).</p>
           {% endif %}
         </section>
       </div>
 
       <div class="card">
-        <header><h2 class="card-title">Members <span class="badge">{{ members|length }}</span></h2></header>
+        <header>
+          <h2>Members</h2>
+          <p>Members derive this Project's Sources. A member is a user (by login) or one of the fixed groups —
+            <code>staff</code> shares with every internal user. Adding <em>yourself</em> (or a group you belong to)
+            needs the Project owner or an elevation.</p>
+          <span class="card-action badge" data-variant="secondary">{{ members|length }}</span>
+        </header>
         <section>
-          <p class="muted">Members derive this Project's Sources. A member is a user (by login) or one of the fixed
-            groups — <code>staff</code> shares with every internal user. Adding <em>yourself</em> (or a group you
-            belong to) needs the Project owner or an elevation.</p>
           {% if members %}
             <div class="table-container">
               <table class="table">
-                <thead><tr><th>Member</th><th>Kind</th><th>Role</th><th></th></tr></thead>
+                <thead><tr><th>Member</th><th>Kind</th><th>Role</th><th class="col-actions"><span class="sr-only">Actions</span></th></tr></thead>
                 <tbody>
                   {% for m in members %}
-                    <tr>
-                      <td>{% if m.user_id %}<a href="/admin/users/{{ m.user_id }}">{{ m.login or m.user_id }}</a>{% else %}<a href="/admin/groups/{{ m.group_id }}">{{ m.name or m.group_id }}</a>{% endif %}</td>
+                    {% set mhref = ('/admin/users/' ~ m.user_id) if m.user_id else ('/admin/groups/' ~ m.group_id) %}
+                    <tr data-href="{{ mhref }}">
+                      <td><a href="{{ mhref }}">{% if m.user_id %}{{ m.login or m.user_id }}{% else %}{{ m.name or m.group_id }}{% endif %}</a></td>
                       <td class="muted">{{ 'user' if m.user_id else 'group' }}</td>
-                      <td>{{ m.role }}</td>
-                      <td>
+                      <td><span class="badge" data-variant="outline">{{ m.role }}</span></td>
+                      <td class="col-actions">
                         <form method="post" action="/admin/kernel/project" autocomplete="off">
                           <input type="hidden" name="csrf" value="{{ csrf_token }}">
                           <input type="hidden" name="op" value="remove_member">
@@ -155,35 +187,52 @@
               </table>
             </div>
           {% else %}
-            <p class="muted">No members yet — nobody derives this Project's Sources.</p>
+            {{ empty('No members yet', "Nobody derives this Project's Sources.") }}
           {% endif %}
-          <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+          <form class="form-grid" method="post" action="/admin/kernel/project" autocomplete="off">
             <input type="hidden" name="csrf" value="{{ csrf_token }}">
             <input type="hidden" name="op" value="add_member">
             <input type="hidden" name="project_id" value="{{ project.id }}">
-            <input class="input" type="text" name="member_login" placeholder="user login" aria-label="user login">
-            <select class="input" name="member_group_id" aria-label="group">
-              <option value="">— or a group —</option>
-              {% for g in canonical_groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
-            </select>
-            <select class="input" name="member_role" aria-label="role">
-              <option value="member">member</option>
-              <option value="owner">owner (users only)</option>
-            </select>
-            <button class="btn" type="submit">Add member</button>
+            <div class="field">
+              <label class="label" for="mb-login">User login</label>
+              <input class="input" id="mb-login" type="text" name="member_login">
+            </div>
+            <div class="field">
+              <label class="label" for="mb-group">— or a group</label>
+              <select class="select" id="mb-group" name="member_group_id">
+                <option value="">none</option>
+                {% for g in canonical_groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label class="label" for="mb-role">Role</label>
+              <select class="select" id="mb-role" name="member_role">
+                <option value="member">member</option>
+                <option value="owner">owner (users only)</option>
+              </select>
+            </div>
+            <div class="form-actions">
+              <button class="btn" type="submit">Add member</button>
+            </div>
           </form>
         </section>
       </div>
 
       <div class="card">
-        <header><h2 class="card-title">Delete project</h2></header>
+        <header>
+          <h2>Delete project</h2>
+          <p>Its Sources' rows become unreachable; nothing is deleted from the graph.</p>
+        </header>
         <section>
-          <form class="invite" method="post" action="/admin/kernel/project" autocomplete="off">
+          <form class="form-inline" method="post" action="/admin/kernel/project" autocomplete="off">
             <input type="hidden" name="csrf" value="{{ csrf_token }}">
             <input type="hidden" name="op" value="delete">
             <input type="hidden" name="project_id" value="{{ project.id }}">
-            <label class="menu-check"><input type="checkbox" name="confirm" value="1"> I understand its Sources' rows become unreachable</label>
-            <button class="btn" data-variant="destructive" type="submit"{% if project.visibility == 'public' and not is_elevated %} disabled{% endif %}>Delete project</button>
+            <div class="field" data-orientation="horizontal">
+              <input class="input" id="del-confirm" type="checkbox" name="confirm" value="1">
+              <label class="label" for="del-confirm">I understand its Sources' rows become unreachable</label>
+            </div>
+            <button class="btn" data-size="sm" data-variant="destructive" type="submit"{% if locked %} disabled{% endif %}>Delete project</button>
           </form>
         </section>
       </div>
