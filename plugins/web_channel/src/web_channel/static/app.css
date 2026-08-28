@@ -416,6 +416,7 @@ tr[data-href]:hover a { color: var(--link); }
    question right, answer left, everything top-down). */
 .post-q { margin-left: auto; max-width: 75%; width: fit-content; padding: 0.6rem 1rem;
           border-radius: var(--radius-lg); background: var(--secondary); text-align: left; }
+.post-q, .reply-q, .post-answer { scroll-margin-block: 5rem 7rem; }
 .post-q .post-q-rest { margin: 0.25rem 0 0; color: var(--muted-foreground); }
 .post-q .meta { margin-top: 0.2rem; font-size: 0.8rem; }
 .post-answer { margin-top: 0.75rem; }

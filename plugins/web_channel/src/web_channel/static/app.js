@@ -28,7 +28,7 @@ document.body.addEventListener("htmx:afterSwap", function (e) {
 
   if (path.endsWith("/ask/start")) {
     var pending = e.detail.target && e.detail.target.querySelector(".post-pending:last-child");
-    scrollToAskFragment(pending, "nearest");
+    scrollToAskFragment((pending && pending.querySelector(".reply-q, .post-q")) || pending, "center");
     return;
   }
 
