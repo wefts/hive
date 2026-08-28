@@ -174,8 +174,8 @@ def test_admin_hub_renders_for_groot(monkeypatch) -> None:
     assert 'href="/admin/tools"' in r.text
     assert 'href="/admin/groups"' in r.text
     assert 'href="/admin/roles"' in r.text
-    assert "1</span> kernel users" in r.text
-    assert "1</span> projects" in r.text
+    assert '<td class="col-num">1</td>' in r.text  # kernel user count on the Users row
+    assert r.text.count('<td class="col-num">1</td>') >= 2  # project + user counts on their rows
 
 
 def test_auth_provider_page_allows_admin_and_lists_realm_users(monkeypatch) -> None:

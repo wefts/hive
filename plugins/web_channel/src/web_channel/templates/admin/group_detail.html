@@ -1,82 +1,66 @@
-{% extends "base.html" %}
-{% from "_ui.html" import crumbs, unavailable, empty %}
-{% block content %}
-<div class="layout admin-layout">
-  <aside class="aside-col">
-    {% include "admin/_nav.html" %}
-  </aside>
+{% extends "admin/_base.html" %}
+{% from "_ui.html" import crumbs, unavailable, empty, kv_row %}
+{% block admin %}
+{{ crumbs([('Admin', '/admin'), ('Groups', '/admin/groups'), ((group.name or group.id) if group else 'Group', None)]) }}
 
-  <main class="main stack">
-    {{ crumbs([('Admin', '/admin'), ('Groups', '/admin/groups'), ((group.name or group.id) if group else 'Group', None)]) }}
+{% if group is none %}
+  <div class="card"><section>{{ unavailable(detail_error, 'Could not render this group right now.') }}</section></div>
+{% else %}
+  <header class="page-head">
+    <div>
+      <h1 class="page-title">{{ group.name or group.id }}
+        <span class="badge" data-variant="outline">fixed group</span>
+        {% if canonical and canonical.elevation_only %}<span class="badge status-warn">elevation-managed</span>{% endif %}</h1>
+      <p class="page-lead">A group grants <strong>no</strong> source visibility by itself — add it as a member of a
+        <a href="/admin/projects">Project</a> and its users inherit that Project's Sources.</p>
+    </div>
+    <div class="page-actions">
+      <a class="btn" data-size="sm" data-variant="outline" href="/admin/users">Manage membership on users</a>
+    </div>
+  </header>
 
-    {% if group is none %}
+  <div class="tabs" x-data="{ tab: 'details' }">
+    <nav role="tablist" aria-orientation="horizontal">
+      <button role="tab" type="button" :aria-selected="tab === 'details'" @click="tab = 'details'">Details</button>
+      <button role="tab" type="button" :aria-selected="tab === 'members'" @click="tab = 'members'">Members ({{ members|length }})</button>
+    </nav>
+
+    <div role="tabpanel" x-show="tab === 'details'">
       <div class="card">
-        <header><h2>Group</h2></header>
-        <section>{{ unavailable(detail_error, 'Could not render this group right now.') }}</section>
+        <section>
+          <dl class="kv">
+            {% call kv_row('Group id') %}<code class="hkey">{{ group.id }}</code>{% endcall %}
+            {% call kv_row('Confers') %}{{ group.granted_roles|join(', ') if group.granted_roles else (canonical.role if canonical else '—') }}{% endcall %}
+            {% call kv_row('Members') %}{{ group.member_count }}{% endcall %}
+            {% call kv_row('Membership') %}{% if canonical and canonical.local_only %}local-provider users only{% else %}any provider{% endif %}{% if canonical and canonical.elevation_only %} · changes require a live elevation{% endif %}{% endcall %}
+          </dl>
+        </section>
       </div>
-    {% else %}
-      <header class="page-head">
-        <div>
-          <h1 class="page-title">{{ group.name or group.id }}</h1>
-          <p class="page-lead">A group grants <strong>no</strong> source visibility by itself. Add it as a member of a
-            <a href="/admin/projects">Project</a> and its users inherit that Project's Sources.</p>
-        </div>
-        <div class="page-badges">
-          <span class="badge" data-variant="outline">fixed group</span>
-          {% if canonical and canonical.elevation_only %}<span class="badge status-warn">elevation-managed</span>{% endif %}
-        </div>
-      </header>
+    </div>
 
-      <div class="detail-grid">
-        <div class="card">
-          <header><h2>Identity</h2></header>
-          <section>
-            <dl class="kv">
-              <dt>Group id</dt><dd><code class="hkey">{{ group.id }}</code></dd>
-              <dt>Confers</dt><dd>{{ group.granted_roles|join(', ') if group.granted_roles else (canonical.role if canonical else '—') }}</dd>
-              <dt>Members</dt><dd>{{ group.member_count }}</dd>
-              {% if canonical and canonical.local_only %}<dt>Membership</dt><dd class="muted">local-provider users only</dd>{% endif %}
-            </dl>
-          </section>
-        </div>
-
-        <div class="card">
-          <header>
-            <h2>Managing membership</h2>
-            <p>Membership is managed per user — open a member, or any user, to add/remove groups.
-              {% if canonical and canonical.elevation_only %}Changing <code>{{ group.id }}</code> membership requires a live elevation.{% endif %}</p>
-          </header>
-          <footer><a class="btn" data-size="sm" data-variant="outline" href="/admin/users">Open the roster</a></footer>
-        </div>
-      </div>
-
+    <div role="tabpanel" x-show="tab === 'members'" x-cloak>
       <div class="card">
-        <header>
-          <h2>Members</h2>
-          <span class="card-action badge" data-variant="secondary">{{ members|length }}</span>
-        </header>
         <section>
           {% if members %}
-            <div class="table-container">
-              <table class="table">
-                <thead><tr><th>Login</th><th>Providers</th><th>Status</th></tr></thead>
-                <tbody>
-                  {% for m in members %}
-                    <tr data-href="/admin/users/{{ m.user_id }}">
-                      <td><a href="/admin/users/{{ m.user_id }}">{{ m.login or '—' }}</a></td>
-                      <td class="muted">{{ m.providers|join(', ') if m.providers else '—' }}</td>
-                      <td><span class="badge" data-variant="outline">{{ m.status or 'unknown' }}</span></td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
+            <table class="table">
+              <thead><tr><th class="col-key">Login</th><th>Providers</th><th class="col-status">Status</th></tr></thead>
+              <tbody>
+                {% for m in members %}
+                  <tr data-href="/admin/users/{{ m.user_id }}">
+                    <td><a href="/admin/users/{{ m.user_id }}">{{ m.login or '—' }}</a></td>
+                    <td class="muted">{{ m.providers|join(', ') if m.providers else '—' }}</td>
+                    <td class="col-status"><span class="badge" data-variant="outline">{{ m.status or 'unknown' }}</span></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
           {% else %}
             {{ empty('No members', 'Add a user to this group from their page.') }}
           {% endif %}
         </section>
+        <footer class="border-t"><p class="muted">Membership is managed per user (open a member, or any user, to add/remove groups).</p></footer>
       </div>
-    {% endif %}
-  </main>
-</div>
+    </div>
+  </div>
+{% endif %}
 {% endblock %}

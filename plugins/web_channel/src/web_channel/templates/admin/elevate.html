@@ -1,36 +1,27 @@
-{% extends "base.html" %}
+{% extends "admin/_base.html" %}
 {% from "_ui.html" import page_head, unavailable, note %}
-{% block content %}
-<div class="layout admin-layout">
-  <aside class="aside-col">
-    {% include "admin/_nav.html" %}
-  </aside>
+{% block admin %}
+{% call page_head('Elevate', 'No standing superadmin: a local wheel member elevates for a bounded time — re-enter your password (fresh re-authentication), give a reason (audited before the capability exists); bound to this session, ends by itself or from the sidebar.') %}
+  <span class="badge status-warn">sudo</span>
+{% endcall %}
 
-  <main class="main stack">
-    {% call page_head('Elevate', 'There is no standing superadmin. A local wheel member may elevate for a bounded time: re-enter your password now (fresh re-authentication), give a reason (audited before the capability exists), and the elevation is bound to this session only. It ends by itself; you can end it early from the sidebar.') %}
-      <span class="badge status-warn">sudo</span>
-    {% endcall %}
-
-    <div class="card">
-      <header><h2>Start an elevation</h2></header>
-      <section>
-        {% if error %}{{ unavailable(error) }}{% endif %}
-        {% if is_elevated %}
-          {{ note('Already elevated', 'until ' ~ elevation_expires_at[:19]) }}
-        {% elif not can_elevate %}
-          {{ note('Local accounts only', 'Only a local account can elevate (Wheel is local-only). You are signed in via ' ~ principal.provider ~ '.') }}
-        {% else %}
-          <form class="form-grid" method="post" action="/admin/elevate" autocomplete="off">
-            <input type="hidden" name="csrf" value="{{ csrf_token }}">
-            <div class="field"><label class="label" for="el-reason">Reason <span class="muted">(required, audited)</span></label>
-              <input class="input" id="el-reason" type="text" name="reason" required></div>
-            <div class="field"><label class="label" for="el-pw">Your password <span class="muted">(re-authentication)</span></label>
-              <input class="input" id="el-pw" type="password" name="password" required></div>
-            <div class="form-actions"><button class="btn" type="submit">Elevate</button></div>
-          </form>
-        {% endif %}
-      </section>
-    </div>
-  </main>
+<div class="card">
+  <section>
+    {% if error %}{{ unavailable(error) }}{% endif %}
+    {% if is_elevated %}
+      {{ note('Already elevated', 'until ' ~ elevation_expires_at[:19]) }}
+    {% elif not can_elevate %}
+      {{ note('Local accounts only', 'Only a local account can elevate (Wheel is local-only). You are signed in via ' ~ principal.provider ~ '.') }}
+    {% else %}
+      <form class="form-grid" method="post" action="/admin/elevate" autocomplete="off">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <div class="field"><label class="label" for="el-reason">Reason <span class="muted">(required, audited)</span></label>
+          <input class="input" id="el-reason" type="text" name="reason" required></div>
+        <div class="field"><label class="label" for="el-pw">Your password <span class="muted">(re-authentication)</span></label>
+          <input class="input" id="el-pw" type="password" name="password" required></div>
+        <div class="form-actions"><button class="btn" type="submit">Elevate</button></div>
+      </form>
+    {% endif %}
+  </section>
 </div>
 {% endblock %}

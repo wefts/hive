@@ -1,28 +1,14 @@
-{% extends "base.html" %}
+{% extends "admin/_base.html" %}
 {% from "_ui.html" import page_head, note %}
-{% block content %}
-<div class="layout admin-layout">
-  <aside class="aside-col">
-    {% include "admin/_nav.html" %}
-  </aside>
+{% block admin %}
+{% call page_head('Connectors', 'The knowledge ingest sources for the swarm — wiki, Confluence, LDAP today, third-party later. Under ADR-20 each connector instance is a Source owned by a Project (stable src:<uuid> scope); access is Project membership.') %}
+  <span class="badge" data-variant="outline">planned</span>
+  <a class="btn" data-size="sm" data-variant="outline" href="/admin/projects">Open Projects</a>
+{% endcall %}
 
-  <main class="main stack">
-    {% call page_head('Connectors', 'Connectors are the knowledge ingest sources for the swarm: wiki, Confluence, LDAP today, and third-party sources later.') %}
-      <span class="badge" data-variant="outline">planned</span>
-    {% endcall %}
-
-    <div class="card">
-      <header>
-        <h2>Where connectors live today</h2>
-        <p>Under ADR-20 each connector instance is a <strong>Source</strong> owned by a
-          <a href="/admin/projects">Project</a>, with a stable <code>src:&lt;uuid&gt;</code> scope; access is Project
-          membership.</p>
-      </header>
-      <section>
-        {{ note('Register Sources on the Project page', 'Connector configuration and health (E4) are not managed here yet — this page does not call the kernel or Keycloak.') }}
-      </section>
-      <footer><a class="btn" data-size="sm" data-variant="outline" href="/admin/projects">Open Projects</a></footer>
-    </div>
-  </main>
+<div class="card">
+  <section>
+    {{ note('Register Sources on the Project page', 'Connector configuration and health (E4) are not managed here yet — this page does not call the kernel or Keycloak.') }}
+  </section>
 </div>
 {% endblock %}

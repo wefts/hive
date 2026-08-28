@@ -1,6 +1,7 @@
 {# Server-side roster page: read-only list + pager, swapped into #roster-body by HTMX
    on search / paginate (ListUsers query+offset+total). All per-user actions live on
-   the user detail page — the roster is just a scannable index that links there. #}
+   the user detail page — the roster is just a scannable index that links there.
+   Roles are not a column: they derive from Groups (shown) and live on the detail page. #}
 {% from "_ui.html" import unavailable, empty %}
 {% if kernel_users is none %}
   {{ unavailable('Kernel roster unavailable', 'Could not list kernel users right now.') }}
@@ -8,30 +9,23 @@
   {% if q %}{{ empty('No users match "' ~ q ~ '"', 'Try a shorter login or name fragment.') }}
   {% else %}{{ empty('No users yet', 'Invite a local user from the Overview page, or sign in through the auth provider.') }}{% endif %}
 {% else %}
-  <div class="table-container">
-    <table class="table admin-users-table">
-      <thead>
-        <tr>
-          <th>Login</th><th>Name</th><th>Status</th><th>Roles</th><th>Groups</th>
-          <th>Providers</th><th class="col-date">Last login</th>
+  <table class="table admin-users-table">
+    <thead>
+      <tr><th class="col-key">Login</th><th>Name</th><th class="col-status">Status</th><th>Groups</th><th class="col-optional">Providers</th><th class="col-date col-optional">Last login</th></tr>
+    </thead>
+    <tbody>
+      {% for u in kernel_users %}
+        <tr data-href="/admin/users/{{ u.id }}">
+          <td><a href="/admin/users/{{ u.id }}">{{ u.login or '—' }}</a>{% if u.external %} <span class="badge status-warn">guest</span>{% endif %}</td>
+          <td>{{ [u.first_name, u.last_name]|select|join(' ') or u.nickname or '—' }}</td>
+          <td class="col-status"><span class="badge" data-variant="outline">{{ u.status or 'unknown' }}</span></td>
+          <td>{{ u.groups|join(', ') if u.groups else '—' }}</td>
+          <td class="muted col-optional">{{ u.providers|join(', ') if u.providers else '—' }}</td>
+          <td class="col-date col-optional muted">{% if u.last_login_at %}<time datetime="{{ u.last_login_at }}">{{ u.last_login_at[:10] }}</time>{% else %}never{% endif %}</td>
         </tr>
-      </thead>
-      <tbody>
-        {% for u in kernel_users %}
-          <tr data-href="/admin/users/{{ u.id }}">
-            <td><a href="/admin/users/{{ u.id }}">{{ u.login or '—' }}</a></td>
-            <td>{{ [u.first_name, u.last_name]|select|join(' ') or u.nickname or '—' }}</td>
-            <td><span class="badge" data-variant="outline">{{ u.status or 'unknown' }}</span></td>
-            <td>{{ u.roles|join(', ') if u.roles else '—' }}</td>
-            <td>{{ u.groups|join(', ') if u.groups else '—' }}</td>
-            <td class="muted">{{ u.providers|join(', ') if u.providers else '—' }}</td>
-            <td class="col-date muted">{% if u.last_login_at %}<time datetime="{{ u.last_login_at }}">{{ u.last_login_at[:10] }}</time>{% else %}never{% endif %}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
+      {% endfor %}
+    </tbody>
+  </table>
   {% if total %}
     <nav class="pager" aria-label="Roster pagination">
       {% if offset > 0 %}

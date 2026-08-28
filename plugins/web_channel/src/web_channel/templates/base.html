@@ -18,6 +18,7 @@
       @keydown.ctrl.k.window.prevent="palette = true"
       @keydown.escape.window="palette = false"
       @close-palette.window="palette = false">
+  {% block body %}
   <main class="shell">
     <header class="topbar">
       {# The brand IS the home link; "operator console" lives in the <title> only —
@@ -42,6 +43,7 @@
     </header>
     {% block content %}{% endblock %}
   </main>
+  {% endblock %}
 
   {% if authed %}
   <!-- Body telemetry (operator: footer ONLY, the aside is full) — a thin fixed

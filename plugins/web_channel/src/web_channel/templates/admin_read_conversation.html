@@ -1,14 +1,15 @@
-{% extends "base.html" %}
-{% from "_ui.html" import crumbs, note %}
-{% block content %}
+{% extends "admin/_base.html" %}
+{% from "_ui.html" import crumbs %}
+{% block admin %}
 {{ crumbs([('Admin', '/admin'), ('Tools', '/admin/tools'), ('Break-glass read', None)]) }}
+<header class="page-head">
+  <div>
+    <h1 class="page-title">{{ conversation.title or '(untitled)' }} <span class="badge status-warn">audited</span></h1>
+    <p class="page-lead"><strong>{{ actor_login }}</strong> read this conversation because: <em>{{ reason }}</em>.
+      Logged to the kernel's audit trail BEFORE the data was returned (ADR-16 D6).</p>
+  </div>
+</header>
 <article class="card">
-  <header>
-    <h2>{{ conversation.title or '(untitled)' }}</h2>
-    <p><strong>{{ actor_login }}</strong> read this conversation because: <em>{{ reason }}</em>.
-      This access was logged to the kernel's audit trail BEFORE the data was returned (ADR-16 D6).</p>
-    <span class="card-action badge status-warn">audited</span>
-  </header>
   <section>
     <ul class="recent">
       {% for m in messages %}
@@ -16,9 +17,7 @@
           <span class="badge" data-variant="outline">{{ m.role }}</span>
           <span class="meta">{{ m.created_at }}</span>
           <p class="answer">{{ m.body }}</p>
-          {% if m.ask_ref %}
-            <a class="navlink" href="/deliberation/{{ m.ask_ref }}">see how it decided</a>
-          {% endif %}
+          {% if m.ask_ref %}<a class="navlink" href="/deliberation/{{ m.ask_ref }}">see how it decided</a>{% endif %}
         </li>
       {% else %}
         <li class="muted">No messages.</li>

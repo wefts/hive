@@ -1,10 +1,11 @@
 {# Shared page grammar — thin Jinja macros over Basecoat components (app.css holds
    only the layout glue). Every page uses THESE, never a one-off variant:
-     page_head  — h1 + lead + badges (call-block carries the badges)
+     page_head  — h1 + lead, actions on the right (call-block carries the actions)
      crumbs     — Basecoat .breadcrumb; items = [(label, href|None), …], last = current
      unavailable— Basecoat .alert[destructive]: a kernel/IdP source could not be read
      note       — Basecoat .alert: a plain informational note
-     empty      — Basecoat .empty: the list is legitimately empty #}
+     empty      — Basecoat .empty: the list is legitimately empty
+     kv_row     — one key/value row of a .kv definition list #}
 
 {% macro page_head(title, lead='') -%}
 <header class="page-head">
@@ -12,7 +13,7 @@
     <h1 class="page-title">{{ title }}</h1>
     {% if lead %}<p class="page-lead">{{ lead }}</p>{% endif %}
   </div>
-  {% if caller %}<div class="page-badges">{{ caller() }}</div>{% endif %}
+  {% if caller %}<div class="page-actions">{{ caller() }}</div>{% endif %}
 </header>
 {%- endmacro %}
 
@@ -48,4 +49,8 @@
     {% if text %}<p>{{ text }}</p>{% endif %}
   </header>
 </div>
+{%- endmacro %}
+
+{% macro kv_row(key) -%}
+<div><dt>{{ key }}</dt><dd>{{ caller() }}</dd></div>
 {%- endmacro %}

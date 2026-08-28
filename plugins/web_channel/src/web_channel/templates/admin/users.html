@@ -1,39 +1,29 @@
-{% extends "base.html" %}
+{% extends "admin/_base.html" %}
 {% from "_ui.html" import page_head, unavailable %}
-{% block content %}
-<div class="layout admin-layout">
-  <aside class="aside-col">
-    {% include "admin/_nav.html" %}
-  </aside>
+{% block admin %}
+{% call page_head('Users', 'Kernel roster — search over login and names, 50 per page. Open a user to manage groups, credentials and lifecycle.') %}
+  <span class="badge" data-variant="outline">kernel truth</span>
+  <a class="btn" data-size="sm" data-variant="outline" href="/admin">Invite local user</a>
+{% endcall %}
 
-  <main class="main stack">
-    {% call page_head('Users', 'Kernel-side search over the whole roster (login + names), 50 per page. Open a user to manage groups, credentials, and lifecycle.') %}
-      <span class="badge" data-variant="outline">kernel truth</span>
-    {% endcall %}
-
-    <div class="card">
-      <header>
-        <h2>Roster</h2>
-        {% if total %}<span class="card-action badge" data-variant="secondary">{{ total }}</span>{% endif %}
-      </header>
-      <section>
-        {% if not principal.uuid %}
-          {{ unavailable('Kernel identity not resolved yet', 'Actions will be rejected until signing is configured and this account is migrated into the kernel identity store.') }}
-        {% endif %}
-        <div class="field">
-          <label class="label" for="admin-user-search">Search users</label>
-          <input id="admin-user-search" class="input" type="search" name="q" value="{{ q }}"
-                 placeholder="login, name, or nickname"
-                 autocomplete="off"
-                 hx-get="/admin/users/roster"
-                 hx-trigger="input changed delay:300ms, search"
-                 hx-target="#roster-body" hx-swap="innerHTML">
-        </div>
-        <div id="roster-body">
-          {% include "admin/_users_roster.html" %}
-        </div>
-      </section>
-    </div>
-  </main>
+<div class="card">
+  <section>
+    {% if not principal.uuid %}
+      {{ unavailable('Kernel identity not resolved yet', 'Actions will be rejected until signing is configured and this account is migrated into the kernel identity store.') }}
+    {% endif %}
+    <form class="form-inline" onsubmit="return false" autocomplete="off">
+      <div class="field">
+        <label class="label" for="admin-user-search">Search</label>
+        <input id="admin-user-search" class="input" type="search" name="q" value="{{ q }}"
+               placeholder="login, name, or nickname"
+               hx-get="/admin/users/roster"
+               hx-trigger="input changed delay:300ms, search"
+               hx-target="#roster-body" hx-swap="innerHTML">
+      </div>
+    </form>
+  </section>
+  <section class="border-t" id="roster-body">
+    {% include "admin/_users_roster.html" %}
+  </section>
 </div>
 {% endblock %}

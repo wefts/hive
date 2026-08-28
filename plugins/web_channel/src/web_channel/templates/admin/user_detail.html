@@ -1,150 +1,139 @@
-{% extends "base.html" %}
-{% from "_ui.html" import crumbs, unavailable, empty, note %}
-{% block content %}
-<div class="layout admin-layout">
-  <aside class="aside-col">
-    {% include "admin/_nav.html" %}
-  </aside>
+{% extends "admin/_base.html" %}
+{% from "_ui.html" import crumbs, unavailable, empty, kv_row %}
+{% block admin %}
+{{ crumbs([('Admin', '/admin'), ('Users', '/admin/users'), ((user.login if user else 'User'), None)]) }}
 
-  <main class="main stack">
-    {{ crumbs([('Admin', '/admin'), ('Users', '/admin/users'), ((user.login if user else 'User'), None)]) }}
+{% if user is none %}
+  <div class="card"><section>{{ unavailable(detail_error, 'Could not render this kernel user detail right now.') }}</section></div>
+{% else %}
+  <header class="page-head">
+    <div>
+      <h1 class="page-title">{{ user.login or 'User detail' }}
+        <span class="badge" data-variant="outline">{{ user.status or 'unknown' }}</span>
+        {% if user.external %}<span class="badge status-warn">guest</span>{% endif %}</h1>
+      <p class="page-lead">{{ [user.first_name, user.last_name]|select|join(' ') or user.nickname or 'kernel user' }} · {{ user.providers|join(', ') if user.providers else 'no provider' }}</p>
+    </div>
+    <div class="page-actions">
+      <form method="post" action="/admin/kernel/user" autocomplete="off">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <input type="hidden" name="target_user_id" value="{{ user.id }}">
+        <input type="hidden" name="op" value="deactivate">
+        <button class="btn" data-size="sm" data-variant="outline" type="submit">Deactivate</button>
+      </form>
+      <form method="post" action="/admin/kernel/user" autocomplete="off">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <input type="hidden" name="target_user_id" value="{{ user.id }}">
+        <input type="hidden" name="op" value="delete">
+        <button class="btn" data-size="sm" data-variant="destructive" type="submit" onclick="return confirm('Delete this user? Login dies; learned content persists.')">Delete</button>
+      </form>
+    </div>
+  </header>
 
-    {% if user is none %}
+  <div class="tabs" x-data="{ tab: 'details' }">
+    <nav role="tablist" aria-orientation="horizontal">
+      <button role="tab" type="button" :aria-selected="tab === 'details'" @click="tab = 'details'">Details</button>
+      <button role="tab" type="button" :aria-selected="tab === 'groups'" @click="tab = 'groups'">Groups ({{ user.groups|length }})</button>
+      <button role="tab" type="button" :aria-selected="tab === 'projects'" @click="tab = 'projects'">Projects ({{ user_projects|length }})</button>
+      <button role="tab" type="button" :aria-selected="tab === 'credential'" @click="tab = 'credential'">Local credential</button>
+    </nav>
+
+    <div role="tabpanel" x-show="tab === 'details'">
       <div class="card">
-        <header><h2>User</h2></header>
-        <section>{{ unavailable(detail_error, 'Could not render this kernel user detail right now.') }}</section>
+        <section>
+          <dl class="kv">
+            {% call kv_row('Login') %}{{ user.login or '—' }}{% endcall %}
+            {% call kv_row('Full name') %}{{ [user.first_name, user.last_name]|select|join(' ') or user.nickname or '—' }}{% endcall %}
+            {% call kv_row('Status') %}{{ user.status or '—' }}{% if user.external %} · guest (external){% endif %}{% endcall %}
+            {% call kv_row('Roles') %}{{ user.roles|join(', ') if user.roles else '—' }} <span class="muted">(derived from groups)</span>{% endcall %}
+            {% call kv_row('Groups') %}{{ user.groups|join(', ') if user.groups else '—' }}{% endcall %}
+            {% call kv_row('Providers') %}{{ user.providers|join(', ') if user.providers else '—' }}{% endcall %}
+            {% call kv_row('Emails') %}{{ user.emails|join(', ') if user.emails else '—' }}{% endcall %}
+            {% call kv_row('Last login') %}{{ user.last_login_at or 'never' }}{% endcall %}
+            {% call kv_row('UUID') %}<code class="hkey">{{ user.id }}</code>{% endcall %}
+          </dl>
+        </section>
+        <footer class="border-t"><p class="muted">Deactivate/delete kill the login; learned content persists (D11).
+          {% if 'wheel' in user.groups %}A <code>wheel</code> member can only be changed under an elevation, never the last one.{% endif %}</p></footer>
       </div>
-    {% else %}
-      <header class="page-head">
-        <div>
-          <h1 class="page-title">{{ user.login or 'User detail' }}</h1>
-          <p class="page-lead">{{ [user.first_name, user.last_name]|select|join(' ') or user.nickname or 'kernel user' }}</p>
-        </div>
-        <div class="page-badges">
-          <span class="badge" data-variant="outline">{{ user.status or 'unknown' }}</span>
-          {% if user.external %}<span class="badge status-warn">guest</span>{% endif %}
-        </div>
-      </header>
+    </div>
 
-      <div class="detail-grid">
-        <div class="stack">
-          <div class="card">
-            <header><h2>Identity</h2></header>
-            <section>
-              <dl class="kv">
-                <dt>Login</dt><dd>{{ user.login or '—' }}</dd>
-                <dt>Full name</dt><dd>{{ [user.first_name, user.last_name]|select|join(' ') or user.nickname or '—' }}</dd>
-                <dt>Roles</dt><dd>{{ user.roles|join(', ') if user.roles else '—' }}</dd>
-                <dt>Groups</dt><dd>{{ user.groups|join(', ') if user.groups else '—' }}</dd>
-                <dt>Providers</dt><dd>{{ user.providers|join(', ') if user.providers else '—' }}</dd>
-                <dt>Emails</dt><dd>{{ user.emails|join(', ') if user.emails else '—' }}</dd>
-                <dt>Last login</dt><dd>{{ user.last_login_at or 'never' }}</dd>
-                <dt>Full UUID</dt><dd><code class="hkey">{{ user.id }}</code></dd>
-              </dl>
-            </section>
-          </div>
-
-          <div class="card">
-            <header>
-              <h2>Projects</h2>
-              <p>What this user can see: the Projects they are a member of (directly or via a group) plus
-                public Projects. Membership is managed on the Project page.</p>
-              <span class="card-action badge" data-variant="secondary">{{ user_projects|length }}</span>
-            </header>
-            <section>
-              {% if user_projects %}
-                <div class="table-container">
-                  <table class="table">
-                    <thead><tr><th>Project</th><th>Visibility</th></tr></thead>
-                    <tbody>
-                      {% for p in user_projects %}
-                        <tr data-href="/admin/projects/{{ p.id }}">
-                          <td><a href="/admin/projects/{{ p.id }}">{{ p.name }}</a></td>
-                          <td>{% if p.visibility %}<span class="badge{% if p.visibility == 'public' %} status-warn{% endif %}"{% if p.visibility != 'public' %} data-variant="outline"{% endif %}>{{ p.visibility }}</span>{% else %}—{% endif %}</td>
-                        </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
-                </div>
+    <div role="tabpanel" x-show="tab === 'groups'" x-cloak>
+      <div class="card">
+        <header>
+          <h2>Group membership</h2>
+          <p>Roles come from group membership — no per-user role grants, and groups grant no visibility.
+            <code>wheel</code> takes local users only and is managed under an elevation.</p>
+        </header>
+        <section>
+          <ul class="row-list">
+            {% for g in canonical_groups %}
+              {% set member = g.id in user.groups %}
+              {% if g.local_only and not user_is_local %}
+                <li class="muted"><span>{{ g.name }}</span><span>local users only</span></li>
+              {% elif g.elevation_only and not is_elevated %}
+                <li><span>{{ g.name }}{% if member %} <span class="badge status-found">member</span>{% endif %}</span>
+                  <span class="muted">requires an elevation</span></li>
               {% else %}
-                {{ empty('No Project', 'This user sees only public knowledge' ~ ('' if user.external else ' and their own conversations') ~ '.') }}
+                <li>
+                  <form method="post" action="/admin/kernel/access" autocomplete="off" class="row-list-form">
+                    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                    <input type="hidden" name="target_user_id" value="{{ user.id }}">
+                    <input type="hidden" name="op" value="{{ 'revoke_group' if member else 'grant_group' }}">
+                    <input type="hidden" name="group_id" value="{{ g.id }}">
+                    <span>{{ g.name }} <span class="muted">· {{ g.role }}</span>{% if member %} <span class="badge status-found">member</span>{% endif %}</span>
+                    <button class="btn" data-size="sm" data-variant="outline" type="submit">{{ 'Remove' if member else 'Add' }}</button>
+                  </form>
+                </li>
               {% endif %}
-            </section>
-          </div>
+            {% endfor %}
+          </ul>
+        </section>
+      </div>
+    </div>
 
-          <div class="card">
-            <header>
-              <h2>Local channel credential</h2>
-              <p>Channel-local password login (bootstrap / invite bridge), separate from the kernel identity
-                and from the auth provider. It carries no authority.</p>
-            </header>
-            <section>
-              {% if local_cred %}
-                <dl class="kv"><dt>Username</dt><dd>{{ local_cred.username }}</dd></dl>
-              {% else %}
-                <p class="muted">No local channel credential for this login — signs in via the auth provider.</p>
-              {% endif %}
-            </section>
-          </div>
-        </div>
-
-        <div class="stack">
-          <div class="card">
-            <header>
-              <h2>Group membership</h2>
-              <p>Roles come from group membership — there are no per-user role grants and groups grant no
-                visibility. <code>wheel</code> takes local users only and is managed under an elevation.</p>
-            </header>
-            <section>
-              <ul class="row-list">
-                {% for g in canonical_groups %}
-                  {% set member = g.id in user.groups %}
-                  {% if g.local_only and not user_is_local %}
-                    <li class="muted">{{ g.name }} <span class="muted">· local users only</span></li>
-                  {% elif g.elevation_only and not is_elevated %}
-                    <li class="muted"><span>{{ g.name }}{% if member %} <span class="badge status-found">member</span>{% endif %}</span>
-                      <span class="muted">requires an elevation</span></li>
-                  {% else %}
-                    <li>
-                      <form method="post" action="/admin/kernel/access" autocomplete="off">
-                        <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                        <input type="hidden" name="target_user_id" value="{{ user.id }}">
-                        <input type="hidden" name="op" value="{{ 'revoke_group' if member else 'grant_group' }}">
-                        <input type="hidden" name="group_id" value="{{ g.id }}">
-                        <span>{{ g.name }} <span class="muted">· {{ g.role }}</span>{% if member %} <span class="badge status-found">member</span>{% endif %}</span>
-                        <button class="btn" data-size="sm" data-variant="outline" type="submit">{{ 'Remove' if member else 'Add' }}</button>
-                      </form>
-                    </li>
-                  {% endif %}
+    <div role="tabpanel" x-show="tab === 'projects'" x-cloak>
+      <div class="card">
+        <header>
+          <h2>Projects</h2>
+          <p>What this user can see: Projects they are a member of (directly or via a group) plus public Projects.
+            Membership is managed on the Project page.</p>
+        </header>
+        <section>
+          {% if user_projects %}
+            <table class="table">
+              <thead><tr><th class="col-key">Project</th><th class="col-status">Visibility</th></tr></thead>
+              <tbody>
+                {% for p in user_projects %}
+                  <tr data-href="/admin/projects/{{ p.id }}">
+                    <td><a href="/admin/projects/{{ p.id }}">{{ p.name }}</a></td>
+                    <td class="col-status">{% if p.visibility %}<span class="badge{% if p.visibility == 'public' %} status-warn{% endif %}"{% if p.visibility != 'public' %} data-variant="outline"{% endif %}>{{ p.visibility }}</span>{% else %}—{% endif %}</td>
+                  </tr>
                 {% endfor %}
-              </ul>
-            </section>
-          </div>
-
-          <div class="card">
-            <header>
-              <h2>Lifecycle</h2>
-              <p>Deactivate/delete kill the login; learned content persists (D11).
-                {% if 'wheel' in user.groups %}A <code>wheel</code> member can only be changed under an elevation, never the last one.{% endif %}</p>
-            </header>
-            <footer>
-              <form method="post" action="/admin/kernel/user" autocomplete="off">
-                <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                <input type="hidden" name="target_user_id" value="{{ user.id }}">
-                <input type="hidden" name="op" value="deactivate">
-                <button class="btn" data-size="sm" type="submit" data-variant="outline">Deactivate</button>
-              </form>
-              <form method="post" action="/admin/kernel/user" autocomplete="off">
-                <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                <input type="hidden" name="target_user_id" value="{{ user.id }}">
-                <input type="hidden" name="op" value="delete">
-                <button class="btn" data-size="sm" type="submit" data-variant="destructive" onclick="return confirm('Delete this user? Login dies; learned content persists.')">Delete</button>
-              </form>
-            </footer>
-          </div>
-        </div>
+              </tbody>
+            </table>
+          {% else %}
+            {{ empty('No Project', 'This user sees only public knowledge' ~ ('' if user.external else ' and their own conversations') ~ '.') }}
+          {% endif %}
+        </section>
       </div>
-    {% endif %}
-  </main>
-</div>
+    </div>
+
+    <div role="tabpanel" x-show="tab === 'credential'" x-cloak>
+      <div class="card">
+        <header>
+          <h2>Local channel credential</h2>
+          <p>Channel-local password login (bootstrap / invite bridge), separate from the kernel identity and from the
+            auth provider. It carries no authority.</p>
+        </header>
+        <section>
+          {% if local_cred %}
+            <dl class="kv">{% call kv_row('Username') %}{{ local_cred.username }}{% endcall %}</dl>
+          {% else %}
+            <p class="muted">No local channel credential for this login — signs in via the auth provider.</p>
+          {% endif %}
+        </section>
+      </div>
+    </div>
+  </div>
+{% endif %}
 {% endblock %}

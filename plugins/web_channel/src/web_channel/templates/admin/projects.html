@@ -1,82 +1,55 @@
-{% extends "base.html" %}
+{% extends "admin/_base.html" %}
 {% from "_ui.html" import page_head, unavailable, empty %}
-{% block content %}
-<div class="layout admin-layout">
-  <aside class="aside-col">
-    {% include "admin/_nav.html" %}
-  </aside>
+{% block admin %}
+<div x-data="{ create: false }">
+  {% call page_head('Projects', 'A Project is the sole data-access container: it owns Sources (connectors); its members — users or one of the fixed groups — see those Sources.') %}
+    <span class="badge" data-variant="outline">kernel truth</span>
+    <button class="btn" data-size="sm" type="button" @click="create = !create" :aria-expanded="create">New project</button>
+  {% endcall %}
 
-  <main class="main stack">
-    {% call page_head('Projects', 'A Project is the sole data-access container: it owns Sources (connectors), and its members — users or one of the fixed groups — see those Sources. People share Projects, not raw scopes.') %}
-      <span class="badge" data-variant="outline">kernel truth</span>
-    {% endcall %}
-
-    <div class="card">
-      <header>
-        <h2>All projects</h2>
-        <p><code>public</code> Projects are visible to every signed-in user and need an elevation to create or flip.</p>
-        {% if projects is not none %}<span class="card-action badge" data-variant="secondary">{{ projects|length }}</span>{% endif %}
-      </header>
-      <section>
-        {% if projects is none %}
-          {{ unavailable('Kernel projects unavailable', 'Could not list projects right now.') }}
-        {% elif not projects %}
-          {{ empty('No projects yet', 'Create the first one below; you become its owner.') }}
-        {% else %}
-          <div class="table-container">
-            <table class="table">
-              <thead>
-                <tr><th>Project</th><th>Visibility</th><th class="col-num">Sources</th><th class="col-num">Members</th><th class="col-date">Created</th></tr>
-              </thead>
-              <tbody>
-                {% for p in projects %}
-                  <tr data-href="/admin/projects/{{ p.id }}">
-                    <td><a href="/admin/projects/{{ p.id }}">{{ p.name }}</a>
-                      {% if p.description %}<div class="muted">{{ p.description }}</div>{% endif %}</td>
-                    <td><span class="badge{% if p.visibility == 'public' %} status-warn{% endif %}"{% if p.visibility != 'public' %} data-variant="outline"{% endif %}>{{ p.visibility }}</span></td>
-                    <td class="col-num">{{ p.source_count }}</td>
-                    <td class="col-num">{{ p.member_count }}</td>
-                    <td class="col-date muted">{{ p.created_at[:10] }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% endif %}
-      </section>
-    </div>
-
-    <div class="card">
-      <header>
-        <h2>New project</h2>
-        <p>You become the Project's owner. Add Sources and members on its page.</p>
-      </header>
-      <section>
-        <form class="form-grid" method="post" action="/admin/kernel/project" autocomplete="off">
-          <input type="hidden" name="csrf" value="{{ csrf_token }}">
-          <input type="hidden" name="op" value="create">
-          <div class="field">
-            <label class="label" for="np-name">Name</label>
-            <input class="input" id="np-name" type="text" name="name" required>
-          </div>
-          <div class="field">
-            <label class="label" for="np-desc">Description <span class="muted">(optional)</span></label>
-            <input class="input" id="np-desc" type="text" name="description">
-          </div>
-          <div class="field">
-            <label class="label" for="np-vis">Visibility</label>
-            <select class="select" id="np-vis" name="visibility">
-              <option value="shared">shared</option>
-              <option value="personal">personal</option>
-              {% if is_elevated %}<option value="public">public (elevation)</option>{% endif %}
-            </select>
-          </div>
-          <div class="form-actions">
-            <button class="btn" type="submit">Create project</button>
-          </div>
-        </form>
-      </section>
-    </div>
-  </main>
+  <div class="card">
+    <section x-show="create" x-cloak class="border-b">
+      <form class="form-grid" method="post" action="/admin/kernel/project" autocomplete="off">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <input type="hidden" name="op" value="create">
+        <div class="field"><label class="label" for="np-name">Name</label>
+          <input class="input" id="np-name" type="text" name="name" required></div>
+        <div class="field"><label class="label" for="np-desc">Description <span class="muted">(optional)</span></label>
+          <input class="input" id="np-desc" type="text" name="description"></div>
+        <div class="field"><label class="label" for="np-vis">Visibility</label>
+          <select class="select" id="np-vis" name="visibility">
+            <option value="shared">shared</option>
+            <option value="personal">personal</option>
+            {% if is_elevated %}<option value="public">public (elevation)</option>{% endif %}
+          </select></div>
+        <div class="form-actions"><button class="btn" type="submit">Create</button>
+          <button class="btn" data-variant="ghost" type="button" @click="create = false">Cancel</button></div>
+      </form>
+      <p class="form-help">You become the Project's owner; add Sources and members on its page. <code>public</code> needs an elevation.</p>
+    </section>
+    <section>
+      {% if projects is none %}
+        {{ unavailable('Kernel projects unavailable', 'Could not list projects right now.') }}
+      {% elif not projects %}
+        {{ empty('No projects yet', 'Create the first one with “New project”.') }}
+      {% else %}
+        <table class="table">
+          <thead><tr><th class="col-key">Project</th><th>Description</th><th class="col-status">Visibility</th><th class="col-num">Sources</th><th class="col-num">Members</th><th class="col-date col-optional">Created</th></tr></thead>
+          <tbody>
+            {% for p in projects %}
+              <tr data-href="/admin/projects/{{ p.id }}">
+                <td><a href="/admin/projects/{{ p.id }}">{{ p.name }}</a></td>
+                <td class="muted">{{ p.description or '—' }}</td>
+                <td class="col-status"><span class="badge{% if p.visibility == 'public' %} status-warn{% endif %}"{% if p.visibility != 'public' %} data-variant="outline"{% endif %}>{{ p.visibility }}</span></td>
+                <td class="col-num">{{ p.source_count }}</td>
+                <td class="col-num">{{ p.member_count }}</td>
+                <td class="col-date col-optional muted">{{ p.created_at[:10] }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </section>
+  </div>
 </div>
 {% endblock %}
