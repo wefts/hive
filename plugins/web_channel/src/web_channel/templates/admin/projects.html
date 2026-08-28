@@ -34,15 +34,15 @@
         {{ empty('No projects yet', 'Create the first one with “New project”.') }}
       {% else %}
         <table class="table">
-          <thead><tr><th class="col-key">Project</th><th>Description</th><th class="col-status">Visibility</th><th class="col-num">Sources</th><th class="col-num">Members</th><th class="col-date col-optional">Created</th></tr></thead>
+          <thead><tr><th class="col-key">Project</th><th>Description</th><th class="col-status">Visibility</th><th class="col-num col-optional">Sources</th><th class="col-num col-optional">Members</th><th class="col-date col-optional">Created</th></tr></thead>
           <tbody>
             {% for p in projects %}
               <tr data-href="/admin/projects/{{ p.id }}">
                 <td><a href="/admin/projects/{{ p.id }}">{{ p.name }}</a></td>
                 <td class="muted">{{ p.description or '—' }}</td>
                 <td class="col-status"><span class="badge{% if p.visibility == 'public' %} status-warn{% endif %}"{% if p.visibility != 'public' %} data-variant="outline"{% endif %}>{{ p.visibility }}</span></td>
-                <td class="col-num">{{ p.source_count }}</td>
-                <td class="col-num">{{ p.member_count }}</td>
+                <td class="col-num col-optional">{{ p.source_count }}</td>
+                <td class="col-num col-optional">{{ p.member_count }}</td>
                 <td class="col-date col-optional muted">{{ p.created_at[:10] }}</td>
               </tr>
             {% endfor %}
