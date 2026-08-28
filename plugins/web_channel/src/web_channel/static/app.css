@@ -838,10 +838,14 @@ div.thinking.live { display: flex; align-items: center; gap: 0.6rem; padding: 0.
   align-content: start;
   gap: 0.75rem;
   min-width: 0;
-  max-height: 100%;
-  overflow-y: auto;
-  padding-right: 0.15rem;
 }
+.dash-lower {
+  display: grid;
+  grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+.dash-lower .act-list { max-height: 16rem; overflow-y: auto; }
 .rail-panel,
 .dash-rail > .card {
   display: grid;
@@ -868,11 +872,11 @@ div.thinking.live { display: flex; align-items: center; gap: 0.6rem; padding: 0.
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   line-height: 1.45;
 }
-.dash-rail .act-list { max-height: 18rem; overflow-y: auto; }
 @media (max-width: 68rem) {
   .dash-console { grid-template-columns: 1fr; height: auto; }
   .memory-map { min-height: 32rem; }
   .dash-rail { grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr)); }
+  .dash-lower { grid-template-columns: 1fr; }
   .cy-canvas { min-height: 24rem; }
 }
 @media (max-width: 36rem) {

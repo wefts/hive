@@ -53,26 +53,29 @@
       </section>
     </div>
 
-    <!-- Stats: full KbStatus, loaded async so the page never blocks on the kernel. -->
-    <div class="rail-panel rail-panel-status" hx-get="/tile/status" hx-trigger="load" hx-swap="outerHTML">
-      <header><h3>State of memory</h3></header>
-      <section><span class="muted">loading...</span></section>
-    </div>
-
-    <!-- Activity: the scope-safe ActivityFeed, polled with an opaque cursor (HTMX OOB). -->
-    <div class="rail-panel">
-      <header>
-        <h3>Activity</h3>
-      </header>
-      <section>
-        <ul id="activity-events" class="act-list" aria-live="polite"></ul>
-        <span id="activity-poller"
-              hx-get="/activity?cursor=" hx-trigger="load"
-              hx-target="#activity-events" hx-swap="beforeend"></span>
-      </section>
-    </div>
   </aside>
 </div>
+
+<section class="dash-lower" aria-label="Memory telemetry">
+  <!-- Stats: full KbStatus, loaded async so the page never blocks on the kernel. -->
+  <div class="rail-panel rail-panel-status" hx-get="/tile/status" hx-trigger="load" hx-swap="outerHTML">
+    <header><h3>State of memory</h3></header>
+    <section><span class="muted">loading...</span></section>
+  </div>
+
+  <!-- Activity: the scope-safe ActivityFeed, polled with an opaque cursor (HTMX OOB). -->
+  <div class="rail-panel">
+    <header>
+      <h3>Activity</h3>
+    </header>
+    <section>
+      <ul id="activity-events" class="act-list" aria-live="polite"></ul>
+      <span id="activity-poller"
+            hx-get="/activity?cursor=" hx-trigger="load"
+            hx-target="#activity-events" hx-swap="beforeend"></span>
+    </section>
+  </div>
+</section>
 
 <!-- Vendored, offline (see vendor/VENDORING.md). Loaded only on the dashboard. -->
 <script src="/static/vendor/cytoscape.min.js"></script>
