@@ -7,6 +7,17 @@
    (full stats, activity, graph) lives on /dashboard. #}
 <div class="home-layout">
   <main class="main home-main">
+    <section class="memory-search-panel" aria-label="Memory search">
+      <form class="memory-search" role="search" autocomplete="off">
+        <label class="sr-only" for="memory-search">Search memories</label>
+        <input id="memory-search" class="input" type="search" name="q"
+               placeholder="Search memories..." autocomplete="off"
+               hx-get="/search" hx-trigger="input changed delay:250ms, search"
+               hx-target="#memory-search-results" hx-swap="innerHTML">
+      </form>
+      <ul id="memory-search-results" class="hits memory-search-results" aria-live="polite"></ul>
+    </section>
+
     <form class="compose home-compose" hx-post="/ask/start" hx-target="#feed" hx-swap="beforeend"
           hx-on::after-request="if(event.detail.successful) this.reset()" autocomplete="off">
       {# Basecoat .textarea auto-grows (field-sizing: content). Chat keys, the

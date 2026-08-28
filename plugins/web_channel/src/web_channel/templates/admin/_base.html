@@ -38,14 +38,8 @@
     </footer>
   </aside>
 
-  <main class="admin-main">
-    <div class="admin-bar">
-      <div class="admin-bar-inner">
-        <span class="spacer"></span>
-        <button class="btn" data-variant="ghost" data-size="sm" @click="palette = true" title="Search memories (⌘K)">⌘K search</button>
-        <a class="btn" data-variant="ghost" data-size="sm" href="/logout">Logout</a>
-      </div>
-    </div>
+  <main id="main-content" class="admin-main" tabindex="-1">
+    <div class="admin-bar" aria-hidden="true"></div>
     <div class="admin-content">
       <nav class="admin-mobile-nav" aria-label="Admin sections">
         {% for title, items in nav_groups %}{% for key, label, href in items %}

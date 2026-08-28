@@ -519,7 +519,7 @@ async def index(request: Request) -> Response:
         "home.html",
         {
             "oidc_enabled": auth.oidc_enabled(),
-            "authed": True,  # home → show the ⌘K search + palette in the header
+            "authed": True,
             "principal": principal.to_session() if principal else None,
             "recent": _recent_titled(viewer),
         },
@@ -635,7 +635,7 @@ async def tile_status(request: Request) -> HTMLResponse:
 
 @app.get("/search", response_class=HTMLResponse)
 async def search(request: Request, q: str = "") -> HTMLResponse:
-    """⌘K command palette: scope-filtered KbSearch → hit list (keyboard-first)."""
+    """Inline memory search: scope-filtered KbSearch -> hit list (keyboard-first)."""
     q = q.strip()
     if not q:
         return HTMLResponse("")
