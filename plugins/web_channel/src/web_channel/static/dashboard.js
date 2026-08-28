@@ -8,13 +8,14 @@
   var STYLE = [
     { selector: "node", style: {
         "background-color": "#1c222c", "border-color": "#3a4452", "border-width": 1,
-        label: "data(label)", color: "#e9eef5", "font-size": 13,
-        "text-valign": "center", "text-halign": "center", "text-wrap": "wrap",
-        "text-max-width": 96, width: "data(size)", height: "data(size)", "text-margin-y": 0 } },
+        label: "data(label)", color: "#e9eef5", "font-size": 12,
+        "text-valign": "bottom", "text-halign": "center", "text-wrap": "wrap",
+        "text-max-width": 128, width: "data(size)", height: "data(size)",
+        "text-margin-y": 8 } },
     { selector: "node.center", style: {
-        "background-color": "#1f6feb", "border-color": "#6cb0ff", width: 40, height: 40,
+        "background-color": "#1f6feb", "border-color": "#6cb0ff", width: 34, height: 34,
         color: "#ffffff", "font-weight": 600 } },
-    { selector: "node.entity", style: { "background-color": "#151a22", shape: "round-rectangle" } },
+    { selector: "node.entity", style: { "background-color": "#151a22", shape: "ellipse" } },
     { selector: "node.scope-public", style: { "border-color": "#6cb0ff" } },
     { selector: "node.scope-group", style: { "border-color": "#8b95a4", "border-width": 2 } },
     { selector: "node.depth-2", style: { opacity: 0.78 } },
@@ -24,8 +25,8 @@
     { selector: "edge", style: {
         width: "data(width)", "line-color": "#3a4452", "target-arrow-color": "#3a4452",
         "target-arrow-shape": "triangle", "curve-style": "bezier",
-        label: "data(relation)", "font-size": 11, color: "#8b95a4",
-        "text-rotation": "autorotate", "text-background-color": "#0b0e14",
+        label: "data(relation)", "font-size": 10, color: "#8b95a4",
+        "text-rotation": "none", "text-background-color": "#0b0e14",
         "text-background-opacity": 0.7, "text-background-padding": 2 } },
   ];
 
@@ -56,6 +57,7 @@
     var q = document.getElementById("graph-q").value.trim();
     var hits = document.getElementById("graph-hits");
     hits.innerHTML = "";
+    hits.hidden = false;
     setText("graph-status", q ? "Searching memory..." : "Enter an entity to search.");
     if (!q) return false;
     try {
@@ -77,6 +79,7 @@
         a.onclick = function (e) {
           e.preventDefault();
           hits.innerHTML = "";
+          hits.hidden = true;
           load(h.id, { id: h.id, key: h.key, type: h.type, score: h.score }, false);
         };
         li.appendChild(a);
@@ -104,8 +107,7 @@
         if (seed) {
           markCenter(c, String(id));
           selectNode(addNode(c, normalizeNode(seed, 0, true)));
-          c.layout({ name: "concentric", animate: true, animationDuration: 200 }).run();
-          c.fit(undefined, 40);
+          layoutGraph(c);
         }
         return;
       }
@@ -128,9 +130,7 @@
       });
       markCenter(c, String(id));
       selectNode(c.getElementById(String(id)));
-      c.layout({ name: "concentric", concentric: function (n) { return n.hasClass("center") ? 3 : 2 - Number(n.data("depth") || 1); },
-                 levelWidth: function () { return 1; }, minNodeSpacing: 44, animate: true, animationDuration: 250 }).run();
-      c.fit(undefined, 40);
+      layoutGraph(c);
       updateMeta(g);
       setText("graph-status", "Showing visible neighborhood for #" + g.center_id + ".");
     } catch (e) {
@@ -144,7 +144,7 @@
     if (confidence === undefined && typeof n.score === "number") confidence = n.score;
     return {
       id: id,
-      label: displayLabel(n.key || ("#" + id)),
+      label: displayLabel(n.key || ("#" + id), center),
       key: n.key || "",
       type: n.type || "",
       scope: n.scope || "",
@@ -224,9 +224,9 @@
   }
 
   function nodeSize(confidence, center) {
-    if (center) return 38;
+    if (center) return 34;
     if (typeof confidence !== "number") return 28;
-    return 24 + Math.max(0, Math.min(1, confidence)) * 12;
+    return 20 + Math.max(0, Math.min(1, confidence)) * 10;
   }
 
   function edgeWidth(reliability) {
@@ -247,10 +247,44 @@
     return value.toFixed(2);
   }
 
-  function displayLabel(value) {
+  function layoutGraph(c) {
+    var nodes = c.nodes();
+    var center = c.nodes(".center").first();
+    var others = nodes.not(center);
+    var w = Math.max(c.width(), 480);
+    var h = Math.max(c.height(), 360);
+    var cx = w / 2;
+    var cyPos = h / 2;
+    if (center.length) center.position({ x: cx, y: cyPos });
+    if (nodes.length <= 10 && center.length) {
+      var radius = Math.max(150, Math.min(w, h) * 0.28);
+      others.forEach(function (n, i) {
+        var angle = (-Math.PI / 2) + (2 * Math.PI * i / Math.max(others.length, 1));
+        n.position({
+          x: cx + Math.cos(angle) * radius,
+          y: cyPos + Math.sin(angle) * radius,
+        });
+      });
+      c.layout({ name: "preset", fit: true, padding: 72, animate: true, animationDuration: 220 }).run();
+      return;
+    }
+    c.layout({
+      name: "concentric",
+      concentric: function (n) { return n.hasClass("center") ? 3 : 2 - Number(n.data("depth") || 1); },
+      levelWidth: function () { return 1; },
+      minNodeSpacing: 96,
+      fit: true,
+      padding: 72,
+      animate: true,
+      animationDuration: 250,
+    }).run();
+  }
+
+  function displayLabel(value, center) {
     var s = String(value || "");
-    if (s.length <= 34) return s;
-    return s.slice(0, 15) + "..." + s.slice(-14);
+    var max = center ? 24 : 28;
+    if (s.length <= max) return s;
+    return s.slice(0, Math.floor(max / 2) - 1) + "..." + s.slice(-(Math.ceil(max / 2) - 2));
   }
 
   function escapeHtml(s) {
