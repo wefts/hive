@@ -745,38 +745,108 @@ div.thinking.live { display: flex; align-items: center; gap: 0.6rem; padding: 0.
 /* --- /dashboard observability page ------------------------------------------ */
 .dash-console {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 22rem;
+  grid-template-columns: minmax(0, 1fr) minmax(19rem, 23rem);
   gap: 1rem;
-  align-items: start;
+  align-items: stretch;
 }
 .dash-console > * { min-width: 0; }
-.dash-graph-card > section { display: grid; gap: 0.75rem; }
-.dash-rail { display: grid; gap: 1rem; min-width: 0; }
-.dash-rail .act-list { max-height: 22rem; overflow-y: auto; }
-.graph-search { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
-.graph-search .q { flex: 1; min-width: 16rem; }
-#graph-meta { min-height: 1.4rem; }
-.graph-stage {
-  position: relative;
-  min-height: 34rem;
+.memory-map {
+  display: grid;
+  grid-template-rows: auto auto minmax(28rem, 1fr) auto;
+  min-height: clamp(34rem, calc(100vh - 13rem), 54rem);
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  background: var(--card);
+  overflow: hidden;
+}
+.map-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 28rem);
+  gap: 0.9rem;
+  align-items: end;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.map-toolbar h2 { margin: 0; font-size: 1rem; font-weight: 650; line-height: 1.3; }
+.map-toolbar p { margin: 0.15rem 0 0; font-size: 0.9rem; }
+.graph-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.graph-search .q { min-width: 0; width: 100%; }
+.graph-hits {
+  max-height: 12rem;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+.graph-hits:empty { display: none; }
+.graph-stage {
+  position: relative;
   background: var(--background);
   overflow: hidden;
 }
 /* Cytoscape needs an explicit height at init, or it renders into a 0px box. */
-.cy-canvas { height: 34rem; width: 100%; }
+.cy-canvas { height: 100%; min-height: 28rem; width: 100%; }
 .graph-empty {
   position: absolute;
   inset: auto 1rem 1rem;
   margin: 0;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
   pointer-events: none;
 }
+.graph-status {
+  min-height: 2.2rem;
+  padding: 0.45rem 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+.dash-rail {
+  display: grid;
+  grid-auto-rows: min-content;
+  gap: 1rem;
+  min-width: 0;
+}
+.rail-panel,
+.dash-rail > .card {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding-block: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+.rail-panel > header,
+.rail-panel > section,
+.dash-rail > .card > header,
+.dash-rail > .card > section {
+  padding-inline: 1rem;
+}
+.rail-panel h3,
+.dash-rail > .card h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+.node-kv dd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.dash-rail .act-list { max-height: 18rem; overflow-y: auto; }
 @media (max-width: 68rem) {
   .dash-console { grid-template-columns: 1fr; }
+  .memory-map { min-height: 32rem; }
+  .map-toolbar { grid-template-columns: 1fr; }
   .dash-rail { grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr)); }
-  .graph-stage { min-height: 28rem; }
-  .cy-canvas { height: 28rem; }
+  .cy-canvas { min-height: 24rem; }
+}
+@media (max-width: 36rem) {
+  .graph-search { grid-template-columns: 1fr; }
+  .graph-search .btn { width: 100%; }
 }
 
 /* the body-telemetry footer: one thin fixed strip, htop vibe — quiet mono numbers

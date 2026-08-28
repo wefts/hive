@@ -1,62 +1,76 @@
 {% extends "base.html" %}
 {% from "_ui.html" import page_head %}
 {% block content %}
-{# /dashboard = the observability instrument: stats · graph · activity. The channel
-   is still a thin renderer — every datum comes from a scope-enforcing Core RPC. #}
-{{ page_head('How the swarm thinks', 'State of memory, a bounded connections explorer, and the live activity feed — all scope-filtered by the kernel.') }}
+{# /dashboard = the Memory Map instrument. The channel is still a thin renderer:
+   every datum comes from a scope-enforcing Core RPC/route already present today. #}
+{{ page_head('Memory Map', 'Search an entity, then expand the visible neighborhood from scope-filtered memory data.') }}
 
 <div class="dash-console">
-  <!-- Graph: a bounded, scope-filtered connections explorer (Neighborhood RPC,
-       ≤50 nodes / depth ≤2), rendered with the vendored Cytoscape. Search an entity,
-       click a node to expand. -->
-  <div class="card dash-graph-card">
-    <header>
-      <h2>Memory graph</h2>
-      <p>Search an entity, then click a node to walk its visible neighborhood.</p>
-      <span class="card-action badge" data-variant="outline">scope-filtered</span>
-    </header>
-    <section>
-      <form class="graph-search" onsubmit="return swarmGraph.search(event)" autocomplete="off">
-        <input class="input q" id="graph-q" type="text" placeholder="Search an entity to explore its connections…"
-               autocomplete="off" aria-label="graph search">
+  <section class="memory-map" aria-labelledby="memory-map-title">
+    <div class="map-toolbar">
+      <div>
+        <h2 id="memory-map-title">Visible memory</h2>
+        <p class="muted">Bounded neighborhood graph from KbSearch and Neighborhood.</p>
+      </div>
+      <form class="graph-search" role="search" onsubmit="return swarmGraph.search(event)" autocomplete="off">
+        <label class="sr-only" for="graph-q">Search entities in memory</label>
+        <input class="input q" id="graph-q" type="search" placeholder="Search entity"
+               autocomplete="off" aria-describedby="graph-status">
         <button class="btn" type="submit">Search</button>
       </form>
-      <ul id="graph-hits" class="hits"></ul>
-      <div id="graph-meta" class="meta"></div>
-      <div class="graph-stage">
-        <div id="cy" class="cy-canvas" role="img" aria-label="connections graph"></div>
-        <p id="graph-empty" class="graph-empty muted">No entity selected yet.</p>
-      </div>
-    </section>
-  </div>
-
-  <aside class="dash-rail">
-    <!-- Stats: full KbStatus, loaded async so the page never blocks on the kernel. -->
-    <div hx-get="/tile/status" hx-trigger="load">
-      <div class="card"><header><h3>State of my memory</h3></header><section><span class="muted">loading…</span></section></div>
     </div>
+    <ul id="graph-hits" class="hits graph-hits" aria-live="polite"></ul>
+    <div class="graph-stage">
+      <div id="cy" class="cy-canvas" role="img" aria-label="Memory Map graph"></div>
+      <p id="graph-empty" class="graph-empty muted">Search for an entity to center the map.</p>
+    </div>
+    <div id="graph-status" class="graph-status muted" role="status" aria-live="polite">
+      No entity selected.
+    </div>
+  </section>
 
-    <!-- Activity: the scope-safe ActivityFeed, polled with an opaque cursor (HTMX OOB). -->
-    <div class="card">
+  <aside class="dash-rail" aria-label="Memory Map details">
+    <div id="selected-node-panel" class="rail-panel selected-node-panel">
       <header>
-        <h3>Activity</h3>
-        <p>Live ingest and worker events visible to the current actor.</p>
+        <h3>Selected node</h3>
       </header>
       <section>
-        <ul id="activity-events" class="act-list"></ul>
-        <span id="activity-poller"
-              hx-get="/activity?cursor=" hx-trigger="load"
-              hx-target="#activity-events" hx-swap="beforeend"></span>
+        <p id="selected-node-empty" class="muted">Select a node in the map to inspect available fields.</p>
+        <dl id="selected-node-kv" class="kv node-kv" hidden></dl>
       </section>
     </div>
 
-    <div class="card">
+    <div class="rail-panel map-meta-panel">
       <header>
-        <h3>Needs attention</h3>
+        <h3>Graph metadata</h3>
       </header>
       <section>
-        <p class="muted">Not available yet — needs the <code>Brief</code> kernel RPC and a running
-          cognitive loop. Shown honestly rather than faked.</p>
+        <dl class="kv">
+          <div><dt>Center</dt><dd id="graph-center" class="muted">none</dd></div>
+          <div><dt>Nodes</dt><dd id="graph-node-count">0</dd></div>
+          <div><dt>Edges</dt><dd id="graph-edge-count">0</dd></div>
+          <div><dt>Relations</dt><dd id="graph-relations" class="muted">none</dd></div>
+          <div><dt>Bounds</dt><dd id="graph-bounds" class="muted">not loaded</dd></div>
+        </dl>
+      </section>
+    </div>
+
+    <!-- Stats: full KbStatus, loaded async so the page never blocks on the kernel. -->
+    <div class="rail-panel rail-panel-status" hx-get="/tile/status" hx-trigger="load" hx-swap="outerHTML">
+      <header><h3>State of memory</h3></header>
+      <section><span class="muted">loading...</span></section>
+    </div>
+
+    <!-- Activity: the scope-safe ActivityFeed, polled with an opaque cursor (HTMX OOB). -->
+    <div class="rail-panel">
+      <header>
+        <h3>Activity</h3>
+      </header>
+      <section>
+        <ul id="activity-events" class="act-list" aria-live="polite"></ul>
+        <span id="activity-poller"
+              hx-get="/activity?cursor=" hx-trigger="load"
+              hx-target="#activity-events" hx-swap="beforeend"></span>
       </section>
     </div>
   </aside>

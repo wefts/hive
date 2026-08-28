@@ -184,6 +184,10 @@ def test_dashboard_page_renders_graph_and_vendored_cytoscape(monkeypatch) -> Non
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
     r = client.get("/dashboard")
     assert r.status_code == 200
+    assert '<h1 class="page-title">Memory Map</h1>' in r.text
+    assert 'class="memory-map"' in r.text
+    assert 'id="selected-node-panel"' in r.text
+    assert 'role="status" aria-live="polite"' in r.text
     assert 'id="cy"' in r.text  # the graph canvas
     assert "/static/vendor/cytoscape.min.js" in r.text  # vendored, offline
     assert "/static/dashboard.js" in r.text
@@ -223,7 +227,11 @@ def test_dashboard_graph_json_found(monkeypatch) -> None:
         return core_pb2.NeighborhoodResponse(
             status=core_pb2.FOUND,
             center_id=node_id,
-            nodes=[core_pb2.NodeView(id=2, type="entity", key="kerberos", scope="public", depth=1)],
+            nodes=[
+                core_pb2.NodeView(
+                    id=2, type="entity", key="kerberos", scope="public", confidence=0.72, depth=1
+                )
+            ],
             edges=[core_pb2.EdgeView(src_id=node_id, dst_id=2, relation="uses", reliability=0.8)],
             truncated=False,
         )
@@ -234,6 +242,7 @@ def test_dashboard_graph_json_found(monkeypatch) -> None:
     g = r.json()
     assert g["status"] == "found" and g["center_id"] == 1
     assert g["nodes"][0]["key"] == "kerberos"
+    assert g["nodes"][0]["confidence"] == 0.72
     assert g["edges"][0]["relation"] == "uses"
 
 

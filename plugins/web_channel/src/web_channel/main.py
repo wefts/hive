@@ -471,7 +471,14 @@ def _neighborhood_view(r: core_pb2.NeighborhoodResponse) -> dict | None:
     if r.status != core_pb2.FOUND:
         return None
     nodes = [
-        {"id": n.id, "type": n.type, "key": n.key, "scope": n.scope, "depth": n.depth}
+        {
+            "id": n.id,
+            "type": n.type,
+            "key": n.key,
+            "scope": n.scope,
+            "confidence": n.confidence,
+            "depth": n.depth,
+        }
         for n in r.nodes
     ]
     edges = [
