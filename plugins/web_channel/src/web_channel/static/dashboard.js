@@ -144,7 +144,7 @@
     if (confidence === undefined && typeof n.score === "number") confidence = n.score;
     return {
       id: id,
-      label: n.key || ("#" + id),
+      label: displayLabel(n.key || ("#" + id)),
       key: n.key || "",
       type: n.type || "",
       scope: n.scope || "",
@@ -245,6 +245,12 @@
   function formatNumber(value) {
     if (typeof value !== "number") return "";
     return value.toFixed(2);
+  }
+
+  function displayLabel(value) {
+    var s = String(value || "");
+    if (s.length <= 34) return s;
+    return s.slice(0, 15) + "..." + s.slice(-14);
   }
 
   function escapeHtml(s) {

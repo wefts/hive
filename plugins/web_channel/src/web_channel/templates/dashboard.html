@@ -8,21 +8,19 @@
 <div class="dash-console">
   <section class="memory-map" aria-labelledby="memory-map-title">
     <div class="map-toolbar">
-      <div>
-        <h2 id="memory-map-title">Visible memory</h2>
-        <p class="muted">Bounded neighborhood graph from KbSearch and Neighborhood.</p>
-      </div>
+      <h2 id="memory-map-title" class="sr-only">Visible memory</h2>
       <form class="graph-search" role="search" onsubmit="return swarmGraph.search(event)" autocomplete="off">
         <label class="sr-only" for="graph-q">Search entities in memory</label>
-        <input class="input q" id="graph-q" type="search" placeholder="Search entity"
+        <input class="input q" id="graph-q" type="search" placeholder="Search memory"
                autocomplete="off" aria-describedby="graph-status">
         <button class="btn" type="submit">Search</button>
       </form>
+      <span class="badge" data-variant="outline">scope-filtered</span>
     </div>
     <ul id="graph-hits" class="hits graph-hits" aria-live="polite"></ul>
     <div class="graph-stage">
       <div id="cy" class="cy-canvas" role="img" aria-label="Memory Map graph"></div>
-      <p id="graph-empty" class="graph-empty muted">Search for an entity to center the map.</p>
+      <p id="graph-empty" class="graph-empty muted">Search memory to draw a visible neighborhood.</p>
     </div>
     <div id="graph-status" class="graph-status muted" role="status" aria-live="polite">
       No entity selected.
