@@ -19,30 +19,54 @@
       @keydown.escape.window="palette = false"
       @close-palette.window="palette = false">
   {% block body %}
-  <main class="shell">
-    <header class="topbar">
-      {# The brand IS the home link; "operator console" lives in the <title> only —
-         operator: the "swarm operator console home" row was noise. #}
-      <a class="brand" href="/">swarm</a>
-      {% if authed %}
-        <a class="navlink" href="/dashboard">dashboard</a>
-        <a class="navlink" href="/history">history</a>
-      {% endif %}
-      <span class="spacer"></span>
-      {% if authed %}
-        <button class="btn" data-variant="outline" data-size="sm"
-                @click="palette = true" title="Search memories (⌘K)">⌘K&nbsp;search</button>
-      {% endif %}
-      {% if principal %}
-        <span class="muted">{{ principal.display or principal.viewer }} · {{ principal.groups|join(', ') if principal.groups else 'no groups' }} · {{ principal.scopes|length }} scope{{ '' if principal.scopes|length == 1 else 's' }}</span>
-        {% if principal.is_admin %}<a class="navlink" href="/admin">admin</a>{% endif %}
-        {% if principal.is_elevated %}<span class="badge status-warn" title="superadmin elevation active for this session">elevated</span>{% endif %}
-        {% if principal.external %}<span class="badge" data-variant="outline" title="guest account">guest</span>{% endif %}
-        <a class="navlink" href="/logout">logout</a>
-      {% endif %}
-    </header>
-    {% block content %}{% endblock %}
-  </main>
+    {% if authed %}
+      {% set current_path = request.url.path %}
+      <div class="app-shell">
+        <aside class="app-sidebar">
+          <header>
+            <a class="brand" href="/">swarm</a>
+            <span class="muted">Operator console</span>
+          </header>
+          <nav aria-label="Application sections">
+            <ul class="app-nav-list">
+              <li><a href="/"{% if current_path == '/' or current_path.startswith('/p/') %} aria-current="page"{% endif %}>Chat</a></li>
+              <li><a href="/dashboard"{% if current_path.startswith('/dashboard') %} aria-current="page"{% endif %}>Dashboard</a></li>
+              <li><a href="/history"{% if current_path.startswith('/history') %} aria-current="page"{% endif %}>History</a></li>
+              {% if principal and principal.is_admin %}<li><a href="/admin">Admin</a></li>{% endif %}
+            </ul>
+          </nav>
+          {% if principal %}
+            <footer>
+              {% if principal.is_elevated %}<span class="badge status-warn" title="superadmin elevation active for this session">elevated</span>{% endif %}
+              {% if principal.external %}<span class="badge" data-variant="outline" title="guest account">guest</span>{% endif %}
+              <p class="muted">{{ principal.display or principal.viewer }} · {{ principal.groups|join(', ') if principal.groups else 'no groups' }} · {{ principal.scopes|length }} scope{{ '' if principal.scopes|length == 1 else 's' }}</p>
+              <a class="btn w-full" data-size="sm" data-variant="outline" href="/logout">Logout</a>
+            </footer>
+          {% endif %}
+        </aside>
+        <main class="app-main">
+          <div class="app-bar">
+            <div class="app-bar-inner">
+              <span class="spacer"></span>
+              <button class="btn" data-variant="ghost" data-size="sm"
+                      @click="palette = true" title="Search memories (⌘K)">⌘K search</button>
+            </div>
+          </div>
+          <div class="app-content">
+    {% else %}
+      <main class="shell">
+        <header class="topbar">
+          <a class="brand" href="/">swarm</a>
+        </header>
+    {% endif %}
+            {% block content %}{% endblock %}
+    {% if authed %}
+          </div>
+        </main>
+      </div>
+    {% else %}
+      </main>
+    {% endif %}
   {% endblock %}
 
   {% if authed %}
