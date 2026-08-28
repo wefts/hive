@@ -843,9 +843,14 @@ div.thinking.live { display: flex; align-items: center; gap: 0.6rem; padding: 0.
   display: grid;
   grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
   gap: 1rem;
-  align-items: start;
+  align-items: stretch;
 }
-.dash-lower .act-list { max-height: 16rem; overflow-y: auto; }
+.dash-lower > .rail-panel { min-height: 13rem; height: 100%; }
+.dash-lower .act-list {
+  max-height: none;
+  overflow: hidden;
+}
+.dash-lower .act-event:nth-child(n+7) { display: none; }
 .rail-panel,
 .dash-rail > .card {
   display: grid;

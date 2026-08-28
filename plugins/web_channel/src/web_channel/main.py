@@ -728,7 +728,7 @@ async def activity(request: Request, cursor: str = "") -> HTMLResponse:
     next_cursor = cursor
     try:
         resp = await core_client.activity_feed(
-            scopes=scopes, viewer=assertion or viewer, cursor=cursor, limit=25
+            scopes=scopes, viewer=assertion or viewer, cursor=cursor, limit=6
         )
         events = [_activity_event_view(e) for e in resp.events]
         next_cursor = resp.next_cursor

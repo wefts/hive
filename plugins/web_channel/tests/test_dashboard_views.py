@@ -132,8 +132,10 @@ def test_neighborhood_forwards_relation_filter(monkeypatch) -> None:
 
 def test_activity_renders_events_and_opaque_poller(monkeypatch) -> None:
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+    seen = {}
 
     async def fake(scopes, viewer, cursor="", limit=50, kinds=None):
+        seen["limit"] = limit
         return core_pb2.ActivityFeedResponse(
             status=core_pb2.FOUND,
             events=[
@@ -148,6 +150,7 @@ def test_activity_renders_events_and_opaque_poller(monkeypatch) -> None:
     r = client.get("/activity", params={"cursor": ""})
     assert r.status_code == 200
     assert "node_added" in r.text and "article" in r.text
+    assert seen["limit"] == 6
     # the OOB poller carries the opaque next_cursor for the next tick
     assert 'hx-swap-oob="true"' in r.text
     assert "cursor=OPAQUE-NEXT" in r.text

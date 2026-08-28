@@ -48,6 +48,14 @@
     return cy;
   }
 
+  function trimActivity() {
+    var list = document.getElementById("activity-events");
+    if (!list) return;
+    while (list.children.length > 6) {
+      list.removeChild(list.firstElementChild);
+    }
+  }
+
   function hide(id) { var el = document.getElementById(id); if (el) el.style.display = "none"; }
   function setText(id, t) { var el = document.getElementById(id); if (el) el.textContent = t; }
   function setHidden(id, value) { var el = document.getElementById(id); if (el) el.hidden = value; }
@@ -292,6 +300,12 @@
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
     });
   }
+
+  document.body.addEventListener("htmx:afterSwap", function (evt) {
+    if (evt.detail && evt.detail.target && evt.detail.target.id === "activity-events") {
+      trimActivity();
+    }
+  });
 
   window.swarmGraph = { search: search, load: load };
 })();
