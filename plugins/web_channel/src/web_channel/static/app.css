@@ -224,7 +224,7 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
 .home-main { min-width: 0; }
 .header-search {
   position: relative;
-  width: min(100%, 48rem);
+  width: min(100%, 64rem);
 }
 .header-search .input {
   width: 100%;
@@ -245,7 +245,7 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
   top: calc(100% + 0.45rem);
   left: 0;
   z-index: 20;
-  width: min(100%, 48rem);
+  width: min(100%, 64rem);
   max-height: min(24rem, 60vh);
   margin: 0;
   border: 1px solid var(--border);
@@ -255,20 +255,27 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
 }
 .header-search-results:empty { display: none; }
 .compose.home-compose {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.6rem;
+  min-height: 3.5rem;
+  padding: 0.5rem 0.6rem 0.5rem 1rem;
   border: 1px solid var(--border);
   border-radius: 1.25rem;
   background: var(--card);
 }
 .compose.home-compose .q {
   min-width: 0;
+  min-height: 2.35rem;
+  height: 2.35rem;
+  max-height: 8rem;
+  padding-block: 0.45rem;
   border-color: transparent;
   background: transparent;
   box-shadow: none;
+  resize: none;
 }
 .compose.home-compose .q:focus-visible {
   outline: 0;
@@ -280,6 +287,13 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
   padding: 0;
   border-radius: 999px;
   font-size: 1rem;
+}
+.compose.home-compose .htmx-indicator {
+  position: absolute;
+  right: 3.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 .recent-card section { max-height: min(66vh, 42rem); overflow-y: auto; }
 .home-memory { display: none; }
