@@ -820,6 +820,52 @@ async def dashboard(request: Request) -> Response:
     )
 
 
+@app.get("/profile", response_class=HTMLResponse)
+async def profile(request: Request) -> Response:
+    """The signed-in principal as this session sees it (the cached ResolveActor verdict:
+    groups, scopes, admin/elevation, guest). Read-only — identity is IdP + kernel owned.
+    Same sign-in gate as /dashboard; in P0 no-auth mode (fixed operator, no principal)
+    the page says so honestly instead of bouncing to a login nobody can complete."""
+    principal = _current_principal(request)
+    if principal is None and (auth.oidc_enabled() or localusers.has_any()):
+        return RedirectResponse("/login")
+    return templates.TemplateResponse(
+        request,
+        "profile.html",
+        {"authed": True, "principal": principal.to_session() if principal else None},
+    )
+
+
+@app.get("/projects", response_class=HTMLResponse)
+async def projects(request: Request) -> Response:
+    """The Projects visible to THIS actor — `ListProjects(mine_only=True)`: public ones plus
+    memberships (shared/personal), for admins and members alike (the admin's all-projects
+    view stays at /admin/projects). Read-only; the kernel filters, the channel renders.
+    Same sign-in gate as /dashboard; unsigned (P0 / pre-signing) sessions get an honest note."""
+    principal = _current_principal(request)
+    if principal is None and (auth.oidc_enabled() or localusers.has_any()):
+        return RedirectResponse("/login")
+    assertion = _actor_assertion(principal) if principal else ""
+    visible: list | None = None
+    if assertion:
+        try:
+            resp = await core_client.list_projects(assertion, mine_only=True)
+            if resp.status == core_pb2.CALL_OK:
+                visible = list(resp.projects)
+        except Exception:
+            logger.exception("ListProjects (mine_only) failed")
+    return templates.TemplateResponse(
+        request,
+        "projects.html",
+        {
+            "authed": True,
+            "principal": principal.to_session() if principal else None,
+            "projects": visible,
+            "signed": bool(assertion),
+        },
+    )
+
+
 @app.get("/dashboard/search")
 async def dashboard_search(request: Request, q: str = "") -> JSONResponse:
     """Scope-filtered KbSearch as JSON — the graph explorer's entity picker. Returns

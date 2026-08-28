@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "_ui.html" import page_head, kv_row, note %}
+{% block content %}
+{# /profile — what the channel knows about the signed-in principal (session view of the
+   kernel's ResolveActor verdict). Read-only: identity is owned by the IdP + kernel. #}
+{% if principal is none %}
+  {{ page_head('Profile') }}
+  {{ note('No signed-in identity', 'Sign-in is not configured on this instance, so there is no per-user profile — every request runs as the fixed operator.') }}
+{% else %}
+{% call page_head('Profile', 'Your identity as this session sees it — groups and scopes come from the kernel, not from anything set here.') %}
+  {% if principal.is_elevated %}<span class="badge status-warn" title="superadmin elevation active for this session">elevated</span>{% endif %}
+  {% if principal.external %}<span class="badge" data-variant="outline" title="guest account">guest</span>{% endif %}
+  {% if principal.is_admin %}<a class="btn" data-size="sm" data-variant="outline" href="/admin">Admin console</a>{% endif %}
+  <a class="btn" data-size="sm" data-variant="outline" href="/logout">Logout</a>
+{% endcall %}
+
+<div class="card">
+  <header><h2>Identity</h2></header>
+  <section>
+    <dl class="kv">
+      {% call kv_row('Display name') %}{{ principal.display or '—' }}{% endcall %}
+      {% call kv_row('Login') %}{{ principal.viewer or '—' }}{% endcall %}
+      {% call kv_row('Provider') %}{{ principal.provider or '—' }}{% endcall %}
+      {% call kv_row('Groups') %}{{ principal.groups|join(', ') if principal.groups else 'no groups' }}{% endcall %}
+      {% call kv_row('Scopes') %}{{ principal.scopes|length }} scope{{ '' if principal.scopes|length == 1 else 's' }}{% if principal.scopes %} <span class="muted">({{ principal.scopes|join(', ') }})</span>{% endif %}{% endcall %}
+      {% call kv_row('Access') %}
+        {% if principal.is_admin %}admin console{% if principal.is_elevated %} · elevated{% if principal.elevation_expires_at %} until <time datetime="{{ principal.elevation_expires_at }}">{{ principal.elevation_expires_at[11:19] }}</time>{% endif %}{% endif %}{% else %}member{% endif %}
+        {% if principal.external %} · guest{% endif %}
+      {% endcall %}
+      {% call kv_row('Projects') %}<a href="/projects">Projects you can see</a>{% endcall %}
+    </dl>
+  </section>
+</div>
+{% endif %}
+{% endblock %}

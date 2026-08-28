@@ -1,0 +1,50 @@
+{# Header Profile menu — Basecoat .dropdown-menu (CSS) driven by Alpine (Basecoat's own
+   JS is not vendored). The trigger is a real <button>; every item is a real link. The
+   panel is hidden via aria-hidden (Basecoat styles [data-popover][aria-hidden=true]),
+   so no x-cloak is needed. The identity block sits INSIDE the popover but OUTSIDE
+   role=menu (a menu may only own menuitems/groups/separators). Arrow keys move focus
+   between items; Escape and Tab close and return focus to the trigger. #}
+{% set who = principal.display or principal.viewer %}
+<div class="dropdown-menu profile-menu"
+     x-data="{ open: false,
+               items() { return Array.from($refs.menu.querySelectorAll('[role=menuitem]')); },
+               focusAt(i) { const it = this.items(); if (it.length) it[(i + it.length) % it.length].focus(); },
+               move(step) { const it = this.items(); const i = it.indexOf(document.activeElement); this.focusAt(i < 0 ? (step > 0 ? 0 : -1) : i + step); },
+               show(at) { this.open = true; $nextTick(() => this.focusAt(at === undefined ? 0 : at)); },
+               hide(refocus) { this.open = false; if (refocus) $refs.trigger.focus(); } }"
+     @click.outside="open = false"
+     @keydown.escape.prevent="hide(true)">
+  <button class="profile-menu-button" type="button" x-ref="trigger"
+          id="profile-menu-trigger" aria-label="Profile"
+          aria-haspopup="menu" aria-controls="profile-menu" aria-expanded="false" :aria-expanded="open ? 'true' : 'false'"
+          @click="open ? hide(false) : show()"
+          @keydown.down.prevent="show(0)" @keydown.up.prevent="show(-1)">
+    <span aria-hidden="true">{{ who[:1]|upper }}</span>
+  </button>
+  <div id="profile-menu" data-popover data-side="bottom" data-align="end"
+       aria-hidden="true" :aria-hidden="open ? 'false' : 'true'" x-ref="menu"
+       @keydown.down.prevent="move(1)" @keydown.up.prevent="move(-1)"
+       @keydown.home.prevent="focusAt(0)" @keydown.end.prevent="focusAt(-1)"
+       @keydown.tab="hide(true)">
+    <div class="profile-menu-head">
+      <strong>{{ who }}</strong>
+      <span class="muted">{{ principal.groups|join(', ') if principal.groups else 'no groups' }} · {{ principal.scopes|length }} scope{{ '' if principal.scopes|length == 1 else 's' }}</span>
+      {% if principal.is_elevated or principal.external %}
+        <span class="profile-menu-badges">
+          {% if principal.is_elevated %}<span class="badge status-warn" title="superadmin elevation active for this session">elevated</span>{% endif %}
+          {% if principal.external %}<span class="badge" data-variant="outline" title="guest account">guest</span>{% endif %}
+        </span>
+      {% endif %}
+    </div>
+    <hr role="separator">
+    <div role="menu" aria-labelledby="profile-menu-trigger">
+      <a role="menuitem" href="/profile">Profile</a>
+      <a role="menuitem" href="/projects">Projects</a>
+      {% if principal.is_admin %}
+        <a role="menuitem" href="/admin">Admin console</a>
+      {% endif %}
+      <hr role="separator">
+      <a role="menuitem" href="/logout">Logout</a>
+    </div>
+  </div>
+</div>

@@ -43,19 +43,10 @@
                 </div>
               </li>
               <li><a href="/dashboard"{% if current_path.startswith('/dashboard') %} aria-current="page"{% endif %}>Dashboard</a></li>
-              {% if principal and principal.is_admin %}
-                <li><a href="/admin">Admin console</a></li>
-              {% endif %}
             </ul>
           </nav>
-          {% if principal %}
-            <footer>
-              {% if principal.is_elevated %}<span class="badge status-warn" title="superadmin elevation active for this session">elevated</span>{% endif %}
-              {% if principal.external %}<span class="badge" data-variant="outline" title="guest account">guest</span>{% endif %}
-              <p class="muted">{{ principal.display or principal.viewer }} · {{ principal.groups|join(', ') if principal.groups else 'no groups' }} · {{ principal.scopes|length }} scope{{ '' if principal.scopes|length == 1 else 's' }}</p>
-              <a class="btn w-full" data-size="sm" data-variant="outline" href="/logout">Logout</a>
-            </footer>
-          {% endif %}
+          {# Account-level items (identity, Projects, Admin console, Logout) live in the
+             header Profile menu — the primary nav stays product sections only. #}
         </aside>
         <main id="main-content" class="app-main" tabindex="-1">
           <div class="app-bar">
@@ -73,10 +64,7 @@
               {% endif %}
               <span class="spacer"></span>
               {% if principal %}
-                <button class="user-menu-button" type="button"
-                        title="{{ principal.display or principal.viewer }}" aria-label="User profile">
-                  {{ (principal.display or principal.viewer)[:1]|upper }}
-                </button>
+                {% include "_profile_menu.html" %}
               {% endif %}
             </div>
           </div>

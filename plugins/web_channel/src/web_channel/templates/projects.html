@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_ui.html" import page_head, unavailable, empty, note %}
+{% block content %}
+{# /projects — the Projects visible to YOU (ListProjects mine_only): public ones plus
+   those you are a member of (shared or personal). Ownership is a member role, not a
+   visibility. Management lives in the admin console; this page is read-only. #}
+{% call page_head('Projects', 'The Projects you can see: public ones, plus every shared or personal Project you are a member of. A Project is what holds Sources — you see what your Projects hold.') %}
+  <span class="badge" data-variant="outline">kernel-owned</span>
+  {% if principal and principal.is_admin %}<a class="btn" data-size="sm" data-variant="outline" href="/admin/projects">All projects (admin)</a>{% endif %}
+{% endcall %}
+
+<div class="card">
+  <header>
+    <h2>Your projects</h2>
+    {% if projects %}<span class="card-action badge" data-variant="secondary">{{ projects|length }}</span>{% endif %}
+  </header>
+  <section>
+    {% if not signed %}
+      {{ note('Not available yet', "Your session has no verified kernel identity (actor signing isn't configured, or you signed in before it was).") }}
+    {% elif projects is none %}
+      {{ unavailable('Kernel unavailable', 'Could not list your projects right now.') }}
+    {% elif projects %}
+      <div class="table-container">
+        <table class="table">
+          <thead><tr><th class="col-key">Project</th><th>Description</th><th class="col-status">Visibility</th><th class="col-num col-optional">Sources</th><th class="col-num col-optional">Members</th></tr></thead>
+          <tbody>
+            {% for p in projects %}
+              <tr>
+                <td>{% if principal and principal.is_admin %}<a href="/admin/projects/{{ p.id }}">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}</td>
+                <td class="muted">{{ p.description or '—' }}</td>
+                <td class="col-status"><span class="badge"{% if p.visibility != 'public' %} data-variant="outline"{% endif %}>{{ p.visibility }}</span></td>
+                <td class="col-num col-optional">{{ p.source_count }}</td>
+                <td class="col-num col-optional">{{ p.member_count }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      {{ empty('No projects yet', 'Nothing is public and you are not a member of any Project. An administrator or a Project owner can add you.') }}
+    {% endif %}
+  </section>
+</div>
+
+<p class="muted">Visibility: <strong>public</strong> — every signed-in user · <strong>shared</strong> — its members · <strong>personal</strong> — one user. Ownership is a member role, separate from visibility.</p>
+{% endblock %}

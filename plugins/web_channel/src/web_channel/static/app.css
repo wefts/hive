@@ -176,13 +176,6 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
 .app-recent-list { gap: 0; }
 .app-recent-list li + li { border-top: 1px solid var(--border); }
 .app-recent-list a[aria-current=page] { color: var(--foreground); }
-.app-sidebar footer {
-  display: grid;
-  gap: 0.55rem;
-  padding: 0.85rem 0.6rem 3rem;
-  border-top: 1px solid var(--border);
-}
-.app-sidebar footer p { margin: 0; font-size: 0.86rem; overflow-wrap: anywhere; }
 .app-main { min-height: 100vh; min-width: 0; display: flex; flex-direction: column; }
 .app-bar {
   display: flex;
@@ -214,7 +207,6 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
   .app-sidebar nav { padding-top: 0; }
   .app-primary-nav { grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); }
   .app-nav-children { display: none; }
-  .app-sidebar footer { display: none; }
   .app-main { min-height: auto; }
   .app-bar { padding-inline: 1rem; }
   .app-content { padding: 1.25rem 1rem 3rem; }
@@ -258,7 +250,11 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
   box-shadow: 0 14px 36px rgba(0,0,0,0.38);
 }
 .header-search-results:empty { display: none; }
-.user-menu-button {
+/* header Profile menu: Basecoat .dropdown-menu supplies the panel, items, separators
+   and the data-align=end anchoring; this is only the round trigger, the panel width
+   and the identity block (plain text, not a component). */
+.profile-menu { flex: 0 0 auto; }
+.profile-menu-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -270,11 +266,25 @@ p .navlink, li .navlink, td .navlink { margin-left: 0; }
   color: var(--foreground);
   font-size: 0.85rem;
   font-weight: 650;
-  flex: 0 0 auto;
 }
-.user-menu-button:hover {
+.profile-menu-button:hover,
+.profile-menu-button[aria-expanded=true] {
   background: var(--accent);
 }
+.profile-menu > [data-popover] {
+  min-width: 16rem;
+  max-width: min(22rem, calc(100vw - 2rem));
+}
+.profile-menu [role=menuitem] { color: var(--foreground); text-decoration: none; }
+.profile-menu [role=menuitem]:hover { background: var(--accent); }
+.profile-menu-head {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.4rem 0.5rem 0.55rem;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+.profile-menu-badges { display: flex; gap: 0.35rem; flex-wrap: wrap; padding-top: 0.25rem; }
 .compose.home-compose {
   position: relative;
   display: grid;
