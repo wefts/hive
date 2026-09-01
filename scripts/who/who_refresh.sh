@@ -51,7 +51,22 @@ if [ -z "${SWARM_LDAP_HOST:-}" ] || [ -z "${SWARM_LDAP_BASE_DN:-}" ]; then
   exit 0
 fi
 
-run_rpc() { docker exec "$KERNEL" /app/bin/swarm rpc "$(cat "$WHO/$1")" </dev/null; }
+run_rpc() {
+  script="$WHO/$1"
+
+  if [ -n "${SWARM_DB_NAME:-}" ]; then
+    rpc_env_args=()
+    for var in SWARM_DB_NAME SWARM_ENV WHO_SOURCE_ID; do
+      val="${!var:-}"
+      [ -n "$val" ] && rpc_env_args+=(-e "$var=$val")
+    done
+
+    docker exec "${rpc_env_args[@]}" "$KERNEL" /app/bin/swarm eval \
+      "$(printf '{:ok, _} = Application.ensure_all_started(:ecto_sql)\n{:ok, _} = Application.ensure_all_started(:postgrex)\n{:ok, _} = Swarm.Repo.start_link()\n'; cat "$script")" </dev/null
+  else
+    docker exec "$KERNEL" /app/bin/swarm rpc "$(cat "$script")" </dev/null
+  fi
+}
 
 {
   echo "== who refresh $STAMP =="
