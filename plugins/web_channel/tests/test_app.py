@@ -5,6 +5,8 @@ intent of swarm/cli's test_cli.py, against the P0 acceptance criteria A.0.1-A.0.
 
 from __future__ import annotations
 
+import re
+
 import grpc
 from fastapi.testclient import TestClient
 from grpc import aio
@@ -73,6 +75,7 @@ def test_a01_found_renders_answer_and_verbatim_citation(monkeypatch) -> None:
         tier="tier_tools",
         status=core_pb2.FOUND,
         citations=[core_pb2.Citation(source="file", ref="/docs/storage.md", confidence=0.9)],
+        ask_ref="ref-storage",
     )
     monkeypatch.setattr(core_client, "ask", _fake_ask(resp))
     r = client.post("/ask", data={"q": "which storage engine?"})
@@ -82,6 +85,56 @@ def test_a01_found_renders_answer_and_verbatim_citation(monkeypatch) -> None:
     assert "/docs/storage.md" in r.text  # verbatim
     assert "file" in r.text
     assert "0.82" in r.text  # confidence shown for FOUND
+    assert 'hx-post="/rate"' in r.text
+    assert 'name="ask_ref" value="ref-storage"' in r.text
+    assert 'name="csrf"' in r.text
+
+
+def test_rate_answer_round_trips_to_kernel(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def fake_rate_answer(ask_ref: str, scopes: list[str], viewer: str, rating: int):
+        captured.update(ask_ref=ask_ref, scopes=scopes, viewer=viewer, rating=rating)
+        return core_pb2.RateAnswerResponse(status=core_pb2.CALL_OK, ask_ref=ask_ref, rating=rating)
+
+    monkeypatch.setattr(core_client, "rate_answer", fake_rate_answer)
+    ask_resp = core_pb2.AskResponse(
+        answer="Postgres + pgvector.",
+        confidence=0.82,
+        tier="tier_tools",
+        status=core_pb2.FOUND,
+        ask_ref="ref-storage",
+    )
+    monkeypatch.setattr(core_client, "ask", _fake_ask(ask_resp))
+    rendered = client.post("/ask", data={"q": "which storage engine?"})
+    m = re.search(r'name="csrf" value="([^"]+)"', rendered.text)
+    assert m
+
+    r = client.post("/rate", data={"ask_ref": "ref-storage", "rating": "wrong", "csrf": m.group(1)})
+
+    assert r.status_code == 200
+    assert "Rating saved" in r.text
+    assert captured == {
+        "ask_ref": "ref-storage",
+        "scopes": ["public"],
+        "viewer": "operator",
+        "rating": core_pb2.WRONG,
+    }
+
+
+def test_rate_answer_rejects_missing_csrf(monkeypatch) -> None:
+    called = False
+
+    async def fake_rate_answer(ask_ref: str, scopes: list[str], viewer: str, rating: int):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(core_client, "rate_answer", fake_rate_answer)
+
+    r = client.post("/rate", data={"ask_ref": "ref-storage", "rating": "wrong"})
+
+    assert r.status_code == 403
+    assert not called
 
 
 def test_a02_not_found_is_honest_no_fabricated_citation_or_confidence(monkeypatch) -> None:

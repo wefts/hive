@@ -13,6 +13,17 @@
      `render.markdown` escapes raw HTML (html=False), so |safe is safe here. #}
   {% if post.answer_html %}<div class="answer md">{{ post.answer_html|safe }}</div>{% endif %}
 
+  {% if post.can_rate %}
+    <form class="rating-control" hx-post="/rate" hx-target="find .rating-status" hx-swap="outerHTML">
+      <input type="hidden" name="ask_ref" value="{{ post.ask_ref }}">
+      <input type="hidden" name="csrf" value="{{ post.csrf_token }}">
+      <button class="btn-icon" type="submit" name="rating" value="helpful" aria-label="helpful answer" title="Helpful">✓</button>
+      <button class="btn-icon" type="submit" name="rating" value="wrong" aria-label="wrong answer" title="Wrong">!</button>
+      <button class="btn-icon" type="submit" name="rating" value="unsure" aria-label="unsure answer" title="Unsure">?</button>
+      <span class="rating-status muted"></span>
+    </form>
+  {% endif %}
+
   {% if post.citations %}
     <details class="disclosure">
       <summary>Sources ({{ post.citations|length }})</summary>

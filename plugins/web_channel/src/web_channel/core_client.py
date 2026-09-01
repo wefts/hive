@@ -95,6 +95,23 @@ async def deliberation(
         )
 
 
+async def rate_answer(
+    ask_ref: str, scopes: list[str], viewer: str, rating: int
+) -> core_pb2.RateAnswerResponse:
+    """Store the viewer's external rating for one answer. Fast, no LLM."""
+    async with aio.insecure_channel(core_addr()) as channel:
+        stub = core_pb2_grpc.CoreStub(channel)
+        return await stub.RateAnswer(
+            core_pb2.RateAnswerRequest(
+                ask_ref=ask_ref,
+                scopes=scopes,
+                viewer=viewer,
+                rating=rating,
+            ),
+            timeout=read_timeout_s(),
+        )
+
+
 async def neighborhood(
     node_id: int,
     scopes: list[str],

@@ -22,6 +22,9 @@ service Core {
   // The panel-vs-judge deliberation behind a past escalated answer, by ask_ref
   // (ADR-15). Read-only, retained, returned only to the owning viewer within scope.
   rpc Deliberation(DeliberationRequest) returns (DeliberationResponse);
+  // External answer rating by the viewer who received the answer. This is the
+  // only signal that can directly mint correctness reward (ADR-11).
+  rpc RateAnswer(RateAnswerRequest) returns (RateAnswerResponse);
   // A bounded, scope-filtered neighborhood around one node: nodes + typed edges
   // (ADR-15). The "connections" surface — never the full hairball.
   rpc Neighborhood(NeighborhoodRequest) returns (NeighborhoodResponse);
@@ -532,16 +535,36 @@ enum AnswerStatus {
   ERROR = 4;
 }
 
+enum AnswerRating {
+  ANSWER_RATING_UNSPECIFIED = 0;
+  HELPFUL = 1;
+  WRONG = 2;
+  UNSURE = 3;
+}
+
 message AskResponse {
   string answer = 1;
   double confidence = 2;
   string tier = 3;
   repeated Citation citations = 4;
   AnswerStatus status = 5;
-  // Opaque handle to the retained panel-vs-judge deliberation (ADR-15), set ONLY
-  // when an escalation produced one for a non-anonymous asker; empty otherwise.
-  // The channel shows a "see the thinking" affordance only when it is present.
+  // Opaque handle to this answer record. Escalated answers that retained a
+  // deliberation use the same handle for the "see the thinking" affordance;
+  // structured answers still get a handle so external ratings can attach.
   string ask_ref = 6;
+}
+
+message RateAnswerRequest {
+  string ask_ref = 1;
+  repeated string scopes = 2;
+  string viewer = 3;       // signed assertion or legacy plaintext viewer
+  AnswerRating rating = 4; // helpful | wrong | unsure
+}
+
+message RateAnswerResponse {
+  CallStatus status = 1;   // OK | NOT_FOUND | BAD_REQUEST
+  string ask_ref = 2;
+  AnswerRating rating = 3;
 }
 
 message StatusRequest {}

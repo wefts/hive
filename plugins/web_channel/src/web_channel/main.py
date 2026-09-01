@@ -133,9 +133,11 @@ def _post_view(turn: dict) -> dict:
         "citations": turn["citations"] if turn["status"] in ("found", "partial") else [],
         "asked_at": datetime.fromtimestamp(asked).strftime("%Y-%m-%d %H:%M:%S") if asked else "",
         "duration": f"{dur / 1000:.1f}s" if dur else None,
-        # Opaque handle to the retained deliberation (ADR-15); the post shows the
-        # "see how it decided" affordance only when it is present.
+        # Opaque handle to the kernel-owned answer record. Escalated answers can
+        # also use it to fetch the retained deliberation.
         "ask_ref": turn.get("ask_ref", ""),
+        "can_rate": bool(turn.get("ask_ref")),
+        "csrf_token": turn.get("csrf_token", ""),
     }
 
 
@@ -681,6 +683,51 @@ async def deliberation(request: Request, ask_ref: str) -> HTMLResponse:
         logger.exception("Deliberation failed")
         delib = None
     return templates.TemplateResponse(request, "_deliberation.html", {"delib": delib})
+
+
+@app.post("/rate", response_class=HTMLResponse)
+async def rate_answer(
+    request: Request,
+    ask_ref: str = Form(...),
+    rating: str = Form(...),
+    csrf: str = Form(""),
+) -> HTMLResponse:
+    """External answer rating. The kernel owns the record and owner/scope gate."""
+    if not _csrf_ok(request, csrf):
+        return _csrf_reject()
+
+    ctx = _session_ctx(request)
+    if ctx is None:
+        return HTMLResponse(
+            '<span class="rating-status error">Session ended.</span>', status_code=401
+        )
+    viewer, scopes, assertion = ctx
+    rating_map = {
+        "helpful": core_pb2.HELPFUL,
+        "wrong": core_pb2.WRONG,
+        "unsure": core_pb2.UNSURE,
+    }
+    wire_rating = rating_map.get(rating)
+    if wire_rating is None:
+        return HTMLResponse(
+            '<span class="rating-status error">Rating rejected.</span>', status_code=400
+        )
+    try:
+        resp = await core_client.rate_answer(
+            ask_ref=ask_ref, scopes=scopes, viewer=assertion or viewer, rating=wire_rating
+        )
+    except Exception:
+        logger.exception("RateAnswer failed")
+        return HTMLResponse('<span class="rating-status error">Rating unavailable.</span>')
+    if resp.status == core_pb2.CALL_OK:
+        return HTMLResponse('<span class="rating-status">Rating saved.</span>')
+    if resp.status == core_pb2.CALL_BAD_REQUEST:
+        return HTMLResponse(
+            '<span class="rating-status error">Rating rejected.</span>', status_code=400
+        )
+    return HTMLResponse(
+        '<span class="rating-status error">Rating unavailable.</span>', status_code=404
+    )
 
 
 @app.get("/neighborhood/{node_id}", response_class=HTMLResponse)
@@ -2236,7 +2283,7 @@ async def ask(
         )
         answer_text, tier, conf = resp.answer, resp.tier, resp.confidence
         status_str = _STATUS_STR.get(resp.status, "unspecified")
-        ask_ref = resp.ask_ref  # opaque deliberation handle; "" unless escalated (ADR-15)
+        ask_ref = resp.ask_ref  # opaque answer handle; empty for anonymous asks
         cites = [
             {"source": c.source, "ref": c.ref, "confidence": c.confidence} for c in resp.citations
         ]
@@ -2315,6 +2362,7 @@ async def ask(
         "asked_at": asked_at,
         "duration_ms": duration_ms,
         "ask_ref": ask_ref,
+        "csrf_token": _csrf_token(request),
     }
     if root is not None:
         # A reply, appended inside its post object's thread.
