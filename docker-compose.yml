@@ -146,14 +146,13 @@ services:
       # returns in seconds, not minutes (this single-GPU box can't swap the heavy
       # default panel of 5 large models + a 70B judge fast enough). Unset these (or
       # override) for prod → the decorrelated heavy panel in swarm config.exs stands.
-      # Capable models for real synthesis (the GB10's 128GB keeps them resident, so
-      # no swap penalty). ADR-7 decorrelation (ADR-17 #1 Phase-2, consilium-latency
-      # blackboard): qwen3:14b is already resident for the panel and, after the ML sidecar
-      # sends think:false, passes the entail calibration as judge too; lfm2.5:8b stays as the
-      # different-family panel member. gemma4:31b is no longer required in the default
-      # resident fleet.
+      # Capable models for real synthesis (the GB10's 128GB keeps them resident).
+      # ADR-11 decorrelation applies to synthesized-answer judging too: the judge
+      # must not be a panel member. qwen3:14b remains in the panel; gemma4:31b is
+      # the conservative decorrelated judge until a smaller third-family judge wins
+      # the contrastive-inversion eval.
       SWARM_CONSILIUM_PANEL: ${SWARM_CONSILIUM_PANEL:-qwen3:14b,lfm2.5:8b}
-      SWARM_CONSILIUM_JUDGE: ${SWARM_CONSILIUM_JUDGE:-qwen3:14b}
+      SWARM_CONSILIUM_JUDGE: ${SWARM_CONSILIUM_JUDGE:-gemma4:31b}
       # Verified actor assertion (ADR-16 D9, step 6b): the SAME shared secret as
       # web_channel's SWARM_ACTOR_SECRET below, from secrets.env — unset here ⇒ the
       # kernel refuses to verify (fails closed), so signing simply has no effect
