@@ -148,13 +148,12 @@ services:
       # override) for prod → the decorrelated heavy panel in swarm config.exs stands.
       # Capable models for real synthesis (the GB10's 128GB keeps them resident, so
       # no swap penalty). ADR-7 decorrelation (ADR-17 #1 Phase-2, consilium-latency
-      # blackboard): the panel and the judge must be from DISTINCT families so the judge
-      # doesn't share the panel's blind spots. Panel qwen3:14b (Qwen) + lfm2.5:8b (LFM);
-      # judge gemma4:31b (Gemma) — three distinct families (was gemma4:e4b in the panel,
-      # which shared a family with the gemma judge). lfm2.5:8b is small+fast (latency-neutral)
-      # and emits valid JSON (glm-4.7-flash was rejected — a thinking model, empty response).
+      # blackboard): qwen3:14b is already resident for the panel and, after the ML sidecar
+      # sends think:false, passes the entail calibration as judge too; lfm2.5:8b stays as the
+      # different-family panel member. gemma4:31b is no longer required in the default
+      # resident fleet.
       SWARM_CONSILIUM_PANEL: ${SWARM_CONSILIUM_PANEL:-qwen3:14b,lfm2.5:8b}
-      SWARM_CONSILIUM_JUDGE: ${SWARM_CONSILIUM_JUDGE:-gemma4:31b}
+      SWARM_CONSILIUM_JUDGE: ${SWARM_CONSILIUM_JUDGE:-qwen3:14b}
       # Verified actor assertion (ADR-16 D9, step 6b): the SAME shared secret as
       # web_channel's SWARM_ACTOR_SECRET below, from secrets.env — unset here ⇒ the
       # kernel refuses to verify (fails closed), so signing simply has no effect
@@ -165,9 +164,9 @@ services:
       # ADR-17 tier-gate: serve covered asks from structure before the consilium. OFF unless
       # set "true" (a false-serve breaks trust — enable only after the go/no-go shows
       # false_serve_rate ~0; set in env/staging.env for the internal instance). Entail model
-      # override optional (default gemma4:31b, the resident judge — fsr 0/recall 1 on the eval).
+      # override optional (default qwen3:14b — fsr 0/recall 1 once sidecar thinking is disabled).
       SWARM_TIER_GATE_ENABLED: ${SWARM_TIER_GATE_ENABLED:-}
-      SWARM_TIER_GATE_ENTAIL_MODEL: ${SWARM_TIER_GATE_ENTAIL_MODEL:-}
+      SWARM_TIER_GATE_ENTAIL_MODEL: ${SWARM_TIER_GATE_ENTAIL_MODEL:-qwen3:14b}
       SWARM_TIER_GATE_NETWORK_SERVE: ${SWARM_TIER_GATE_NETWORK_SERVE:-}
       SWARM_TIER_GATE_NETWORK_MIN_CORROB: ${SWARM_TIER_GATE_NETWORK_MIN_CORROB:-}
       SWARM_TIER_GATE_WHO_SERVE: ${SWARM_TIER_GATE_WHO_SERVE:-}
