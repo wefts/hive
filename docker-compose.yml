@@ -170,6 +170,16 @@ services:
       SWARM_TIER_GATE_NETWORK_SERVE: ${SWARM_TIER_GATE_NETWORK_SERVE:-}
       SWARM_TIER_GATE_NETWORK_MIN_CORROB: ${SWARM_TIER_GATE_NETWORK_MIN_CORROB:-}
       SWARM_TIER_GATE_WHO_SERVE: ${SWARM_TIER_GATE_WHO_SERVE:-}
+      SWARM_TIER_GATE_TECHNOLOGY_SERVE: ${SWARM_TIER_GATE_TECHNOLOGY_SERVE:-}
+      SWARM_TIER_GATE_TECHNOLOGY_MIN_CORROB: ${SWARM_TIER_GATE_TECHNOLOGY_MIN_CORROB:-}
+      # Gate budget after semantic routing entered the live path: semantic embedding
+      # runs before Stage 2, then Stage 2 gets this bounded entail window. Keep this
+      # visible here so deploy and host-side measurements cannot drift silently.
+      SWARM_TIER_GATE_BREAKER_MS: ${SWARM_TIER_GATE_BREAKER_MS:-7000}
+      # Warm the pinned fleet at kernel start so the first browser ask after deploy
+      # sees the steady-state path instead of paying cold-load inside the gate.
+      SWARM_ML_PREWARM: ${SWARM_ML_PREWARM:-true}
+      SWARM_ML_PREWARM_TIMEOUT_MS: ${SWARM_ML_PREWARM_TIMEOUT_MS:-120000}
     ports:
       - "${SWARM_CORE_API_PORT:-50061}:50061"
     depends_on:

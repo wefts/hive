@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Emit host-side exports for live kernel measurements.
+#
+# Host Mix sessions do not run inside the compose network and do not inherit
+# docker-compose.yml interpolation. This script derives the kernel environment
+# from the same layered compose config used for deploys, rewrites container-only
+# service addresses to host-reachable endpoints, and fails loudly if the tier
+# gate would not be measuring the deployed configuration.
+set -euo pipefail
+
+: "${SWARM_ENV:?SWARM_ENV must be set to test|staging|prod}"
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+json="$("${here}/scripts/compose" config --format json)"
+
+kernel_env="$(printf '%s' "$json" | jq -r '.services.kernel.environment')"
+
+get_env() {
+  printf '%s' "$kernel_env" | jq -r --arg key "$1" '.[$key] // empty'
+}
+
+emit_export() {
+  local key="$1"
+  local value="$2"
+  printf 'export %s=%q\n' "$key" "$value"
+}
+
+require_enabled() {
+  local key="$1"
+  local value
+  value="$(get_env "$key")"
+  if [ "$value" != "true" ]; then
+    echo "kernel-measure-env: ${key} must resolve to true for live gate measurement, got '${value:-<unset>}'" >&2
+    exit 2
+  fi
+}
+
+for key in \
+  SWARM_TIER_GATE_ENABLED \
+  SWARM_TIER_GATE_NETWORK_SERVE \
+  SWARM_TIER_GATE_WHO_SERVE
+do
+  require_enabled "$key"
+done
+
+network_min="$(get_env SWARM_TIER_GATE_NETWORK_MIN_CORROB)"
+if [ -z "$network_min" ]; then
+  echo "kernel-measure-env: SWARM_TIER_GATE_NETWORK_MIN_CORROB is unset; host Mix would use the code default" >&2
+  exit 2
+fi
+
+breaker_ms="$(get_env SWARM_TIER_GATE_BREAKER_MS)"
+if [ -z "$breaker_ms" ]; then
+  echo "kernel-measure-env: SWARM_TIER_GATE_BREAKER_MS is unset; host Mix would use the code default" >&2
+  exit 2
+fi
+
+ml_address="$(get_env SWARM_ML_ADDRESS)"
+case "$ml_address" in
+  ml:*)
+    port="${ml_address#ml:}"
+    ml_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' hive-ml-1 2>/dev/null || true)"
+    if [ -z "$ml_ip" ]; then
+      ml_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' hive-ml-2 2>/dev/null || true)"
+    fi
+    if [ -z "$ml_ip" ]; then
+      echo "kernel-measure-env: could not resolve a running hive ML container for ${ml_address}" >&2
+      exit 2
+    fi
+    ml_address="${ml_ip}:${port}"
+    ;;
+esac
+
+db_host="$(get_env SWARM_DB_HOST)"
+if [ "$db_host" = "postgres" ]; then
+  db_host="localhost"
+fi
+
+# Host measurements call Core.ask in-process; do not bind the public Core API
+# port already owned by the deployed kernel.
+emit_export SWARM_CORE_API_START_SERVER false
+
+for key in \
+  SWARM_DB_HOST \
+  SWARM_DB_PORT \
+  SWARM_DB_USER \
+  SWARM_DB_PASSWORD \
+  SWARM_DB_NAME \
+  SWARM_CONSILIUM_PANEL \
+  SWARM_CONSILIUM_JUDGE \
+  SWARM_TIER_GATE_ENABLED \
+  SWARM_TIER_GATE_ENTAIL_MODEL \
+  SWARM_TIER_GATE_NETWORK_SERVE \
+  SWARM_TIER_GATE_NETWORK_MIN_CORROB \
+  SWARM_TIER_GATE_WHO_SERVE \
+  SWARM_TIER_GATE_TECHNOLOGY_SERVE \
+  SWARM_TIER_GATE_TECHNOLOGY_MIN_CORROB \
+  SWARM_TIER_GATE_BREAKER_MS \
+  SWARM_ML_PREWARM \
+  SWARM_ML_PREWARM_TIMEOUT_MS
+do
+  if [ "$key" = "SWARM_DB_HOST" ]; then
+    emit_export "$key" "$db_host"
+  else
+    emit_export "$key" "$(get_env "$key")"
+  fi
+done
+
+emit_export SWARM_ML_ADDRESS "$ml_address"
