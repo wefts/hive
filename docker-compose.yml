@@ -98,7 +98,7 @@ services:
 
   # --- Intelligence pillar: Python ML service (gRPC Embedder) -------------
   ml:
-    image: swarm-ml:${SWARM_ML_VERSION:-0.1.0}
+    image: swarm-ml:${SWARM_ML_VERSION:-0.2.0}
     init: true
     # Horizontal pillar (system_architecture §9): the ML service is stateless, so
     # it scales out. Compose DNS resolves `ml` to all replica IPs; the kernel
