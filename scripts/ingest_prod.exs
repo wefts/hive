@@ -14,7 +14,8 @@
 #     ../../hive/scripts/ingest_prod.exs
 #
 # Tunables (generous defaults for a real corpus, bounded so it completes):
-#   CONF_MAXPAGES (30) CONF_LIMIT (50) WIKI_MAXPAGES (30) WIKI_GAPLIMIT (50) EMBED_CONC (4)
+#   CONF_MAXPAGES (30) CONF_LIMIT (50) CONF_SPACE (unset = all spaces)
+#   WIKI_MAXPAGES (30) WIKI_GAPLIMIT (50) EMBED_CONC (4)
 
 require Logger
 Logger.configure(level: :warning)
@@ -40,6 +41,14 @@ alias Swarm.Repo
 {:ok, _} = Swarm.ML.ChannelPool.start_link([])
 
 env = fn k, d -> String.to_integer(System.get_env(k, d)) end
+
+env_optional = fn k ->
+  case System.get_env(k) do
+    nil -> nil
+    "" -> nil
+    v -> v
+  end
+end
 
 count = fn sql ->
   %{rows: [[n]]} = Repo.query!(sql)
@@ -94,7 +103,8 @@ conf =
     Sync.run(Hive.Confluence.Connector,
       scope: conf_scope,
       limit: env.("CONF_LIMIT", "50"),
-      max_pages: env.("CONF_MAXPAGES", "30")
+      max_pages: env.("CONF_MAXPAGES", "30"),
+      space: env_optional.("CONF_SPACE")
     ),
     System.monotonic_time(:millisecond) - t
   )
