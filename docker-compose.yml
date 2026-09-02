@@ -51,7 +51,7 @@ services:
   # A release has no `mix ecto.migrate`; run migrations via the release `eval`
   # (Swarm.Release.migrate/0), then exit. The kernel waits for this to succeed.
   migrate:
-    image: swarm-kernel:${SWARM_KERNEL_VERSION:-0.4.0}
+    image: swarm-kernel:${SWARM_KERNEL_VERSION:-0.5.0}
     build:
       context: ../swarm/kernel
       args:
@@ -123,7 +123,7 @@ services:
 
   # --- Logic / coordination: Elixir kernel (Core API + graph + consilium) -
   kernel:
-    image: swarm-kernel:${SWARM_KERNEL_VERSION:-0.4.0}
+    image: swarm-kernel:${SWARM_KERNEL_VERSION:-0.5.0}
     init: true            # docker-init as PID 1 → reaps the BEAM's epmd child
     build:
       context: ../swarm/kernel
