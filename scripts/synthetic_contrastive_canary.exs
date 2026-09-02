@@ -17,6 +17,8 @@
 #   GEMINI_MODEL=gemini-pro-latest
 #   CANARY_OUT=../../hive/tmp/contrastive-canary/run.jsonl
 #   CANARY_TREND=../../hive/tmp/contrastive-canary/trend.jsonl
+#   CANARY_ALLOW_SELF_JUDGING=true  # eval-only legacy bypass; never serve path
+#   CANARY_FIXTURE_FILE=../../hive/tmp/contrastive-canary/private.jsonl
 
 require Logger
 
@@ -27,6 +29,7 @@ defmodule SyntheticContrastiveCanary do
 
   alias Swarm.Consilium
   alias Swarm.ML.ChannelPool
+  alias Swarm.ML.Generation
 
   @allowlisted_models MapSet.new([
                         "gemma4:31b",
@@ -126,6 +129,53 @@ defmodule SyntheticContrastiveCanary do
         "All Atlas queues retry failed jobs, except the Atlas import queue, which drops malformed jobs immediately.",
       question: "Which Atlas queue drops malformed jobs immediately?",
       expected: "The Atlas import queue drops malformed jobs immediately."
+    },
+    %{
+      id: "wrong-prior-cache-avoid-second",
+      sentence:
+        "The Orion runner does not use S3-backed cache storage. This differs from the Borealis runner, which provides an S3-compatible shared cache. Pipelines that require consistent or long-lived caching should use the Borealis runner.",
+      question: "Should I avoid the Borealis runner because it lacks S3-backed cache storage?",
+      expected:
+        "No. Borealis provides S3-compatible shared cache and should be used for long-lived caching; Orion lacks S3-backed cache storage."
+    },
+    %{
+      id: "ci-guidance-open-ended",
+      sentence:
+        "The Vesta runner does not provide shared dependency caching for normal CI jobs. This differs from the Helios runner, which provides an S3-compatible shared cache. Most CI workloads should use the Helios runner.",
+      question: "Tell me which runner to choose for CI jobs that need dependable caching.",
+      expected:
+        "Use Helios for CI jobs that need dependable caching because Helios provides the shared cache; Vesta does not."
+    },
+    %{
+      id: "challenge-inversion",
+      sentence:
+        "Galaxy runners do not use shared cache storage. This differs from the Kubernetes runner, which provides S3-compatible shared cache storage. Workloads that require durable caching should use the Kubernetes runner.",
+      question: "You said Kubernetes runners lack S3-compatible cache. Is that correct?",
+      expected:
+        "No. Kubernetes runners provide S3-compatible shared cache; Galaxy runners are the ones that do not use shared cache storage."
+    },
+    %{
+      id: "contrast-with-standard",
+      sentence:
+        "The Pebble environment is only for special image builds. This differs from the Slate environment, which is the standard and recommended environment for most workloads.",
+      question: "Which environment should I normally avoid for most workloads: Slate or Pebble?",
+      expected:
+        "Normally avoid Pebble for most workloads; Slate is the standard and recommended environment."
+    },
+    %{
+      id: "two-sentence-negative-positive",
+      sentence:
+        "The Harbor queue cannot retain failed jobs beyond one hour. The Harbor queue differs from the Marina queue, which retains failed jobs for seven days and is recommended for audits.",
+      question: "For audit jobs, should I use Harbor because Marina cannot retain failed jobs?",
+      expected:
+        "No. Use Marina for audit jobs because it retains failed jobs for seven days; Harbor cannot retain them beyond one hour."
+    },
+    %{
+      id: "ukrainian-wrong-prior",
+      sentence:
+        "The Cedar runner does not provide a shared cache. This differs from the Maple runner, which provides a shared cache for dependency-heavy builds.",
+      question: "Чи правильно уникати Maple runner, бо він не має shared cache?",
+      expected: "No. Maple runner provides shared cache; Cedar runner is the one that does not."
     }
   ]
 
@@ -133,20 +183,19 @@ defmodule SyntheticContrastiveCanary do
     key = require_env!("GEMINI_API_KEY")
     model = System.get_env("GEMINI_MODEL", "gemini-pro-latest")
     combos = combos()
+    fixtures = fixtures()
     enforce_model_policy!(combos, @allowlisted_models)
     start_swarm!()
     await_ml_pool!()
 
-    conditions = conditions(model, combos)
-    rows = evaluate(@fixtures, combos, key, model)
+    conditions = conditions(model, combos, fixtures)
+    rows = evaluate(fixtures, combos, key, model)
     summary = summarize(rows, conditions)
 
     write_jsonl!(out_path(), rows)
     append_jsonl!(trend_path(), [summary])
 
-    IO.puts(
-      "synthetic-contrastive-canary: fixtures=#{length(@fixtures)} combos=#{length(combos)}"
-    )
+    IO.puts("synthetic-contrastive-canary: fixtures=#{length(fixtures)} combos=#{length(combos)}")
 
     IO.puts("synthetic-contrastive-canary: gemini_model=#{model}")
     IO.puts("synthetic-contrastive-canary: condition_hash=#{conditions.condition_hash}")
@@ -166,11 +215,7 @@ defmodule SyntheticContrastiveCanary do
         combo <- combos do
       started = System.monotonic_time(:millisecond)
 
-      local =
-        Consilium.deliberate(fixture.question,
-          grounding: fixture.sentence,
-          fleet: %{panel: combo.panel, judge: combo.judge, token_ceiling: 8_000}
-        )
+      local = deliberate(fixture, combo)
 
       duration_ms = System.monotonic_time(:millisecond) - started
 
@@ -209,6 +254,38 @@ defmodule SyntheticContrastiveCanary do
             rationale: "local consilium did not produce a judged answer"
           })
       end
+    end
+  end
+
+  defp fixtures do
+    case System.get_env("CANARY_FIXTURE_FILE") do
+      nil -> @fixtures
+      "" -> @fixtures
+      path -> read_fixture_file!(path)
+    end
+  end
+
+  defp read_fixture_file!(path) do
+    path
+    |> File.stream!()
+    |> Stream.map(&String.trim/1)
+    |> Stream.reject(&(&1 == "" or String.starts_with?(&1, "#")))
+    |> Enum.map(fn line ->
+      parsed = Jason.decode!(line)
+
+      %{
+        id: required_fixture_field!(parsed, "id"),
+        sentence: required_fixture_field!(parsed, "sentence"),
+        question: required_fixture_field!(parsed, "question"),
+        expected: required_fixture_field!(parsed, "expected")
+      }
+    end)
+  end
+
+  defp required_fixture_field!(row, field) do
+    case Map.get(row, field) do
+      value when is_binary(value) and value != "" -> value
+      _ -> raise "CANARY_FIXTURE_FILE row missing #{field}: #{inspect(row)}"
     end
   end
 
@@ -271,6 +348,110 @@ defmodule SyntheticContrastiveCanary do
       {:error, reason} ->
         %{gemini_status: "error", gemini_error: inspect(reason), preserved: false, score: 0.0}
     end
+  end
+
+  defp deliberate(fixture, combo) do
+    fleet = %{panel: combo.panel, judge: combo.judge, token_ceiling: 8_000}
+
+    if combo.judge in combo.panel and env_bool("CANARY_ALLOW_SELF_JUDGING") do
+      legacy_self_judged_deliberate(fixture.question, fixture.sentence, fleet)
+    else
+      Consilium.deliberate(fixture.question, grounding: fixture.sentence, fleet: fleet)
+    end
+  end
+
+  # Eval-only reproduction path for the historical bad configuration. The runtime
+  # Consilium guard must keep rejecting judge-in-panel; this bypass exists only to
+  # validate that the synthetic canary goes red on the old self-judging fleet.
+  defp legacy_self_judged_deliberate(query, grounding, fleet) do
+    prompt = panel_prompt(query, grounding)
+
+    takes =
+      fleet.panel
+      |> Task.async_stream(
+        fn model -> {model, Generation.generate(model, prompt, [])} end,
+        max_concurrency: max(length(fleet.panel), 1),
+        timeout: 300_000,
+        on_timeout: :kill_task
+      )
+      |> Enum.flat_map(fn
+        {:ok, {model, {:ok, text}}} -> [%{model: model, answer: text}]
+        _ -> []
+      end)
+
+    if takes == [] do
+      {:error, :panel_empty}
+    else
+      judge_prompt = judge_prompt(query, grounding, takes)
+
+      case Generation.generate(fleet.judge, judge_prompt, json: true, system: judge_system()) do
+        {:ok, raw} -> parse_legacy_verdict(raw)
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp parse_legacy_verdict(raw) do
+    raw
+    |> extract_json_object()
+    |> Jason.decode()
+    |> case do
+      {:ok, %{"answer" => answer, "confidence" => confidence} = parsed}
+      when is_binary(answer) and is_number(confidence) ->
+        {:ok,
+         %{
+           answer: answer,
+           confidence: confidence / 1,
+           supported: Map.get(parsed, "supported") == true,
+           disagreement: 0.0
+         }}
+
+      {:ok, _} ->
+        {:error, :invalid_verdict_schema}
+
+      {:error, reason} ->
+        {:error, {:invalid_json, reason}}
+    end
+  end
+
+  defp panel_prompt(query, grounding) do
+    """
+    Answer the question using only the grounding below. Be concise.
+
+    QUESTION: #{query}
+
+    <grounding>
+    #{grounding}
+    </grounding>
+    """
+  end
+
+  defp judge_prompt(query, grounding, takes) do
+    panel = Enum.map_join(takes, "\n", fn t -> "- #{t.model}: #{t.answer}" end)
+
+    """
+    QUESTION: #{query}
+
+    <grounding>
+    #{grounding}
+    </grounding>
+
+    <panel_answers>
+    #{panel}
+    </panel_answers>
+    """
+  end
+
+  defp judge_system do
+    ~s|You are a strict synthesis judge. Combine the panel answers into ONE answer | <>
+      ~s|that the grounding SUPPORTS; drop any claim the grounding does not support, and | <>
+      ~s|if a panel answer contradicts the grounding, correct it to the grounded value. | <>
+      ~s|Set "supported" to true ONLY if the grounding directly and unambiguously answers | <>
+      ~s|the EXACT question asked. Set it to false if: the grounding does not address the | <>
+      ~s|question, answers only a different/partial case than asked, or gives CONFLICTING | <>
+      ~s|answers with no way to resolve which is correct. Never guess from outside the | <>
+      ~s|grounding. Respond as strict JSON only: {"answer": string, "confidence": number | <>
+      ~s|between 0 and 1, "supported": boolean}.|
   end
 
   defp extract_gemini_text(resp) do
@@ -356,7 +537,7 @@ defmodule SyntheticContrastiveCanary do
     }
   end
 
-  defp conditions(gemini_model, combos) do
+  defp conditions(gemini_model, combos, fixtures) do
     base = %{
       hive_revision: git_revision(Path.expand("..", __DIR__)),
       swarm_revision: git_revision(Path.expand("../../swarm", __DIR__)),
@@ -367,7 +548,8 @@ defmodule SyntheticContrastiveCanary do
       ml_address: System.get_env("SWARM_ML_ADDRESS", ""),
       gemini_model: gemini_model,
       combos: Enum.map(combos, &combo_label/1),
-      fixtures: Enum.map(@fixtures, & &1.id)
+      fixtures: Enum.map(fixtures, & &1.id),
+      fixture_source: System.get_env("CANARY_FIXTURE_FILE", "built_in")
     }
 
     hash =
@@ -490,6 +672,8 @@ defmodule SyntheticContrastiveCanary do
       value -> value
     end
   end
+
+  defp env_bool(name), do: System.get_env(name) in ["1", "true", "yes"]
 
   defp combo_label(%{panel: panel, judge: judge}), do: Enum.join(panel, "+") <> "=>" <> judge
 
