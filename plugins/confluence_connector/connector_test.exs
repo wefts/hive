@@ -34,7 +34,10 @@ defmodule Hive.Confluence.ConnectorTest do
             "<table><tbody><tr><th>step</th><th>cmd</th></tr><tr><td>build</td><td>make</td></tr></tbody></table>"
       }
     },
-    "ancestors" => [%{"id" => "1", "title" => "Space Home"}, %{"id" => "50", "title" => "Operations"}],
+    "ancestors" => [
+      %{"id" => "1", "title" => "Space Home"},
+      %{"id" => "50", "title" => "Operations"}
+    ],
     "metadata" => %{"labels" => %{"results" => [%{"name" => "ops"}]}},
     "version" => %{"when" => "2024-03-02T10:15:30.000Z"},
     "_links" => %{"webui" => "/spaces/OPS/pages/101"}
@@ -83,8 +86,15 @@ defmodule Hive.Confluence.ConnectorTest do
   # follow that opaque next URL, not compute its own offset.
   defp page1_body do
     # `next` is relative to the /wiki context (no /wiki prefix), resolved against `_links.base`.
-    %{"results" => [@page_101, @page_102, @page_103], "limit" => 50, "size" => 3,
-      "_links" => %{"base" => "https://example.test/wiki", "next" => "/rest/api/content/search?cursor=NEXTTOK&limit=50"}}
+    %{
+      "results" => [@page_101, @page_102, @page_103],
+      "limit" => 50,
+      "size" => 3,
+      "_links" => %{
+        "base" => "https://example.test/wiki",
+        "next" => "/rest/api/content/search?cursor=NEXTTOK&limit=50"
+      }
+    }
     |> JSON.encode!()
   end
 
@@ -96,12 +106,17 @@ defmodule Hive.Confluence.ConnectorTest do
   # http stub: route by whether the URL carries the opaque next cursor token.
   defp http_two_pages do
     fn url ->
-      if String.contains?(url, "cursor=NEXTTOK"), do: {:ok, page2_body()}, else: {:ok, page1_body()}
+      if String.contains?(url, "cursor=NEXTTOK"),
+        do: {:ok, page2_body()},
+        else: {:ok, page1_body()}
     end
   end
 
   defp opts(extra \\ []) do
-    Keyword.merge([http: http_two_pages(), scope: "group", space: "OPS", base_url: "https://example.test"], extra)
+    Keyword.merge(
+      [http: http_two_pages(), scope: "group", space: "OPS", base_url: "https://example.test"],
+      extra
+    )
   end
 
   # --- describe -------------------------------------------------------------
@@ -148,19 +163,59 @@ defmodule Hive.Confluence.ConnectorTest do
 
     # 102 (archive) and 103 (too short) are filtered → only 101 survives page 1
     assert [event] = page.events
+
+    assert [
+             %{source_ref: "confluence:102", reason: :archived_label},
+             %{source_ref: "confluence:103", reason: :short_or_stub}
+           ] = page.skips
+
     assert event.provenance == "confluence:101"
+    assert event.origin == "confluence:101"
     assert %DateTime{} = event.occurred_at
 
     page_entity = Enum.find(event.entities, &(&1.key == "Runbook: Deploy"))
     assert page_entity.type == "article"
+    assert page_entity.identity == "confluence:101"
+    assert page_entity.source_ref == "confluence:101"
     assert page_entity.scope == "group"
     assert page_entity.content =~ "Deploy via"
     assert page_entity.content =~ "| step | cmd |"
 
     assert Enum.any?(event.entities, &(&1.key == "Rollback" and &1.content == ""))
-    assert %{from: "Runbook: Deploy", to: "Rollback", type: "links_to"} in event.relations
+
+    assert Enum.any?(
+             event.entities,
+             &(&1.key == "Operations" and &1.identity == "confluence:50" and
+                 &1.source_ref == "confluence:50")
+           )
+
+    assert Enum.any?(
+             event.relations,
+             &match?(
+               %{
+                 from: "Runbook: Deploy",
+                 from_ref: "confluence:101",
+                 to: "Rollback",
+                 type: "links_to"
+               },
+               &1
+             )
+           )
+
     # immediate parent = last ancestor
-    assert %{from: "Runbook: Deploy", to: "Operations", type: "child_of"} in event.relations
+    assert Enum.any?(
+             event.relations,
+             &match?(
+               %{
+                 from: "Runbook: Deploy",
+                 from_ref: "confluence:101",
+                 to: "Operations",
+                 to_ref: "confluence:50",
+                 type: "child_of"
+               },
+               &1
+             )
+           )
   end
 
   test "fetch/2 follows _links.next then stops at :done" do

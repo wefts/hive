@@ -21,6 +21,7 @@ Logger.configure(level: :warning)
 
 alias Swarm.Connector.Sync
 alias Swarm.Ingest.Content
+alias Swarm.Ingest.SkipLedger
 alias Swarm.Repo
 
 {:ok, _} = Application.ensure_all_started(:ecto_sql)
@@ -39,15 +40,25 @@ alias Swarm.Repo
 {:ok, _} = Swarm.ML.ChannelPool.start_link([])
 
 env = fn k, d -> String.to_integer(System.get_env(k, d)) end
-count = fn sql -> %{rows: [[n]]} = Repo.query!(sql); n end
+
+count = fn sql ->
+  %{rows: [[n]]} = Repo.query!(sql)
+  n
+end
 
 report = fn label, {:ok, r}, ms ->
-  IO.puts("  #{label}: ingested=#{r.ingested} dup=#{r.duplicates} err=#{r.errors} " <>
-            "pages=#{r.pages} complete?=#{r.complete?} in #{ms} ms")
+  IO.puts(
+    "  #{label}: ingested=#{r.ingested} dup=#{r.duplicates} err=#{r.errors} " <>
+      "skipped=#{r.skipped} pages=#{r.pages} complete?=#{r.complete?} in #{ms} ms"
+  )
+
   r
 end
 
-IO.puts("== prod ingest (db=#{System.get_env("SWARM_DB_NAME", "?")} ml=#{System.get_env("SWARM_ML_ADDRESS", "?")}) ==")
+IO.puts(
+  "== prod ingest (db=#{System.get_env("SWARM_DB_NAME", "?")} ml=#{System.get_env("SWARM_ML_ADDRESS", "?")}) =="
+)
+
 IO.puts("before: nodes=#{count.("SELECT count(*) FROM node")}")
 
 # --- 1. ingest both intranet sources — each under ITS registered Source scope (ADR-20:
@@ -66,11 +77,17 @@ IO.puts("\n-- ingest (kernel-driven Sync loop) confluence=#{conf_scope} wiki=#{w
 
 cookie =
   case Hive.MediaWiki.Connector.login([]) do
-    {:ok, c} -> IO.puts("  mediawiki login: OK"); c
-    {:error, r} -> IO.puts("  mediawiki login: anon (#{inspect(r)})"); nil
+    {:ok, c} ->
+      IO.puts("  mediawiki login: OK")
+      c
+
+    {:error, r} ->
+      IO.puts("  mediawiki login: anon (#{inspect(r)})")
+      nil
   end
 
 t = System.monotonic_time(:millisecond)
+
 conf =
   report.(
     "confluence",
@@ -83,6 +100,7 @@ conf =
   )
 
 t = System.monotonic_time(:millisecond)
+
 wiki =
   report.(
     "mediawiki",
@@ -129,13 +147,34 @@ IO.puts("  embedded ok=#{ok} failed=#{failed} in #{t_embed} ms")
 
 # --- 3. population (privacy-safe: counts only) ---
 IO.puts("\n-- population --")
-IO.puts("  nodes: #{count.("SELECT count(*) FROM node")} " <>
-          "(public=#{count.("SELECT count(*) FROM node WHERE scope='public'")} " <>
-          "group=#{count.("SELECT count(*) FROM node WHERE scope='group'")})")
-IO.puts("  edges=#{count.("SELECT count(*) FROM edge")} " <>
-          "content=#{count.("SELECT count(*) FROM content")} " <>
-          "chunks=#{count.("SELECT count(*) FROM chunk")} " <>
-          "vec=#{count.("SELECT count(*) FROM node WHERE vec IS NOT NULL")}")
 
-IO.puts("\nRESULT: prod corpus ingested+embedded (privacy-safe counts above). " <>
-          "conf complete?=#{conf.complete?} wiki complete?=#{wiki.complete?}")
+IO.puts(
+  "  nodes: #{count.("SELECT count(*) FROM node")} " <>
+    "(public=#{count.("SELECT count(*) FROM node WHERE scope='public'")} " <>
+    "group=#{count.("SELECT count(*) FROM node WHERE scope='group'")})"
+)
+
+IO.puts(
+  "  edges=#{count.("SELECT count(*) FROM edge")} " <>
+    "content=#{count.("SELECT count(*) FROM content")} " <>
+    "skips=#{count.("SELECT count(*) FROM ingest_skip")} " <>
+    "chunks=#{count.("SELECT count(*) FROM chunk")} " <>
+    "vec=#{count.("SELECT count(*) FROM node WHERE vec IS NOT NULL")}"
+)
+
+IO.puts("  skip reasons:")
+
+case SkipLedger.summary() do
+  [] ->
+    IO.puts("    none")
+
+  rows ->
+    Enum.each(rows, fn row ->
+      IO.puts("    #{row.source}/#{row.reason}=#{row.count}")
+    end)
+end
+
+IO.puts(
+  "\nRESULT: prod corpus ingested+embedded (privacy-safe counts above). " <>
+    "conf complete?=#{conf.complete?} wiki complete?=#{wiki.complete?}"
+)

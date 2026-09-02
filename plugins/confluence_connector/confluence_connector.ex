@@ -24,15 +24,16 @@ defmodule Hive.Confluence.Connector do
   One ingest event per surviving page:
 
       %{
-        provenance: "confluence:<id>",       # evidential origin = stable page id
+        provenance: "confluence:<id>",       # emission/source ref = stable page id
+        origin: "confluence:<id>",           # evidential origin = stable page id
         occurred_at: <version.when, UTC>,
         entities: [
-          %{type: "article", key: <title>, scope: <env scope>, content: <prose>},
+          %{type: "article", key: <title>, identity: "confluence:<id>", source_ref: "confluence:<id>", scope: <env scope>, content: <prose>},
           %{type: "article", key: <link/parent title>, scope: …, content: ""}, …
         ],
         relations: [
-          %{from: <title>, to: <linked title>, type: "links_to"}, …
-          %{from: <title>, to: <parent title>, type: "child_of"}   # immediate ancestor
+          %{from: <title>, from_ref: "confluence:<id>", to: <linked title>, type: "links_to"}, …
+          %{from: <title>, from_ref: "confluence:<id>", to: <parent title>, to_ref: "confluence:<parent-id>", type: "child_of"}
         ]
       }
 
@@ -42,7 +43,8 @@ defmodule Hive.Confluence.Connector do
   kernel `entity-resolution` seam, ADR-13).
 
   Archived/deprecated pages (by label) and empty/stub pages (prose `< @min_body`)
-  are skipped — the glpi-agent's hard-won filters.
+  are emitted as privacy-safe skip records — the glpi-agent's hard-won filters,
+  now observable by the kernel skip ledger.
 
   ## Config (`opts`)
 
@@ -85,8 +87,8 @@ defmodule Hive.Confluence.Connector do
 
     with {:ok, body} <- http.(request_url),
          {:ok, json} <- decode(body) do
-      events = json |> Map.get("results", []) |> Enum.flat_map(&page_to_event(&1, scope))
-      {:ok, paginate(events, json, page_num, opts)}
+      {events, skips} = json |> Map.get("results", []) |> page_items(scope)
+      {:ok, paginate(events, skips, json, page_num, opts)}
     end
   end
 
@@ -97,14 +99,14 @@ defmodule Hive.Confluence.Connector do
   # So the kernel-driven cursor IS the next URL Confluence hands us. `:max_pages` is
   # surfaced as `truncated?` (no silent cap); `totalSize` rides as `:total` for the
   # Sync loop's coverage reconciliation (ADR-5 §3).
-  defp paginate(events, json, page_num, opts) do
+  defp paginate(events, skips, json, page_num, opts) do
     next = get_in(json, ["_links", "next"])
     max_pages = Keyword.get(opts, :max_pages)
 
     page =
       case Map.get(json, "totalSize") do
-        n when is_integer(n) -> %{events: events, total: n}
-        _ -> %{events: events}
+        n when is_integer(n) -> %{events: events, skips: skips, total: n}
+        _ -> %{events: events, skips: skips}
       end
 
     cond do
@@ -137,57 +139,107 @@ defmodule Hive.Confluence.Connector do
 
   # --- page → event ---------------------------------------------------------
 
-  defp page_to_event(page, scope) do
+  defp page_items(pages, scope) do
+    pages
+    |> Enum.map(&page_to_item(&1, scope))
+    |> Enum.reduce({[], []}, fn
+      {:event, event}, {events, skips} -> {[event | events], skips}
+      {:skip, skip}, {events, skips} -> {events, [skip | skips]}
+    end)
+    |> then(fn {events, skips} -> {Enum.reverse(events), Enum.reverse(skips)} end)
+  end
+
+  defp page_to_item(page, scope) do
     title = page |> Map.get("title", "") |> String.trim()
     xhtml = get_in(page, ["body", "storage", "value"]) || ""
     md = to_markdown(xhtml)
 
     cond do
-      archived?(page) -> []
-      title == "" or String.length(md) < @min_body -> []
-      true -> [build_event(page, title, xhtml, md, scope)]
+      archived?(page) -> {:skip, skip_record(page, :archived_label)}
+      title == "" -> {:skip, skip_record(page, :blank_title)}
+      String.length(md) < @min_body -> {:skip, skip_record(page, :short_or_stub)}
+      true -> {:event, build_event(page, title, xhtml, md, scope)}
     end
   end
 
+  defp skip_record(page, reason) do
+    %{
+      source: "confluence",
+      source_ref: "confluence:#{Map.get(page, "id")}",
+      reason: reason,
+      occurred_at: occurred_at(page)
+    }
+  end
+
   defp build_event(page, title, xhtml, prose, scope) do
+    page_ref = page_ref(page)
+    page_identity = page_ref || title
+
     targets =
       xhtml
       |> extract_links()
       |> Enum.reject(&(&1 == "" or &1 == title))
       |> Enum.uniq()
 
-    parent = parent_title(page)
+    parent = parent(page)
     stub = &%{type: "article", key: &1, scope: scope, content: ""}
 
     entities =
-      [%{type: "article", key: title, scope: scope, content: prose}] ++
-        Enum.map(targets, stub) ++ parent_entities(parent, stub)
+      [
+        %{
+          type: "article",
+          key: title,
+          identity: page_identity,
+          source_ref: page_ref,
+          scope: scope,
+          content: prose
+        }
+      ] ++
+        Enum.map(targets, stub) ++ parent_entities(parent, stub, scope)
 
     relations =
-      Enum.map(targets, &%{from: title, to: &1, type: "links_to"}) ++
-        parent_relations(title, parent)
+      Enum.map(targets, &%{from: title, from_ref: page_identity, to: &1, type: "links_to"}) ++
+        parent_relations(title, page_identity, parent)
 
     %{
-      provenance: "confluence:#{Map.get(page, "id")}",
+      provenance: page_ref || "confluence:title:#{title}",
+      origin: page_ref || "confluence:title:#{title}",
       occurred_at: occurred_at(page),
       entities: entities,
       relations: relations
     }
   end
 
-  defp parent_entities(nil, _stub), do: []
-  defp parent_entities(parent, stub), do: [stub.(parent)]
+  defp parent_entities(nil, _stub, _scope), do: []
+  defp parent_entities(%{title: title, ref: nil}, stub, _scope), do: [stub.(title)]
 
-  defp parent_relations(_title, nil), do: []
-  defp parent_relations(title, parent), do: [%{from: title, to: parent, type: "child_of"}]
+  defp parent_entities(%{title: title, ref: ref}, _stub, scope),
+    do: [
+      %{type: "article", key: title, identity: ref, source_ref: ref, scope: scope, content: ""}
+    ]
+
+  defp parent_relations(_title, _page_ref, nil), do: []
+
+  defp parent_relations(title, page_ref, %{title: parent_title, ref: nil}),
+    do: [%{from: title, from_ref: page_ref, to: parent_title, type: "child_of"}]
+
+  defp parent_relations(title, page_ref, %{title: parent_title, ref: parent_ref}) do
+    [%{from: title, from_ref: page_ref, to: parent_title, to_ref: parent_ref, type: "child_of"}]
+  end
 
   # Immediate parent = the last ancestor (Confluence orders root → … → parent).
-  defp parent_title(page) do
+  defp parent(page) do
     case page |> Map.get("ancestors", []) |> List.last() do
-      %{"title" => t} when is_binary(t) and t != "" -> String.trim(t)
-      _ -> nil
+      %{"title" => t} = parent when is_binary(t) and t != "" ->
+        %{title: String.trim(t), ref: page_ref(parent)}
+
+      _ ->
+        nil
     end
   end
+
+  defp page_ref(%{"id" => id}) when is_binary(id) and id != "", do: "confluence:#{id}"
+  defp page_ref(_), do: nil
 
   defp archived?(page) do
     page
