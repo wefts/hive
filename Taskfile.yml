@@ -133,30 +133,35 @@ tasks:
 
   # ---- deploy (guardrail: always backs up the DB first) ---------------------
   deploy:
-    desc: Redeploy one service — task deploy SERVICE=kernel. Backs up the DB first.
+    desc: Redeploy one service — task deploy SERVICE=kernel. Backs up the DB first; kernel deploy runs migrations first.
     requires:
       vars: [SERVICE]
     deps: [db:backup]
     cmds:
       - task: _guard-name
         vars: { NAME: "{{.SERVICE}}", LABEL: SERVICE }
+      - |
+        if [ "{{.SERVICE}}" = "kernel" ]; then
+          SWARM_ENV={{.SWARM_ENV}} ./scripts/compose run --rm --no-deps migrate
+        fi
       - SWARM_ENV={{.SWARM_ENV}} ./scripts/compose up -d --no-deps {{.SERVICE}}
 
   # ---- database (guardrails: backup is a dependency, not a suggestion) ------
   db:backup:
     desc: pg_dump the live DB for SWARM_ENV to tmp/snapshots/ (custom format, timestamped).
     vars:
-      DB: 'swarm_{{.SWARM_ENV}}'
       LABEL: '{{.LABEL | default "manual"}}'
-      STAMP:
-        sh: date +%Y%m%d-%H%M%S
     cmds:
       - task: _guard-name
         vars: { NAME: "{{.LABEL}}", LABEL: LABEL }
-      - docker exec hive-postgres-1 pg_dump -U swarm -Fc -f /tmp/{{.DB}}_{{.LABEL}}_{{.STAMP}}.dump {{.DB}}
-      - docker cp hive-postgres-1:/tmp/{{.DB}}_{{.LABEL}}_{{.STAMP}}.dump ../tmp/snapshots/{{.DB}}_{{.LABEL}}_{{.STAMP}}.dump
-      - docker exec hive-postgres-1 rm -f /tmp/{{.DB}}_{{.LABEL}}_{{.STAMP}}.dump
-      - echo "  snapshot -> tmp/snapshots/{{.DB}}_{{.LABEL}}_{{.STAMP}}.dump"
+      - |
+        db="${SWARM_DB_NAME:-swarm_{{.SWARM_ENV}}}"
+        stamp="$(date +%Y%m%d-%H%M%S)"
+        dump="${db}_{{.LABEL}}_${stamp}.dump"
+        docker exec hive-postgres-1 pg_dump -U swarm -Fc -f "/tmp/${dump}" "${db}"
+        docker cp "hive-postgres-1:/tmp/${dump}" "../tmp/snapshots/${dump}"
+        docker exec hive-postgres-1 rm -f "/tmp/${dump}"
+        echo "  snapshot -> tmp/snapshots/${dump}"
 
   db:rename:
     desc: >-
