@@ -47,7 +47,15 @@ defmodule ContrastiveInversionEval do
     "unlike" => "\\munlike\\M",
     "whereas" => "\\mwhereas\\M"
   }
-  @allowlisted_models MapSet.new(["gemma4:31b", "qwen3:14b", "lfm2.5:8b", "bge-m3"])
+  # Campaign model allowlist. Granite is intentionally included only as the approved
+  # third-family judge candidate; banned large defaults still require an explicit override.
+  @allowlisted_models MapSet.new([
+                        "gemma4:31b",
+                        "qwen3:14b",
+                        "lfm2.5:8b",
+                        "bge-m3",
+                        "granite4.1-guardian:8b"
+                      ])
 
   def run do
     Application.ensure_all_started(:ecto_sql)
