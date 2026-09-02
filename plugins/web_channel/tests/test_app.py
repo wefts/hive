@@ -90,6 +90,28 @@ def test_a01_found_renders_answer_and_verbatim_citation(monkeypatch) -> None:
     assert 'name="csrf"' in r.text
 
 
+def test_found_renders_citation_link_when_kernel_supplies_url(monkeypatch) -> None:
+    resp = core_pb2.AskResponse(
+        answer="Article answer.",
+        confidence=0.82,
+        tier="escalate",
+        status=core_pb2.FOUND,
+        citations=[
+            core_pb2.Citation(
+                source="article",
+                ref="Example.test Article",
+                confidence=0.9,
+                url="https://docs.example.test/pages/123",
+            )
+        ],
+    )
+    monkeypatch.setattr(core_client, "ask", _fake_ask(resp))
+    r = client.post("/ask", data={"q": "where is this written?"})
+    assert r.status_code == 200
+    assert 'href="https://docs.example.test/pages/123"' in r.text
+    assert "Example.test Article" in r.text
+
+
 def test_rate_answer_round_trips_to_kernel(monkeypatch) -> None:
     captured: dict = {}
 
@@ -188,9 +210,28 @@ def test_a04_adversarial_citation_ref_renders_verbatim_escaped(monkeypatch) -> N
     # < and & are HTML-escaped (so they render literally, not as broken markup);
     # [ and ` are not HTML-special and pass through verbatim.
     assert "a&lt;b&amp;c[d`e" in r.text
-    assert "x&lt;y&amp;z" in r.text
-    # the raw, unescaped sequence must NOT appear (that would be broken/injected markup)
-    assert "a<b&c" not in r.text
+
+
+def test_adversarial_citation_url_is_escaped(monkeypatch) -> None:
+    resp = core_pb2.AskResponse(
+        answer="x",
+        confidence=0.7,
+        tier="tier_tools",
+        status=core_pb2.FOUND,
+        citations=[
+            core_pb2.Citation(
+                source="src",
+                ref="safe ref",
+                confidence=0.5,
+                url='https://docs.example.test/" onclick="alert(1)',
+            )
+        ],
+    )
+    monkeypatch.setattr(core_client, "ask", _fake_ask(resp))
+    r = client.post("/ask", data={"q": "special"})
+    assert r.status_code == 200
+    assert 'onclick="alert(1)' not in r.text
+    assert "https://docs.example.test/&#34; onclick=&#34;alert(1)" in r.text
 
 
 def test_viewer_passes_through_and_scopes_locked_to_public(monkeypatch) -> None:

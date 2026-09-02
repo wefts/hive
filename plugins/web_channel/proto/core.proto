@@ -522,6 +522,9 @@ message Citation {
   string source = 1;
   string ref = 2;
   double confidence = 3;
+  // Optional evidence URL. Empty means the source has no configured public
+  // template for this deployment; clients must render the citation as plain text.
+  string url = 4;
 }
 
 // Answer-result algebra (T6): the typed outcome of a lookup. NOT_FOUND (no such

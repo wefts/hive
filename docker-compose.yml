@@ -180,6 +180,10 @@ services:
       # sees the steady-state path instead of paying cold-load inside the gate.
       SWARM_ML_PREWARM: ${SWARM_ML_PREWARM:-true}
       SWARM_ML_PREWARM_TIMEOUT_MS: ${SWARM_ML_PREWARM_TIMEOUT_MS:-120000}
+      # Optional evidence-link templates. Real base URLs live in env/<stage>.env
+      # because they are intranet instance facts; empty means plaintext citations.
+      SWARM_CITATION_URL_TEMPLATE_CONFLUENCE: ${SWARM_CITATION_URL_TEMPLATE_CONFLUENCE:-}
+      SWARM_CITATION_URL_TEMPLATE_MEDIAWIKI: ${SWARM_CITATION_URL_TEMPLATE_MEDIAWIKI:-}
     ports:
       - "${SWARM_CORE_API_PORT:-50061}:50061"
     depends_on:

@@ -30,7 +30,11 @@
       <ul class="citations">
         {% for c in post.citations %}
           <li class="chip"><span class="src">{{ c.source }}</span>
-            <span class="ref">{{ c.ref }}</span>
+            {% if c.url %}
+              <a class="ref" href="{{ c.url }}" rel="noreferrer">{{ c.ref }}</a>
+            {% else %}
+              <span class="ref">{{ c.ref }}</span>
+            {% endif %}
             <span class="cc">{{ "%.2f"|format(c.confidence) }}</span></li>
         {% endfor %}
       </ul>

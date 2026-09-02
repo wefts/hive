@@ -2285,7 +2285,8 @@ async def ask(
         status_str = _STATUS_STR.get(resp.status, "unspecified")
         ask_ref = resp.ask_ref  # opaque answer handle; empty for anonymous asks
         cites = [
-            {"source": c.source, "ref": c.ref, "confidence": c.confidence} for c in resp.citations
+            {"source": c.source, "ref": c.ref, "confidence": c.confidence, "url": c.url}
+            for c in resp.citations
         ]
     except aio.AioRpcError as err:
         # Unreachable / DEADLINE_EXCEEDED / etc. — honest error with the gRPC code.
