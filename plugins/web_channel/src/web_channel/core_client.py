@@ -96,7 +96,7 @@ async def deliberation(
 
 
 async def rate_answer(
-    ask_ref: str, scopes: list[str], viewer: str, rating: int
+    ask_ref: str, scopes: list[str], viewer: str, rating: core_pb2.AnswerRating
 ) -> core_pb2.RateAnswerResponse:
     """Store the viewer's external rating for one answer. Fast, no LLM."""
     async with aio.insecure_channel(core_addr()) as channel:

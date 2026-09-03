@@ -115,7 +115,9 @@ def test_found_renders_citation_link_when_kernel_supplies_url(monkeypatch) -> No
 def test_rate_answer_round_trips_to_kernel(monkeypatch) -> None:
     captured: dict = {}
 
-    async def fake_rate_answer(ask_ref: str, scopes: list[str], viewer: str, rating: int):
+    async def fake_rate_answer(
+        ask_ref: str, scopes: list[str], viewer: str, rating: core_pb2.AnswerRating
+    ):
         captured.update(ask_ref=ask_ref, scopes=scopes, viewer=viewer, rating=rating)
         return core_pb2.RateAnswerResponse(status=core_pb2.CALL_OK, ask_ref=ask_ref, rating=rating)
 
@@ -147,7 +149,9 @@ def test_rate_answer_round_trips_to_kernel(monkeypatch) -> None:
 def test_rate_answer_rejects_missing_csrf(monkeypatch) -> None:
     called = False
 
-    async def fake_rate_answer(ask_ref: str, scopes: list[str], viewer: str, rating: int):
+    async def fake_rate_answer(
+        ask_ref: str, scopes: list[str], viewer: str, rating: core_pb2.AnswerRating
+    ):
         nonlocal called
         called = True
 
