@@ -74,11 +74,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-SWARM_ENV="${SWARM_ENV:-staging}" "$here/scripts/compose" --profile jobs up -d mediawiki_connector
+SWARM_ENV="${SWARM_ENV:-staging}" "$here/scripts/compose" --profile jobs up -d --no-recreate mediawiki_connector
 
 if [ -n "$target_db" ]; then
   SWARM_ENV="${SWARM_ENV:-staging}" SWARM_DB_NAME="$target_db" \
-    "$here/scripts/compose" --profile jobs run --rm mediawiki_ingest
+    "$here/scripts/compose" --profile jobs run --rm --no-deps mediawiki_ingest
 else
-  SWARM_ENV="${SWARM_ENV:-staging}" "$here/scripts/compose" --profile jobs run --rm mediawiki_ingest
+  SWARM_ENV="${SWARM_ENV:-staging}" "$here/scripts/compose" --profile jobs run --rm --no-deps mediawiki_ingest
 fi
