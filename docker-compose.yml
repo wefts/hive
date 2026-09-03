@@ -268,6 +268,99 @@ services:
       mediawiki_connector:
         condition: service_started
 
+  confluence_connector:
+    image: conn-confluence:${CONN_CONFLUENCE_VERSION:-0.1.0}
+    profiles: ["jobs"]
+    init: true
+    build:
+      context: ../conn-confluence
+      args:
+        HUB_REGISTRY: ${HUB_REGISTRY:-dockerhub.smile.fr}
+        DHI_REGISTRY: ${DHI_REGISTRY:-dhi.smile.fr}
+    environment:
+      SWARM_CONNECTOR_PORT: "50072"
+      CONFLUENCE_URL: ${CONFLUENCE_URL:-}
+      CONFLUENCE_USER: ${CONFLUENCE_USER:-}
+      CONFLUENCE_TOKEN: ${CONFLUENCE_TOKEN:-}
+      CONFLUENCE_TLS_INSECURE: ${CONFLUENCE_TLS_INSECURE:-}
+
+  confluence_ingest:
+    image: swarm-kernel:${SWARM_KERNEL_VERSION:-0.8.3}
+    profiles: ["jobs"]
+    init: true
+    build:
+      context: ../swarm/kernel
+      args:
+        HUB_REGISTRY: ${HUB_REGISTRY:-dockerhub.smile.fr}
+        DHI_REGISTRY: ${DHI_REGISTRY:-dhi.smile.fr}
+    command:
+      - eval
+      - |
+        {:ok, _} = Application.ensure_all_started(:swarm)
+        scope =
+          case System.get_env("CONF_SOURCE_ID") do
+            v when v in [nil, ""] -> Swarm.Projects.scope_by_kind!("confluence")
+            source_id -> Swarm.Projects.scope!(source_id)
+          end
+        int = fn name, default ->
+          case System.get_env(name) do
+            v when v in [nil, ""] -> default
+            v -> String.to_integer(v)
+          end
+        end
+        opts = [
+          address: System.fetch_env!("SWARM_CONNECTOR_ADDRESS"),
+          scope: scope,
+          max_pages: int.("CONF_MAXPAGES", 30),
+          limit: int.("CONF_LIMIT", 50)
+        ]
+        opts =
+          case System.get_env("CONF_SPACE") do
+            v when v in [nil, ""] -> opts
+            space -> Keyword.put(opts, :space, space)
+          end
+        {:ok, report} = Swarm.Connector.IngestRunner.run(opts)
+        %{rows: pending} =
+          Swarm.Repo.query!("SELECT c.node_id FROM content c WHERE NOT EXISTS (SELECT 1 FROM chunk k WHERE k.node_id = c.node_id)")
+        total = length(pending)
+        conc = String.to_integer(System.get_env("EMBED_CONC", "4"))
+        {ok, failed} =
+          pending
+          |> Task.async_stream(fn [id] -> Swarm.Ingest.Content.embed(id, []) end,
+            max_concurrency: conc,
+            timeout: 120_000,
+            on_timeout: :kill_task
+          )
+          |> Enum.reduce({0, 0}, fn
+            {:ok, {:ok, _}}, {o, f} -> {o + 1, f}
+            _, {o, f} -> {o, f + 1}
+          end)
+        IO.puts("confluence_connector_ingest.report=" <> inspect(report))
+        IO.puts("confluence_connector_ingest.embed pending=#{total} ok=#{ok} failed=#{failed}")
+        if report.complete? and failed == 0, do: :ok, else: System.halt(1)
+    environment:
+      SWARM_DB_HOST: postgres
+      SWARM_DB_PORT: "5432"
+      SWARM_DB_USER: ${SWARM_DB_USER:-swarm}
+      SWARM_DB_PASSWORD: ${SWARM_DB_PASSWORD:-swarm}
+      SWARM_DB_NAME: ${SWARM_DB_NAME:-swarm_${SWARM_ENV:?SWARM_ENV must be set to test|staging|prod}}
+      SWARM_ML_ADDRESS: ml:50051
+      SWARM_CONNECTOR_ADDRESS: confluence_connector:50072
+      SWARM_CORE_API_START_SERVER: "false"
+      SWARM_ML_PREWARM: "false"
+      CONF_SOURCE_ID: ${CONF_SOURCE_ID:-}
+      CONF_MAXPAGES: ${CONF_MAXPAGES:-30}
+      CONF_LIMIT: ${CONF_LIMIT:-50}
+      CONF_SPACE: ${CONF_SPACE:-}
+      EMBED_CONC: ${EMBED_CONC:-4}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ml:
+        condition: service_started
+      confluence_connector:
+        condition: service_started
+
   # --- Channel: web_channel (FastAPI/HTMX operator console) ----------------
   # First Tier-B plugin: an out-of-process gRPC CLIENT of the Core API. It speaks
   # exactly the contract cli_channel speaks and NEVER reads the graph DB (ADR-1

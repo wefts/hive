@@ -146,6 +146,15 @@ tasks:
         vars: { NAME: "{{.TARGET_DB}}", LABEL: TARGET_DB }
       - SWARM_ENV={{.SWARM_ENV}} ./scripts/mediawiki_connector_ingest.sh --target-db {{.TARGET_DB}}
 
+  connectors:confluence:ingest:
+    desc: Run the ADR-21 Confluence connector image ingest against TARGET_DB.
+    requires:
+      vars: [TARGET_DB]
+    cmds:
+      - task: _guard-db
+        vars: { NAME: "{{.TARGET_DB}}", LABEL: TARGET_DB }
+      - SWARM_ENV={{.SWARM_ENV}} ./scripts/confluence_connector_ingest.sh --target-db {{.TARGET_DB}}
+
   # ---- deploy (guardrail: always backs up the DB first) ---------------------
   deploy:
     desc: Redeploy one service — task deploy SERVICE=kernel. Backs up the DB first; kernel deploy runs migrations first.
