@@ -1,5 +1,9 @@
 .env
 secrets.env
+# Any sibling of it too: a backup or a .bak left during a migration carries
+# the same live credentials, and only the exact name was ignored before.
+secrets.env.*
+!secrets.env.example
 *.local
 
 # Per-stage env files carry real (non-secret) instance facts — hostnames both
