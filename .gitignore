@@ -27,3 +27,7 @@ data/*
 # Local scratch.
 tmp/
 .claude/settings.*
+
+# Internal PKI trust material. Not secret, but it advertises internal
+# infrastructure and this repo is public.
+certs/
