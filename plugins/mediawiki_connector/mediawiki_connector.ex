@@ -128,6 +128,9 @@ defmodule Hive.MediaWiki.Connector do
 
     %{
       provenance: p.provenance,
+      origin: p.provenance,
+      source: "mediawiki",
+      source_ref: p.provenance,
       occurred_at: p.occurred_at,
       entities: [page_entity | stubs],
       relations: relations

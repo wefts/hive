@@ -17,15 +17,35 @@ defmodule Hive.MediaWiki.ConnectorTest do
     do: [%{"timestamp" => ts, "slots" => %{"main" => %{"content" => content}}}]
 
   defp p11,
-    do: %{"pageid" => 11, "title" => "Runbook Deploy", "revisions" => rev("2024-03-02T10:15:30Z", "Deploy steps. See [[Rollback]] and [[Monitoring|metrics]].")}
+    do: %{
+      "pageid" => 11,
+      "title" => "Runbook Deploy",
+      "revisions" =>
+        rev("2024-03-02T10:15:30Z", "Deploy steps. See [[Rollback]] and [[Monitoring|metrics]].")
+    }
 
   defp p12,
-    do: %{"pageid" => 12, "title" => "Rollback", "revisions" => rev("2024-02-01T00:00:00Z", "How to roll back. {{infobox|x}} '''bold''' text.")}
+    do: %{
+      "pageid" => 12,
+      "title" => "Rollback",
+      "revisions" =>
+        rev("2024-02-01T00:00:00Z", "How to roll back. {{infobox|x}} '''bold''' text.")
+    }
 
   defp p13,
-    do: %{"pageid" => 13, "title" => "Monitoring", "revisions" => rev("2024-01-01T00:00:00Z", "Dashboards and alerts live here.")}
+    do: %{
+      "pageid" => 13,
+      "title" => "Monitoring",
+      "revisions" => rev("2024-01-01T00:00:00Z", "Dashboards and alerts live here.")
+    }
 
-  defp page1, do: JSON.encode!(%{"query" => %{"pages" => [p11(), p12()]}, "continue" => %{"gapcontinue" => "Monitoring", "continue" => "gapcontinue||"}})
+  defp page1,
+    do:
+      JSON.encode!(%{
+        "query" => %{"pages" => [p11(), p12()]},
+        "continue" => %{"gapcontinue" => "Monitoring", "continue" => "gapcontinue||"}
+      })
+
   defp page2, do: JSON.encode!(%{"query" => %{"pages" => [p13()]}})
 
   defp http do
@@ -35,7 +55,16 @@ defmodule Hive.MediaWiki.ConnectorTest do
   end
 
   defp opts(extra \\ []),
-    do: Keyword.merge([http: http(), scope: "group", base_url: "https://wiki.test/api.php", resolve_redirects: false], extra)
+    do:
+      Keyword.merge(
+        [
+          http: http(),
+          scope: "group",
+          base_url: "https://wiki.test/api.php",
+          resolve_redirects: false
+        ],
+        extra
+      )
 
   test "describe/0 names a mediawiki connector" do
     d = Connector.describe()
@@ -74,6 +103,9 @@ defmodule Hive.MediaWiki.ConnectorTest do
     assert length(page.events) == 2
 
     e = Enum.find(page.events, &(&1.provenance == "mediawiki:11"))
+    assert e.origin == "mediawiki:11"
+    assert e.source == "mediawiki"
+    assert e.source_ref == "mediawiki:11"
     assert %DateTime{} = e.occurred_at
     pe = Enum.find(e.entities, &(&1.key == "Runbook Deploy"))
     assert pe.scope == "group"
