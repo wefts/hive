@@ -156,7 +156,11 @@ tasks:
       - SWARM_ENV={{.SWARM_ENV}} ./scripts/confluence_connector_ingest.sh --target-db {{.TARGET_DB}}
 
   connectors:proxmox:ingest:
-    desc: Run the ADR-21 Proxmox connector image ingest for SITE against TARGET_DB (one job per site).
+    desc: >-
+      Run the ADR-21 Proxmox connector image ingest for SITE against TARGET_DB (one job per site).
+      Prepares the target: creates it empty if missing, migrates it with SWARM_KERNEL_VERSION
+      (must carry schema >= 13), registers a proxmox Source under PROXMOX_PROJECT (Operations)
+      — or fails saying what to do.
     requires:
       vars: [TARGET_DB, SITE]
     cmds:
