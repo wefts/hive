@@ -197,6 +197,77 @@ services:
   # Each plugin is a self-contained dir under ./plugins with its own Dockerfile,
   # vendored proto, and manifest. Polyglot by construction — Python, Go, etc.
 
+  mediawiki_connector:
+    image: conn-mediawiki:${CONN_MEDIAWIKI_VERSION:-0.1.0}
+    profiles: ["jobs"]
+    init: true
+    build:
+      context: ../conn-mediawiki
+      args:
+        HUB_REGISTRY: ${HUB_REGISTRY:-dockerhub.smile.fr}
+        DHI_REGISTRY: ${DHI_REGISTRY:-dhi.smile.fr}
+    environment:
+      SWARM_CONNECTOR_PORT: "50071"
+      WIKI_URL: ${WIKI_URL:-}
+      WIKI_USER: ${WIKI_USER:-}
+      WIKI_USER_TOKEN: ${WIKI_USER_TOKEN:-}
+      WIKI_ALT_USERNAME: ${WIKI_ALT_USERNAME:-}
+      WIKI_ALT_TOKEN: ${WIKI_ALT_TOKEN:-}
+      WIKI_TLS_INSECURE: ${WIKI_TLS_INSECURE:-}
+
+  mediawiki_ingest:
+    image: swarm-kernel:${SWARM_KERNEL_VERSION:-0.8.3}
+    profiles: ["jobs"]
+    init: true
+    build:
+      context: ../swarm/kernel
+      args:
+        HUB_REGISTRY: ${HUB_REGISTRY:-dockerhub.smile.fr}
+        DHI_REGISTRY: ${DHI_REGISTRY:-dhi.smile.fr}
+    command:
+      - eval
+      - |
+        {:ok, report} = Swarm.Connector.IngestRunner.run_from_env()
+        %{rows: pending} =
+          Swarm.Repo.query!("SELECT c.node_id FROM content c WHERE NOT EXISTS (SELECT 1 FROM chunk k WHERE k.node_id = c.node_id)")
+        total = length(pending)
+        conc = String.to_integer(System.get_env("EMBED_CONC", "4"))
+        {ok, failed} =
+          pending
+          |> Task.async_stream(fn [id] -> Swarm.Ingest.Content.embed(id, []) end,
+            max_concurrency: conc,
+            timeout: 120_000,
+            on_timeout: :kill_task
+          )
+          |> Enum.reduce({0, 0}, fn
+            {:ok, {:ok, _}}, {o, f} -> {o + 1, f}
+            _, {o, f} -> {o, f + 1}
+          end)
+        IO.puts("mediawiki_connector_ingest.report=" <> inspect(report))
+        IO.puts("mediawiki_connector_ingest.embed pending=#{total} ok=#{ok} failed=#{failed}")
+        if report.complete? and failed == 0, do: :ok, else: System.halt(1)
+    environment:
+      SWARM_DB_HOST: postgres
+      SWARM_DB_PORT: "5432"
+      SWARM_DB_USER: ${SWARM_DB_USER:-swarm}
+      SWARM_DB_PASSWORD: ${SWARM_DB_PASSWORD:-swarm}
+      SWARM_DB_NAME: ${SWARM_DB_NAME:-swarm_${SWARM_ENV:?SWARM_ENV must be set to test|staging|prod}}
+      SWARM_ML_ADDRESS: ml:50051
+      SWARM_CONNECTOR_ADDRESS: mediawiki_connector:50071
+      SWARM_CORE_API_START_SERVER: "false"
+      SWARM_ML_PREWARM: "false"
+      WIKI_SOURCE_ID: ${WIKI_SOURCE_ID:-}
+      WIKI_MAXPAGES: ${WIKI_MAXPAGES:-30}
+      WIKI_GAPLIMIT: ${WIKI_GAPLIMIT:-50}
+      EMBED_CONC: ${EMBED_CONC:-4}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ml:
+        condition: service_started
+      mediawiki_connector:
+        condition: service_started
+
   # --- Channel: web_channel (FastAPI/HTMX operator console) ----------------
   # First Tier-B plugin: an out-of-process gRPC CLIENT of the Core API. It speaks
   # exactly the contract cli_channel speaks and NEVER reads the graph DB (ADR-1
