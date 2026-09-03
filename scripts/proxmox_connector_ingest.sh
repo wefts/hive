@@ -88,7 +88,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-SWARM_ENV="${SWARM_ENV:-staging}" "$here/scripts/compose" --profile jobs up -d --no-recreate proxmox_connector
+# Recreate ONLY the sidecar each run so a changed site URL, token, or CA path is picked up
+# (a kept container keeps its first environment); --no-deps leaves the stack alone.
+SWARM_ENV="${SWARM_ENV:-staging}" "$here/scripts/compose" --profile jobs up -d --no-deps --force-recreate proxmox_connector
 
 if [ -n "$target_db" ]; then
   SWARM_ENV="${SWARM_ENV:-staging}" SWARM_DB_NAME="$target_db" PROXMOX_SITE="$site" \
