@@ -37,7 +37,8 @@ Builds a named disposable graph DB from sources:
   1. snapshot the source/reference DB to hive/tmp/snapshots/
   2. create or recreate the target DB, then run kernel migrations
   3. copy only control-plane registry rows from the reference DB
-  4. run scripts/ingest_prod.exs for Confluence + MediaWiki with bge-m3 embeddings
+  4. run the ADR-21 connector-image ingest jobs for Confluence + MediaWiki
+     (kernel ingest runner + connector sidecar, embeddings via bge-m3)
   5. run scripts/netmap/netmap_refresh.sh for deterministic IaC/wiki topology
   6. run scripts/who/who_refresh.sh for directory overlays
 
@@ -207,46 +208,30 @@ copy_registry_from_reference() {
   docker exec "$postgres_container" rm -f "$dump"
 }
 
-ml_address() {
-  if [ -n "${SWARM_ML_ADDRESS:-}" ]; then
-    printf '%s\n' "$SWARM_ML_ADDRESS"
-    return 0
-  fi
-  local ip
-  ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' hive-ml-1)"
-  [ -n "$ip" ] || { echo "rebuild_graph: could not resolve hive-ml-1 IP; set SWARM_ML_ADDRESS" >&2; exit 1; }
-  printf '%s:50051\n' "$ip"
-}
-
-load_runtime_env() {
-  # Source in the same broad order as scripts/compose so host-side Mix/plugin
-  # code sees connector credentials and per-stage non-secret config.
-  set -a
-  [ -f "$here/env/base.env" ] && . "$here/env/base.env"
-  [ -f "$here/env/${SWARM_ENV:-staging}.env" ] && . "$here/env/${SWARM_ENV:-staging}.env"
-  [ -f "$here/secrets.env" ] && . "$here/secrets.env"
-  set +a
-}
-
 run_corpus_ingest() {
-  load_runtime_env
-  local ml
-  ml="$(ml_address)"
-  (
-    cd "$workspace/swarm/kernel"
-    timeout "${INGEST_TIMEOUT:-4h}" env \
-      SWARM_ENV="${SWARM_ENV:-staging}" \
-      SWARM_DB_NAME="$target_db" \
-      SWARM_ML_ADDRESS="$ml" \
-      MIX_ENV=dev \
-      CONF_MAXPAGES="${CONF_MAXPAGES:-1000000}" \
-      WIKI_MAXPAGES="${WIKI_MAXPAGES:-1000000}" \
-      EMBED_CONC="${EMBED_CONC:-4}" \
-      mise exec -- mix run --no-start \
-        -r ../../hive/plugins/confluence_connector/confluence_connector.ex \
-        -r ../../hive/plugins/mediawiki_connector/mediawiki_connector.ex \
-        ../../hive/scripts/ingest_prod.exs
-  )
+  # ADR-21: corpus ingest runs through the packaged connector images — the
+  # kernel ingest runner one-shot beside each connector sidecar — never a
+  # host-side `mix run -r` source loader. Embeddings run inside each job.
+  # A job exits non-zero when the run is incomplete (source ceiling, ingest
+  # error); like the legacy loader, the rebuild logs that and continues — the
+  # per-source reports are in the job output above.
+  export CONF_MAXPAGES="${CONF_MAXPAGES:-1000000}"
+  export CONF_LIMIT="${CONF_LIMIT:-50}"
+  export CONF_SPACE="${CONF_SPACE:-}"
+  export WIKI_MAXPAGES="${WIKI_MAXPAGES:-1000000}"
+  export WIKI_GAPLIMIT="${WIKI_GAPLIMIT:-50}"
+  export EMBED_CONC="${EMBED_CONC:-4}"
+
+  local rc
+  rc=0
+  SWARM_ENV="${SWARM_ENV:-staging}" timeout "${INGEST_TIMEOUT:-4h}" \
+    bash "$here/scripts/confluence_connector_ingest.sh" --target-db "$target_db" || rc=$?
+  echo "   confluence connector job exit=$rc"
+
+  rc=0
+  SWARM_ENV="${SWARM_ENV:-staging}" timeout "${INGEST_TIMEOUT:-4h}" \
+    bash "$here/scripts/mediawiki_connector_ingest.sh" --target-db "$target_db" || rc=$?
+  echo "   mediawiki connector job exit=$rc"
 }
 
 run_netmap_refresh() {
