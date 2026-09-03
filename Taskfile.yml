@@ -55,9 +55,15 @@ tasks:
   lint:
     desc: Validate compose config, shell syntax, and the web_channel Python plugin.
     cmds:
+      - task: lint:leaks
       - task: lint:compose
       - task: lint:sh
       - task: lint:web_channel
+
+  lint:leaks:
+    desc: Scan tracked files and unpushed commits for private material.
+    cmds:
+      - bash scripts/leak_scan.sh
 
   lint:compose:
     desc: >-
