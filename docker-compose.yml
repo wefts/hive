@@ -361,6 +361,102 @@ services:
       confluence_connector:
         condition: service_started
 
+  # --- Proxmox (ADR-21 slice 3): one connector image, one scheduled ingest job PER SITE.
+  # The site key is data: it qualifies every fact's identity, so the connector receives every
+  # configured site's variables and the job names ONE site (PROXMOX_SITE). A site listed in
+  # PROXMOX_SITES without its three variables is a fatal startup error in the image, never a
+  # silent skip. Read-only PVEAuditor tokens; TLS verified, an internal root ADDED via
+  # PROXMOX_CA_PEM (a host path in secrets.env, mounted read-only), never disabled.
+  proxmox_connector:
+    image: conn-proxmox:${CONN_PROXMOX_VERSION:-0.1.0}
+    profiles: ["jobs"]
+    init: true
+    build:
+      context: ../conn-proxmox
+      args:
+        HUB_REGISTRY: ${HUB_REGISTRY:-dockerhub.smile.fr}
+        DHI_REGISTRY: ${DHI_REGISTRY:-dhi.smile.fr}
+    environment:
+      SWARM_CONNECTOR_PORT: "50073"
+      PROXMOX_SITES: ${PROXMOX_SITES:-}
+      PROXMOX_FORGE_URL: ${PROXMOX_FORGE_URL:-}
+      PROXMOX_FORGE_TOKEN_ID: ${PROXMOX_FORGE_TOKEN_ID:-}
+      PROXMOX_FORGE_TOKEN_SECRET: ${PROXMOX_FORGE_TOKEN_SECRET:-}
+      PROXMOX_GALAXY_URL: ${PROXMOX_GALAXY_URL:-}
+      PROXMOX_GALAXY_TOKEN_ID: ${PROXMOX_GALAXY_TOKEN_ID:-}
+      PROXMOX_GALAXY_TOKEN_SECRET: ${PROXMOX_GALAXY_TOKEN_SECRET:-}
+      PROXMOX_IDF_URL: ${PROXMOX_IDF_URL:-}
+      PROXMOX_IDF_TOKEN_ID: ${PROXMOX_IDF_TOKEN_ID:-}
+      PROXMOX_IDF_TOKEN_SECRET: ${PROXMOX_IDF_TOKEN_SECRET:-}
+      PROXMOX_CASA_URL: ${PROXMOX_CASA_URL:-}
+      PROXMOX_CASA_TOKEN_ID: ${PROXMOX_CASA_TOKEN_ID:-}
+      PROXMOX_CASA_TOKEN_SECRET: ${PROXMOX_CASA_TOKEN_SECRET:-}
+      PROXMOX_TLS_VERIFY: ${PROXMOX_TLS_VERIFY:-true}
+      # Inside the container the anchor is always at this path; empty when no PEM is configured.
+      PROXMOX_CA_PEM: ${PROXMOX_CA_PEM:+/certs/proxmox-root-ca.pem}
+    volumes:
+      - ${PROXMOX_CA_PEM:-/dev/null}:/certs/proxmox-root-ca.pem:ro
+
+  proxmox_ingest:
+    image: swarm-kernel:${SWARM_KERNEL_VERSION:-0.8.3}
+    profiles: ["jobs"]
+    init: true
+    build:
+      context: ../swarm/kernel
+      args:
+        HUB_REGISTRY: ${HUB_REGISTRY:-dockerhub.smile.fr}
+        DHI_REGISTRY: ${DHI_REGISTRY:-dhi.smile.fr}
+    command:
+      - eval
+      - |
+        {:ok, _} = Application.ensure_all_started(:swarm)
+        site =
+          case System.get_env("PROXMOX_SITE") do
+            v when v in [nil, ""] -> raise "PROXMOX_SITE is required: one ingest job per site"
+            v -> v
+          end
+        scope =
+          case System.get_env("PROXMOX_SOURCE_ID") do
+            v when v in [nil, ""] -> Swarm.Projects.scope_by_kind!("proxmox")
+            source_id -> Swarm.Projects.scope!(source_id)
+          end
+        started = DateTime.utc_now()
+        {:ok, report} =
+          Swarm.Connector.IngestRunner.run(
+            address: System.fetch_env!("SWARM_CONNECTOR_ADDRESS"),
+            scope: scope,
+            site: site
+          )
+        # Closure by absence is gated on a COMPLETE run: a failed fetch must never read as a
+        # datacenter emptying out. as_of = the run's latest observation instant.
+        absent =
+          if report.complete? do
+            {:ok, n} =
+              Swarm.Graph.Temporal.reconcile_absent("proxmox:" <> site, started, report.watermark || started)
+            n
+          else
+            :skipped_incomplete
+          end
+        IO.puts("proxmox_connector_ingest.site=#{site} report=" <> inspect(report) <> " absent_closed=" <> inspect(absent))
+        if report.complete?, do: :ok, else: System.halt(1)
+    environment:
+      SWARM_DB_HOST: postgres
+      SWARM_DB_PORT: "5432"
+      SWARM_DB_USER: ${SWARM_DB_USER:-swarm}
+      SWARM_DB_PASSWORD: ${SWARM_DB_PASSWORD:-swarm}
+      SWARM_DB_NAME: ${SWARM_DB_NAME:-swarm_${SWARM_ENV:?SWARM_ENV must be set to test|staging|prod}}
+      SWARM_ML_ADDRESS: ml:50051
+      SWARM_CONNECTOR_ADDRESS: proxmox_connector:50073
+      SWARM_CORE_API_START_SERVER: "false"
+      SWARM_ML_PREWARM: "false"
+      PROXMOX_SITE: ${PROXMOX_SITE:-}
+      PROXMOX_SOURCE_ID: ${PROXMOX_SOURCE_ID:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      proxmox_connector:
+        condition: service_started
+
   # --- Channel: web_channel (FastAPI/HTMX operator console) ----------------
   # First Tier-B plugin: an out-of-process gRPC CLIENT of the Core API. It speaks
   # exactly the contract cli_channel speaks and NEVER reads the graph DB (ADR-1

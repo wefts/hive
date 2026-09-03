@@ -155,6 +155,17 @@ tasks:
         vars: { NAME: "{{.TARGET_DB}}", LABEL: TARGET_DB }
       - SWARM_ENV={{.SWARM_ENV}} ./scripts/confluence_connector_ingest.sh --target-db {{.TARGET_DB}}
 
+  connectors:proxmox:ingest:
+    desc: Run the ADR-21 Proxmox connector image ingest for SITE against TARGET_DB (one job per site).
+    requires:
+      vars: [TARGET_DB, SITE]
+    cmds:
+      - task: _guard-db
+        vars: { NAME: "{{.TARGET_DB}}", LABEL: TARGET_DB }
+      - task: _guard-name
+        vars: { NAME: "{{.SITE}}", LABEL: SITE }
+      - SWARM_ENV={{.SWARM_ENV}} ./scripts/proxmox_connector_ingest.sh --site {{.SITE}} --target-db {{.TARGET_DB}}
+
   # ---- deploy (guardrail: always backs up the DB first) ---------------------
   deploy:
     desc: Redeploy one service — task deploy SERVICE=kernel. Backs up the DB first; kernel deploy runs migrations first.
