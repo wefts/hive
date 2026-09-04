@@ -140,6 +140,10 @@ defmodule Hive.Posix.Connector do
   defp continuant(%{cluster_uid: u}) when is_binary(u) and u != "",
     do: {"cluster", "env:k8s:#{u}", :continuant}
 
+  # The docker daemon's own id: stable across container churn on this host.
+  defp continuant(%{daemon_id: d}) when is_binary(d) and d != "",
+    do: {"dockerd", "env:dockerd:#{d}", :continuant}
+
   defp continuant(_), do: :none
 
   # `/proc/sys/kernel/random/boot_id` is NOT namespaced: read inside a container it returns
