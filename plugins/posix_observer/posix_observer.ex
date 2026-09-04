@@ -52,7 +52,7 @@ defmodule Hive.Posix.Observer do
           detail: String.t() | nil
         }
 
-  @classes [:self_identity, :active_units, :listening_sockets]
+  @classes [:self_identity, :pid1_process, :active_units, :listening_sockets]
 
   @doc "The observation classes this observer knows, in a stable order."
   @spec classes() :: [atom()]
@@ -68,6 +68,12 @@ defmodule Hive.Posix.Observer do
     do: [~w(systemctl list-units --type=service --state=active --no-pager --output=json)]
 
   def reads(:listening_sockets), do: [~w(ss -H -l -tun)]
+
+  # What PID 1 is. On a systemd host this says `systemd` and is nearly worthless; inside a
+  # container it is the single most informative fact available, because it is what the
+  # container IS. Added after running the observer in the kernel container and finding
+  # that the two classes which carry the host disappear entirely.
+  def reads(:pid1_process), do: [~w(cat /proc/1/cmdline)]
 
   # Identity is an observation class, not a transport capability. It moved here after v1
   # was written: having the transport read /etc/machine-id gave every future transport a
@@ -124,6 +130,13 @@ defmodule Hive.Posix.Observer do
       {:ok, %{output: out, exit_status: 0}} ->
         parse(class, out, read)
 
+      {:ok, %{exit_status: 127}} ->
+        # 127 is "command not found" in every POSIX shell. The local transport surfaces a
+        # missing binary as a raise; every remote transport surfaces it as this. Same fact
+        # about the environment, so the same status -- found by running the observer
+        # inside a container, where systemctl and ss are simply absent.
+        blank(class, :unsupported, read, "the binary this class needs is not present (127)")
+
       {:ok, %{exit_status: status}} ->
         # It ran and refused. That is not "nothing is here"; it closes nothing.
         blank(class, :partial, read, "exit status #{status}")
@@ -150,7 +163,7 @@ defmodule Hive.Posix.Observer do
 
     {artifacts, any_ok?} =
       reads
-      |> Enum.zip([:machine_id, :boot_id, :hostname, :container_id])
+      |> Enum.zip([:machine_id, :host_boot_id, :hostname, :container_id])
       |> Enum.reduce({[], false}, fn {read, key}, {acc, ok?} ->
         case transport.exec(read, with_read_id(opts, :self_identity, read)) do
           {:ok, %{output: out, exit_status: 0}} ->
@@ -232,6 +245,24 @@ defmodule Hive.Posix.Observer do
       _ ->
         # Ran fine, output unreadable. Partial: we know nothing, so we close nothing.
         blank(:active_units, :partial, read, "output did not parse as JSON")
+    end
+  end
+
+  defp parse(:pid1_process, output, read) do
+    # /proc/1/cmdline is NUL-separated argv.
+    cmd = output |> String.split(<<0>>, trim: true) |> Enum.join(" ") |> String.trim()
+
+    if cmd == "" do
+      blank(:pid1_process, :partial, read, "pid 1 reported no command line")
+    else
+      %{
+        class: :pid1_process,
+        status: :complete,
+        artifacts: [%{relation: "runs_as_pid1", object: cmd}],
+        reads: [read],
+        skips: [],
+        detail: nil
+      }
     end
   end
 

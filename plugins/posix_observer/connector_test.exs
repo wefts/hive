@@ -96,6 +96,30 @@ defmodule Hive.Posix.ObserverTest do
       assert o.detail =~ "not present"
     end
 
+    test "exit 127 is UNSUPPORTED — the container case, where systemctl simply is not there" do
+      # Through the local transport a missing binary raises; through docker exec or ssh it
+      # comes back as 127. Same fact about the environment, so the same status. Found by
+      # running the observer inside the kernel container, where it was landing on `partial`
+      # and therefore reporting "something went wrong" for "this is a container".
+      o =
+        Observer.observe(:active_units, Fake,
+          responses: %{"systemctl" => {:ok, %{output: "", exit_status: 127}}}
+        )
+
+      assert o.status == :unsupported
+      assert o.detail =~ "127"
+    end
+
+    test "pid1_process names what the environment actually runs" do
+      o =
+        Observer.observe(:pid1_process, Fake,
+          responses: %{"cat" => ok("/sbin/docker-init\0--\0/app/bin/swarm\0start\0")}
+        )
+
+      assert o.status == :complete
+      assert [%{relation: "runs_as_pid1", object: "/sbin/docker-init -- /app/bin/swarm start"}] = o.artifacts
+    end
+
     test "a non-zero exit is PARTIAL — it ran and refused, so it closes nothing" do
       o =
         Observer.observe(:active_units, Fake,
@@ -202,7 +226,7 @@ defmodule Hive.Posix.ObserverTest do
     test "is exactly the reads the observer declares, and ids derive from the argv" do
       all = Observer.allowlist()
 
-      assert length(all) == 6
+      assert length(all) == 7
       assert Enum.map(all, &elem(&1, 1)) |> Enum.uniq() == Observer.classes()
 
       # The id is a function of the argv, so a wrapper generated from this list cannot
@@ -212,7 +236,7 @@ defmodule Hive.Posix.ObserverTest do
         assert String.starts_with?(id, "#{class}.")
       end
 
-      assert all |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> length() == 6
+      assert all |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> length() == 7
     end
 
     test "every read is literal argv with no caller-supplied argument" do
@@ -295,7 +319,7 @@ defmodule Hive.Posix.ObserverTest do
       assert d.profile == "environment-observation/1"
       assert d.observer == "posix"
       assert d.transports == ["local"]
-      assert d.classes == [:self_identity, :active_units, :listening_sockets]
+      assert d.classes == [:self_identity, :pid1_process, :active_units, :listening_sockets]
     end
   end
 end

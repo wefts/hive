@@ -184,3 +184,38 @@ defmodule Hive.Posix.Transport.Ssh do
     ])
   end
 end
+
+defmodule Hive.Posix.Transport.Docker do
+  @moduledoc """
+  Carry the POSIX observer into a local container via `docker exec`.
+
+  A container is just another Unix-like environment, so this is a transport and not a new
+  observer — the same reasoning that makes `kubectl exec` a transport while the Kubernetes
+  control plane is its own observer.
+
+  ## Its enforcement story is different, and worse, and that is worth saying
+
+  The SSH transport has a real server-side boundary: `command=` means the far end decides.
+  Docker has no equivalent. **Access to the docker socket is root-equivalent on the host**
+  — anyone who can `docker exec` can also start a privileged container and read anything.
+  So this transport's allowlist is *advice*, exactly the thing ADR-22 says an allowlist in
+  our own config always is.
+
+  That is acceptable here only because of where it is used: observing a container **on the
+  machine Swarm already runs on**, where Swarm already has that access by construction. It
+  is not a model for reaching someone else's host, and it must not be reused as one.
+
+  `opts`: `:container` (required), `:timeout_ms`.
+  """
+
+  @behaviour Hive.Posix.Transport
+
+  @impl true
+  def name, do: "docker"
+
+  @impl true
+  def exec(read, opts) do
+    container = Keyword.fetch!(opts, :container)
+    Hive.Posix.Transport.Local.exec(["docker", "exec", container | read], opts)
+  end
+end

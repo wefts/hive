@@ -142,8 +142,15 @@ defmodule Hive.Posix.Connector do
 
   defp continuant(_), do: :none
 
-  defp incarnation(%{boot_id: b}) when is_binary(b) and b != "", do: b
+  # `/proc/sys/kernel/random/boot_id` is NOT namespaced: read inside a container it returns
+  # the HOST's boot id, so using it there would give every container on a host the same
+  # incarnation. It counts only alongside a machine-id, which is what says "this is a host".
+  # Found by running the observer inside the kernel container.
+  defp incarnation(%{machine_id: m, host_boot_id: b}) when is_binary(m) and is_binary(b) and b != "",
+    do: b
+
   defp incarnation(%{container_id: c}) when is_binary(c) and c != "", do: c
+  defp incarnation(%{hostname: h}) when is_binary(h) and h != "", do: h
   defp incarnation(_), do: nil
 
   # --- events --------------------------------------------------------------------------
