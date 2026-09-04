@@ -139,6 +139,11 @@ defmodule LearnerEvalRun do
       swarm_env: System.get_env("SWARM_ENV", ""),
       database: System.get_env("SWARM_DB_NAME", ""),
       ml_address: System.get_env("SWARM_ML_ADDRESS", ""),
+      # WHICH ollama answered. `ml_address` names the sidecar, not the model daemon behind
+      # it, and this box runs two with separate caches and separate GPU memory. A
+      # measurement that cannot say which one answered cannot be reproduced. Sourced from
+      # scripts/ollama_daemons.sh so there is exactly one place that knows there are two.
+      ollama_daemon: ollama_daemon(),
       consilium_panel: System.get_env("SWARM_CONSILIUM_PANEL", ""),
       consilium_judge: System.get_env("SWARM_CONSILIUM_JUDGE", ""),
       tier_gate: normalize(Application.get_env(:swarm, :tier_gate, [])),
@@ -224,6 +229,17 @@ defmodule LearnerEvalRun do
 
   defp file_sha256(path) do
     path |> File.read!() |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
+  end
+
+  # Identity of the model daemon that answers the serve path, from the ONE place that
+  # knows this box has two of them (scripts/ollama_daemons.sh).
+  defp ollama_daemon do
+    script = Path.expand("ollama_daemons.sh", __DIR__)
+
+    case System.cmd("bash", ["-c", ". #{script}; ollama_daemon_identity"], stderr_to_stdout: true) do
+      {out, 0} -> String.trim(out)
+      _ -> "unknown"
+    end
   end
 
   defp git_revision(path), do: git(path, ["rev-parse", "HEAD"], "unknown")

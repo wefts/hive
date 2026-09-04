@@ -476,6 +476,13 @@ defmodule LearnerEvalTrace do
       database: System.get_env("SWARM_DB_NAME", ""),
       swarm_env: System.get_env("SWARM_ENV", ""),
       ml_address: System.get_env("SWARM_ML_ADDRESS", ""),
+      # WHICH ollama answered. `ml_address` names the sidecar, not the model daemon behind
+      # it, and there are two daemons on this box with separate caches and separate GPU
+      # memory. A measurement that cannot say which one answered cannot be reproduced --
+      # and reading the wrong one has already produced four wrong explanations of a memory
+      # event (2026-09-02) and two silently lost critic reviews (2026-09-04). Routed
+      # through scripts/ollama_daemons.sh so this is not a second place that has to know.
+      ollama_daemon: ollama_daemon(),
       swarm_revision: git(Path.expand("../../swarm", __DIR__), ["rev-parse", "HEAD"], "unknown"),
       swarm_dirty?: git(Path.expand("../../swarm", __DIR__), ["status", "--porcelain"], "") != "",
       hive_revision: git(Path.expand("..", __DIR__), ["rev-parse", "HEAD"], "unknown"),
@@ -521,6 +528,17 @@ defmodule LearnerEvalTrace do
     case System.cmd("git", ["-C", path | args], stderr_to_stdout: true) do
       {out, 0} -> String.trim(out)
       _ -> fallback
+    end
+  end
+
+  # Identity of the model daemon that answers the serve path, from the ONE place that
+  # knows this box has two of them (scripts/ollama_daemons.sh).
+  defp ollama_daemon do
+    script = Path.expand("ollama_daemons.sh", __DIR__)
+
+    case System.cmd("bash", ["-c", ". #{script}; ollama_daemon_identity"], stderr_to_stdout: true) do
+      {out, 0} -> String.trim(out)
+      _ -> "unknown"
     end
   end
 
