@@ -71,6 +71,10 @@
       "class": "wrong_subject",
       "control_class": "inventory_only",
       "probes": "each half must be graded with ITS OWN provenance record. The question mis-bound, the control bound correctly; grading the control with the question's record reported six real control successes as wrong_subject"
+    },
+    "L4-wrong-doc-link-offered": {
+      "class": "answered_off",
+      "probes": "a plausible-but-wrong document->host link, offered and rejected. An exclusive-mention linker would resolve this question to `ledger` because one page mentions it alone; the answer reads perfectly. The record shows the grounded fact is about ledger and the passage is a page about something else, so neither kind of evidence is about the asked subject"
     }
   },
   "known_limitations": {

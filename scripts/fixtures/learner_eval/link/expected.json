@@ -1,0 +1,38 @@
+{
+  "_comment": "Adversarial fixtures for the document->host linker. A linker that guesses manufactures the exact false joins the apparatus exists to detect, so every case here that is not a clean name identity must REFUSE. Synthetic world only.",
+  "expected": {
+    "doc:10|store.alpha.internal": {
+      "decision": "link",
+      "basis": "title_equality",
+      "probes": "the whole title equals the host stem and resolves to one host \u2014 a name identity, not a guess"
+    },
+    "doc:11|ledger.alpha.internal": {
+      "decision": "refuse",
+      "probes": "PLAUSIBLE BUT WRONG. A page titled 'Argo CD' mentions exactly one host. Linking on exclusive mention asserts 'Argo CD runs on ledger' \u2014 confident and false. This is the live shape: 137 real pairs look like this"
+    },
+    "doc:12|ledger.alpha.internal": {
+      "decision": "refuse",
+      "probes": "title CONTAINS the stem ('Ledger monitoring notes') \u2014 substring, not identity"
+    },
+    "doc:13|relay.alpha.internal": {
+      "decision": "refuse",
+      "probes": "the title resolves to a host at each of two sites; picking one invents a fact"
+    },
+    "doc:13|relay.beta.internal": {
+      "decision": "refuse",
+      "probes": "the other half of the cross-site collision"
+    },
+    "doc:14|store.alpha.internal": {
+      "decision": "refuse",
+      "probes": "a page naming three hosts says nothing about which it is 'about'"
+    },
+    "doc:15|decommissioned.beta.internal": {
+      "decision": "refuse",
+      "probes": "the host is not a live guest in the snapshot"
+    },
+    "doc:12|store.alpha.internal": {
+      "decision": "refuse",
+      "probes": "the second host on the containment page \u2014 named, unrelated to the title"
+    }
+  }
+}

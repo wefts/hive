@@ -1,0 +1,7 @@
+source_ref,title,blen,hosts,hostlist
+doc:10,Store,3000,1,alpha/store.alpha.internal
+doc:11,Argo CD,3000,1,alpha/ledger.alpha.internal
+doc:12,Ledger monitoring notes,3000,2,alpha/ledger.alpha.internal alpha/store.alpha.internal
+doc:13,Relay,3000,2,alpha/relay.alpha.internal beta/relay.beta.internal
+doc:14,Platform map,5000,3,alpha/ledger.alpha.internal alpha/relay.alpha.internal alpha/store.alpha.internal
+doc:15,Cache,2000,1,beta/decommissioned.beta.internal

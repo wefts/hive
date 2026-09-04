@@ -1,0 +1,80 @@
+{
+  "observed_at": "2026-01-01T00:00:00Z",
+  "_comment": "SYNTHETIC world for the link fixtures. beta/relay.beta.internal exists so the cross-site title collision is exercised on the collision rule rather than on liveness; decommissioned.beta.internal is deliberately absent.",
+  "sites": {
+    "alpha": {
+      "cluster": "alpha",
+      "nodes": [
+        {
+          "node": "hv-01",
+          "status": "online"
+        },
+        {
+          "node": "hv-02",
+          "status": "online"
+        }
+      ],
+      "guests": [
+        {
+          "vmid": 101,
+          "name": "store.alpha.internal",
+          "node": "hv-01",
+          "status": "running",
+          "type": "qemu",
+          "template": false
+        },
+        {
+          "vmid": 102,
+          "name": "store-dev.alpha.internal",
+          "node": "hv-01",
+          "status": "running",
+          "type": "qemu",
+          "template": false
+        },
+        {
+          "vmid": 103,
+          "name": "ledger.alpha.internal",
+          "node": "hv-02",
+          "status": "running",
+          "type": "qemu",
+          "template": false
+        },
+        {
+          "vmid": 104,
+          "name": "relay.alpha.internal",
+          "node": "hv-02",
+          "status": "running",
+          "type": "qemu",
+          "template": false
+        }
+      ]
+    },
+    "beta": {
+      "cluster": "beta",
+      "nodes": [
+        {
+          "node": "hv-11",
+          "status": "online"
+        }
+      ],
+      "guests": [
+        {
+          "vmid": 201,
+          "name": "cache.beta.internal",
+          "node": "hv-11",
+          "status": "running",
+          "type": "qemu",
+          "template": false
+        },
+        {
+          "vmid": 202,
+          "name": "relay.beta.internal",
+          "node": "hv-11",
+          "status": "running",
+          "type": "qemu",
+          "template": false
+        }
+      ]
+    }
+  }
+}
