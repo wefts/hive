@@ -72,6 +72,8 @@ def main():
         got = rows.get(row_id)
         got_class = got and got.get("class")
         ok = got_class == want["class"]
+        if ok and "control_class" in want:
+            ok = (got or {}).get("control_class") == want["control_class"]
         (passed if ok else failed).append(row_id)
         if ok and a.quiet_pass:
             continue
@@ -79,6 +81,9 @@ def main():
         print(f"  {mark} {row_id}")
         print(f"       expected {want['class']!r}, got {got_class!r}")
         if not ok:
+            if "control_class" in want:
+                print(f"       control expected {want['control_class']!r}, "
+                      f"got {(got or {}).get('control_class')!r}")
             print(f"       probes: {want['probes']}")
             if got and got.get("why"):
                 print(f"       grader said: {got['why']}")

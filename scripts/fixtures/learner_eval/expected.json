@@ -59,8 +59,18 @@
       "probes": "a real join proven by the kernel record: a grounded fact placing the subject on the right node AND a grounded passage from a document that contains the host"
     },
     "L2-provenance-rejects-the-fake": {
-      "class": "answered_off",
-      "probes": "the SAME prose as L1-concordance-ceiling, but the provenance record shows the answer was built from a fact about a different machine. Only the record can tell these apart \u2014 this is the fixture that concordance cannot pass"
+      "class": "wrong_subject",
+      "probes": "the SAME prose as L1-concordance-ceiling, but the provenance record shows the answer was built from a fact about a different machine. Only the record can tell these apart \u2014 this is the fixture concordance cannot pass.",
+      "expectation_corrected": "first written as answered_off. That was my error reading my own rule table, not the grader's: `wrong_subject` is defined as evidence for a DIFFERENT host's key, and this record has exactly that. Corrected from the rule text, not from the output."
+    },
+    "A9-provenance-wrong-subject": {
+      "class": "wrong_subject",
+      "probes": "the record names a DIFFERENT machine that happens to share the node. Right node, wrong subject, proven by the record rather than guessed from prose \u2014 the exact shape live rows frozen-001/003/012 turned out to have"
+    },
+    "C1-control-uses-its-own-record": {
+      "class": "wrong_subject",
+      "control_class": "inventory_only",
+      "probes": "each half must be graded with ITS OWN provenance record. The question mis-bound, the control bound correctly; grading the control with the question's record reported six real control successes as wrong_subject"
     }
   },
   "known_limitations": {

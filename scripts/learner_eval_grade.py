@@ -168,16 +168,38 @@ def provenance_evidence(record, site, host, node, docs_by_host):
     facts = [f for f in record.get("facts") or [] if isinstance(f, dict)]
     subject_key = record.get("subject_key")
 
+    # A record's subject_key is the graph key; a different one means the answer was
+    # built about a DIFFERENT machine, however right the node looks. Two machines
+    # sharing a node is common, and this is the only place it can be seen.
+    if subject_key and subject_key != key:
+        return {
+            "evidence_basis": "provenance",
+            "record_kind": record.get("kind"),
+            "record_subject_key": subject_key,
+            "wrong_subject": True,
+            "inventory_evidence": None,
+            "document_evidence": False,
+            "grounded_fact_count": len(facts),
+            "grounded_passage_count": len(record.get("passages") or []),
+        }
+
     def about_subject(f):
         if subject_key:
             return subject_key == key
         subj = str(f.get("subject") or "")
         return subj.lower() in {host.lower(), host.split(".")[0].lower()}
 
-    inventory = any(
-        about_subject(f) and str(f.get("object") or "").lower() == str(node or "").lower()
-        for f in facts
-    )
+    # Core renders a fact object as `host/<site>/<name>`, not a bare name. Compare the
+    # last segment, and when the object carries a site require it to be this row's.
+    def names_node(value):
+        parts = [p for p in str(value or "").split("/") if p]
+        if not parts:
+            return False
+        if len(parts) >= 3 and parts[-2].lower() != (site or "").lower():
+            return False
+        return parts[-1].lower() == str(node or "").lower()
+
+    inventory = any(about_subject(f) and names_node(f.get("object")) for f in facts)
 
     passages = [p for p in record.get("passages") or [] if isinstance(p, dict)]
     host_docs = {ref for ref, _title in docs_by_host.get((host or "").lower(), ())}
@@ -266,6 +288,11 @@ def grade_row(row, site_nodes, site_guests, doc_mentions, docs_by_host):
     if prov and status == "found":
         out.update(prov)
         out["expected_node"] = node
+        if prov.get("wrong_subject"):
+            out["class"] = "wrong_subject"
+            out["why"] = (f"the record says the answer was built about "
+                          f"{prov['record_subject_key']}, not {host}")
+            return out
         out["class"] = evidence_class(prov["inventory_evidence"], prov["document_evidence"])
         if out["class"] == "answered_off":
             out["why"] = "the kernel record shows neither the subject's placement nor a document about it"
@@ -557,10 +584,14 @@ def main():
 
         if row.get("control_question"):
             expect = row.get("expect") or {}
+            # Every field of the control must come from the CONTROL. Leaving the
+            # question's provenance on this dict graded the control with the wrong
+            # record and reported six real control successes as wrong_subject.
             ctrl = {**row, "question": row["control_question"],
                     "swarm_answer": row.get("control_answer"),
                     "swarm_status": row.get("control_status"),
-                    "citations": row.get("control_citations")}
+                    "citations": row.get("control_citations"),
+                    "provenance": row.get("control_provenance")}
             cg = grade_row(ctrl, site_nodes, site_guests, doc_mentions, docs_by_host)
             g["control_class"] = cg["class"]
             g["control_evidence"] = cg.get("evidence")
