@@ -425,6 +425,11 @@ defmodule LearnerEvalTrace do
       rows: length(traced),
       scopes: scopes,
       tier_gate: Application.get_env(:swarm, :tier_gate, []) |> Enum.into(%{}, fn {k, v} -> {k, to_string(v)} end),
+      # The harness is part of the measurement. Without this, two different versions of
+      # THIS script share one condition hash whenever hive is dirty — which it was.
+      harness_sha256: file_sha256(__ENV__.file),
+      hive_dirty_diff_sha256: dirty_diff_sha256(Path.expand("..", __DIR__)),
+      swarm_dirty_diff_sha256: dirty_diff_sha256(Path.expand("../../swarm", __DIR__)),
       cheap_intent: tally.(& &1.cheap.intent),
       cheap_blockers: tally.(&inspect(&1.cheap.blockers)),
       semantic_route: tally.(&inspect(&1.semantic.route)),
@@ -476,6 +481,11 @@ defmodule LearnerEvalTrace do
       hive_revision: git(Path.expand("..", __DIR__), ["rev-parse", "HEAD"], "unknown"),
       hive_dirty?: git(Path.expand("..", __DIR__), ["status", "--porcelain"], "") != "",
       tier_gate: Application.get_env(:swarm, :tier_gate, []) |> Enum.into(%{}, fn {k, v} -> {k, to_string(v)} end),
+      # The harness is part of the measurement. Without this, two different versions of
+      # THIS script share one condition hash whenever hive is dirty — which it was.
+      harness_sha256: file_sha256(__ENV__.file),
+      hive_dirty_diff_sha256: dirty_diff_sha256(Path.expand("..", __DIR__)),
+      swarm_dirty_diff_sha256: dirty_diff_sha256(Path.expand("../../swarm", __DIR__)),
       scopes: scopes,
       graph_nodes: nodes,
       graph_edges: edges,
@@ -486,6 +496,16 @@ defmodule LearnerEvalTrace do
       base |> Jason.encode!() |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
 
     Map.put(base, :condition_hash, hash)
+  end
+
+  # A dirty tree is not a revision. Hash the diff so "swarm 42cd9ee + these edits" is a
+  # distinguishable condition rather than collapsing onto the clean revision's hash.
+  defp dirty_diff_sha256(path) do
+    case System.cmd("git", ["-C", path, "diff", "HEAD"], stderr_to_stdout: true) do
+      {"", 0} -> "clean"
+      {diff, 0} -> diff |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
+      _ -> "unknown"
+    end
   end
 
   defp file_sha256(""), do: ""

@@ -41,7 +41,9 @@ def main():
     ap.add_argument("--quiet-pass", action="store_true", help="print only failures and the tally")
     a = ap.parse_args()
 
-    expected = json.loads(pathlib.Path(a.expected).read_text())["expected"]
+    spec = json.loads(pathlib.Path(a.expected).read_text())
+    expected = spec["expected"]
+    limits = {k: v for k, v in spec.get("known_limitations", {}).items() if not k.startswith("_")}
 
     with tempfile.TemporaryDirectory() as tmp:
         out = pathlib.Path(tmp) / "graded.jsonl"
@@ -85,8 +87,20 @@ def main():
 
     positives = [r for r, w in expected.items() if w["class"] in ("join_correct", "inventory_only")]
     scored = [r for r in positives if rows.get(r, {}).get("class") == expected[r]["class"]]
-    print(f"  positive controls: {len(scored)}/{len(positives)} scored as successes "
-          f"(a metric that never scores a success is not a metric)")
+    print(f"  positive controls: {len(scored)}/{len(positives)} rows whose expected class is a "
+          f"SUCCESS scored as one")
+    print(f"  (the fixture file has 5 P-rows; P4's expected class is corpus_only, so only 4 of "
+          f"them are successes)")
+
+    # The ceiling of output-side grading, executable rather than only admitted in prose.
+    if limits:
+        print("\n  KNOWN LIMITATIONS — the grader gets these wrong and that is the point:")
+        for row_id, lim in limits.items():
+            got = (rows.get(row_id) or {}).get("class")
+            state = "still wrong" if got == lim["grader_says"] else f"CHANGED -> {got!r}"
+            print(f"    LIMIT {row_id}: says {lim['grader_says']!r}, truth {lim['truth']!r} [{state}]")
+            print(f"          {lim['why']}")
+            print(f"          fix: {lim['fix']}")
 
     if failed:
         print(f"\nvalidate: FAILED on {len(failed)} fixtures: {', '.join(failed)}")

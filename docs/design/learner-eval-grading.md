@@ -1,6 +1,7 @@
 ---
 status: pre-registered for the next untouched run
-rules_version: 3
+metric_kind: CONCORDANCE (not provenance — see 'What this metric actually is')
+rules_version: 4
 owns: hive/scripts/learner_eval_grade.py — the classification rules only
 supersedes: rules v2 (output concordance), rules v1 (node-only, not a join metric)
 validated_by: hive/scripts/learner_eval_validate_grader.py against scripts/fixtures/learner_eval/
@@ -16,7 +17,7 @@ v1 rows had already been read, and v2 preserved `wrong_subject` — a rule inven
 seeing `frozen-002`. That is versioned retrospective re-analysis. It is reproducible and
 honestly labelled, and it is not pre-registration.
 
-**v3 is pre-registered for the next untouched run** and for nothing before it. Any
+**v4 is pre-registered for the next untouched run** and for nothing before it. Any
 figure produced by re-grading an already-inspected run is re-analysis and is to be
 labelled as such wherever it appears.
 
@@ -38,25 +39,51 @@ disagreement with `expected.json`, which is written from this text before the gr
 runs. **Run it before trusting any number.** v2 scores 5 of the 13 fixtures wrong, three
 of them by calling a fake a join.
 
+## What this metric actually is — CONCORDANCE, and the word matters
+
+**This is not a provenance metric and must not be called one.** v3 called itself that;
+the third review built a counterexample and ran it — correct host, correct node, an
+incidental citation, unrelated filler — and the grader returned `join_correct`. It is
+reproduced as fixture `L1-concordance-ceiling`, which the validator reports as a
+standing LIMIT.
+
+The reason is structural, not a missing guard:
+
+- `exclusive` inventory evidence establishes that no **cited** document contains the
+  node. It does not establish that the inventory supplied it.
+- document evidence establishes that a citation mentions the host and the answer has
+  three novel tokens. A longer irrelevant answer satisfies that.
+
+**No analysis of answer text can separate a join from a coincidence.** Adding a sixth
+output-side guard would move the counterexample, not remove it. The rules below are
+therefore the best available *concordance* rules — useful for ranking failure shapes,
+not for asserting that two sources were connected — and every entry reporting them says
+`concordance`.
+
+**The fix is in the kernel.** The serve path already knows which facts it grounded on
+and which citations it used, and it does not emit that. Once `Swarm.Core` emits a
+machine-readable provenance record per answer, the grader reads it instead of guessing
+from prose, `L1` becomes a real assertion, and the metric earns the name.
+
 ## The definition everything else follows from
 
-Two sources are **joined in an answer** when the answer carries **provenance** from both
-about **the same subject**. Output-string agreement is not provenance: that an answer
-names the right node and cites some document mentioning the host proves neither source
-contributed.
+Two sources are **concordant in an answer** when the answer carries evidence consistent
+with both about **the same subject**. Output-string agreement is not provenance: that an
+answer names the right node and cites some document mentioning the host proves neither
+source contributed.
 
-### Inventory provenance — one of two, and the grader records which
+### Inventory evidence — one of two, and the grader records which
 
 - **`structured`** — a citation with `source == "structured"` whose `ref` is exactly the
   subject's graph key, `net:host:<site>/<host>`. The serve path names the object it
-  read; this is provenance in the strict sense.
+  read; this is the ONE case that is provenance in the strict sense.
 - **`exclusive`** — no structured citation, but the answer names the node the snapshot
   places the subject on **and that node name appears in no cited document**. If a cited
   document contains the node, the answer could have read it off prose, so the evidence
   is discarded. Weaker than `structured`, and recorded distinctly so a result can be
   read without it.
 
-Anything else is no inventory provenance. Status words stay excluded: `running` and
+Anything else is no inventory evidence. Status words stay excluded: `running` and
 `stopped` occur too freely in prose to be told from a claim about this host.
 
 ### Subject binding — required before any inventory evidence counts
@@ -66,7 +93,7 @@ token), or it carries a structured citation for that host's key. An answer that 
 the right node while never saying what it is talking about is **`unbound_subject`**, not
 a join.
 
-### Document provenance
+### Document evidence
 
 A citation resolves to a document that genuinely contains the subject's hostname
 (checked against `docs_with_hosts.csv`, never against the answer's prose) **and** the
@@ -97,14 +124,14 @@ Assigned in this order; the first that applies wins.
 | `wrong_subject` | a structured citation for a different host's key, or the answer names another host of the site and not the subject | no |
 | `unbound_subject` | names the right node but never identifies the subject and carries no structured citation for it | no |
 | `cross_paired` | inventory evidence about one host, document evidence about another | no |
-| `answered_off` | answered with neither kind of provenance | no |
-| `corpus_only` | document provenance only | no |
-| `inventory_only` | inventory provenance only | no |
+| `answered_off` | answered with neither kind of evidence | no |
+| `corpus_only` | document evidence only | no |
+| `inventory_only` | inventory evidence only | no |
 | `join_correct` | **both, about the same host** | **yes** |
 
 ## Shapes
 
-Inventory provenance is one rule everywhere. What varies is the subject and what
+Inventory evidence is one rule everywhere. What varies is the subject and what
 contradicts.
 
 - **placement** — subject is the host; contradiction is a different node of that site.

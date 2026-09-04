@@ -54,5 +54,14 @@
       "class": "wrong_subject",
       "probes": "structured provenance exists but for a DIFFERENT subject; provenance for the wrong thing is not provenance"
     }
+  },
+  "known_limitations": {
+    "_comment": "Fixtures the grader is KNOWN to get wrong, recorded so the ceiling of output-side grading is executable rather than only admitted in prose. The validator reports these as LIMIT and does not fail on them. Each becomes a real assertion once the kernel emits a per-answer provenance record.",
+    "L1-concordance-ceiling": {
+      "grader_says": "join_correct",
+      "truth": "not a join",
+      "why": "correct host, correct node, an incidental citation and unrelated filler. `exclusive` inventory evidence only establishes that no CITED document contains the node, not that the inventory supplied it; document evidence only establishes that a citation mentions the host and that the answer has three novel tokens, which longer irrelevant text satisfies. No analysis of answer text can separate a join from a coincidence.",
+      "fix": "Swarm.Core must emit a machine-readable provenance record per answer: which graph facts grounded it and which citations were used. Grade against that."
+    }
   }
 }

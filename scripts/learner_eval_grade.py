@@ -8,17 +8,20 @@ Run the validator before trusting any number this produces: hashing and pre-regi
 make a classifier reproducible, not correct, and v2 scored 5 of 13 fixtures wrong --
 three of them by calling a fake a join.
 
-v3 grades on PROVENANCE, not output concordance. That an answer names the right node
-and cites some document mentioning the host proves neither source contributed. See the
-pre-registration for the full contract; the short version:
+THIS IS A CONCORDANCE METRIC, NOT A PROVENANCE ONE, and the output says so. Only the
+`structured` case is provenance in the strict sense -- a citation naming the graph key
+the serve path actually read. `exclusive` is an inference from absence, and document
+evidence is an inference from a citation plus answer length: fixture
+`L1-concordance-ceiling` is a counterexample that passes both. No analysis of answer
+text can separate a join from a coincidence; the fix is a per-answer provenance record
+emitted by Swarm.Core. Until then, report `concordance`.
 
-  inventory provenance  a structured citation for the subject's own graph key, or the
-                        node named where no CITED document contains that node name
-  subject binding       required before inventory evidence counts at all
-  document provenance   a cited document that really contains the host, plus a
-                        substantive answer (an incidental citation on a one-word
-                        answer is not evidence)
-  pairing               per host, never accumulated across a page's host set
+  inventory evidence  a structured citation for the subject's own graph key (provenance),
+                      or the node named where no CITED document contains it (inference)
+  subject binding     required before inventory evidence counts at all
+  document evidence   a cited document that really contains the host, plus a substantive
+                      answer (an incidental citation on a one-word answer is not evidence)
+  pairing             per host, never accumulated across a page's host set
 
 Usage:
   scripts/learner_eval_grade.py --run ... --truth ... --overlap ... \
@@ -34,7 +37,7 @@ import pathlib
 import re
 import sys
 
-RULES_VERSION = 3
+RULES_VERSION = 4
 MIN_CONTENT_TOKENS = 3
 
 STOPWORDS = set("""
@@ -61,8 +64,13 @@ def load_rules(path):
     if int(m.group(1)) != RULES_VERSION:
         sys.exit(f"learner_eval_grade: {path} declares rules_version {m.group(1)}, "
                  f"this grader implements {RULES_VERSION}")
+    # The rules doc hash binds PROSE to output. The grader's own source is the thing that
+    # actually classifies, so hash it too: without this, two implementations of the same
+    # document share one hash.
+    impl = pathlib.Path(__file__).read_bytes()
     return {"rules_version": RULES_VERSION, "rules_doc": str(path),
-            "rules_sha256": hashlib.sha256(text.encode()).hexdigest()}
+            "rules_sha256": hashlib.sha256(text.encode()).hexdigest(),
+            "grader_sha256": hashlib.sha256(impl).hexdigest()}
 
 
 def load_truth(path):
@@ -143,7 +151,7 @@ def identifier_tokens_for(site, site_nodes, site_guests):
     return ids
 
 
-# --- provenance per host -------------------------------------------------------------
+# --- evidence per host -------------------------------------------------------------
 
 
 def host_evidence(answer, question, citations, site, host, node, docs_by_host, id_tokens,
@@ -172,7 +180,7 @@ def host_evidence(answer, question, citations, site, host, node, docs_by_host, i
         "host": host, "node": node, "structured_citation": structured,
         "host_named": named, "node_named": node_named,
         "node_in_cited_document": node_in_cited,
-        "inventory_provenance": inventory, "document_provenance": document,
+        "inventory_evidence": inventory, "document_evidence": document,
         "cited_docs_mentioning_host": doc_hits, "substantive": subst,
         "content_tokens": content, "bound": bound,
     }
@@ -238,7 +246,7 @@ def grade_row(row, site_nodes, site_guests, doc_mentions, docs_by_host):
         out["why"] = "names the right node but never identifies the subject"
         return out
 
-    out["class"] = evidence_class(ev["inventory_provenance"], ev["document_provenance"])
+    out["class"] = evidence_class(ev["inventory_evidence"], ev["document_evidence"])
     out["why"] = why_for(out["class"], ev)
     return out
 
@@ -265,9 +273,9 @@ def grade_page(status, answer, question, citations, expect, site_nodes, docs_by_
         out["why"] = f"places page hosts on {wrong_nodes}, API says {sorted(allowed)}"
         return out
 
-    both = [e for e in evs if e["inventory_provenance"] and e["document_provenance"]]
-    inv = [e for e in evs if e["inventory_provenance"]]
-    doc = [e for e in evs if e["document_provenance"]]
+    both = [e for e in evs if e["inventory_evidence"] and e["document_evidence"]]
+    inv = [e for e in evs if e["inventory_evidence"]]
+    doc = [e for e in evs if e["document_evidence"]]
 
     if both:
         out["class"] = "join_correct"
@@ -297,7 +305,7 @@ def evidence_class(inventory, document):
 
 def why_for(cls, ev):
     if cls == "inventory_only":
-        return f"inventory provenance ({ev['inventory_provenance']}); no document reaches this host"
+        return f"inventory provenance ({ev['inventory_evidence']}); no document reaches this host"
     if cls == "corpus_only":
         if ev["node_in_cited_document"]:
             return "node named, but a cited document contains it — the node may come from prose"
@@ -347,7 +355,7 @@ def summarize(graded, header, rules):
 
     def prov(rows, kind):
         return sum(1 for r in rows
-                   if (r.get("evidence") or {}).get("inventory_provenance") == kind)
+                   if (r.get("evidence") or {}).get("inventory_evidence") == kind)
 
     def by(rows, field):
         out = {}
@@ -373,8 +381,8 @@ def summarize(graded, header, rules):
             "join_correct": n(joins, "join_correct"),
             "join_rate": round(n(joins, "join_correct") / len(joins), 3) if joins else None,
             "inventory_only": n(joins, "inventory_only"),
-            "inventory_provenance_structured": prov(joins, "structured"),
-            "inventory_provenance_exclusive": prov(joins, "exclusive"),
+            "inventory_evidence_structured": prov(joins, "structured"),
+            "inventory_evidence_exclusive": prov(joins, "exclusive"),
             "corpus_only": n(joins, "corpus_only"),
             "cross_paired": n(joins, "cross_paired"),
             "unbound_subject": n(joins, "unbound_subject"),
@@ -416,11 +424,11 @@ def report(s, graded):
           f"sha={s['rules_sha256'][:12]}  set={(s.get('set') or {}).get('label')} "
           f"set_hash={(s.get('set') or {}).get('set_hash', '')[:16]} "
           f"condition_hash={(s.get('run') or {}).get('condition_hash', '')[:16]}")
-    print(f"  JOIN (provenance from both, same host)  {h['join_correct']}/{h['join_questions']}"
+    print(f"  JOIN-CONCORDANCE (evidence from both, same host)  {h['join_correct']}/{h['join_questions']}"
           f"  rate={h['join_rate']}")
     print(f"    inventory_only  {h['inventory_only']}"
-          f"  (structured {h['inventory_provenance_structured']}, "
-          f"exclusive {h['inventory_provenance_exclusive']})")
+          f"  (structured {h['inventory_evidence_structured']}, "
+          f"exclusive {h['inventory_evidence_exclusive']})")
     print(f"    corpus_only {h['corpus_only']} · cross_paired {h['cross_paired']}"
           f" · unbound_subject {h['unbound_subject']} · wrong_subject {h['wrong_subject']}")
     print(f"  SINGLE-SOURCE reached inventory   "
