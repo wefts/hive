@@ -1,0 +1,26 @@
+{
+  "observed_at": "2026-01-01T00:00:00Z",
+  "_comment": "SYNTHETIC fixture world. No real host, site or node name appears here. Two sites, and store/store-dev deliberately share a node so a same-node coincidence can be staged.",
+  "sites": {
+    "alpha": {
+      "cluster": "alpha",
+      "nodes": [
+        {"node": "hv-01", "status": "online"},
+        {"node": "hv-02", "status": "online"}
+      ],
+      "guests": [
+        {"vmid": 101, "name": "store.alpha.internal", "node": "hv-01", "status": "running", "type": "qemu", "template": false},
+        {"vmid": 102, "name": "store-dev.alpha.internal", "node": "hv-01", "status": "running", "type": "qemu", "template": false},
+        {"vmid": 103, "name": "ledger.alpha.internal", "node": "hv-02", "status": "running", "type": "qemu", "template": false},
+        {"vmid": 104, "name": "relay.alpha.internal", "node": "hv-02", "status": "running", "type": "qemu", "template": false}
+      ]
+    },
+    "beta": {
+      "cluster": "beta",
+      "nodes": [{"node": "hv-11", "status": "online"}],
+      "guests": [
+        {"vmid": 201, "name": "cache.beta.internal", "node": "hv-11", "status": "running", "type": "qemu", "template": false}
+      ]
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "_comment": "Expected class per fixture row under grading rules v3. Written from the rule text, before running the grader, so the fixtures test the rules rather than the implementation's habits. Each adversarial row names the specific hole it probes.",
+  "rules_version": 3,
+  "expected": {
+    "P1-structured-join": {
+      "class": "join_correct",
+      "probes": "a real join with direct inventory provenance: a structured citation for the subject's own graph key, the correct node, and a cited document that mentions the subject"
+    },
+    "P2-grounded-join": {
+      "class": "join_correct",
+      "probes": "a real join without a structured citation: correct node, subject named, and the node appears in NO cited document, so it cannot have come from prose"
+    },
+    "P3-inventory-only": {
+      "class": "inventory_only",
+      "probes": "reached the inventory and stopped there; success for a control, not a join"
+    },
+    "P4-corpus-only": {
+      "class": "corpus_only",
+      "probes": "reached the documents and stopped there; no node named at all"
+    },
+    "P5-structured-join-node-also-in-doc": {
+      "class": "join_correct",
+      "probes": "the node ALSO appears in a cited document, but a structured citation for the subject's key is direct provenance - v3 must not be so conservative that it rejects this"
+    },
+    "A1-node-came-from-prose": {
+      "class": "corpus_only",
+      "probes": "HOLE 1 - the cited document itself contains the node name, so naming the node proves nothing about the inventory. v2 scores this join_correct"
+    },
+    "A2-incidental-citation": {
+      "class": "answered_off",
+      "probes": "HOLE 2 - vacuous answer text ('Proxmox') with citations that happen to mention the subject. This is the frozen-012 shape. v2 scores this corpus_only"
+    },
+    "A3-same-node-coincidence": {
+      "class": "wrong_subject",
+      "probes": "HOLE 3 - right node, but the answer is about a different machine that shares it"
+    },
+    "A4-subject-omitted": {
+      "class": "unbound_subject",
+      "probes": "HOLE 4 - the answer never identifies the subject, names the right node, carries a matching citation, and names no competing host. v2 scores this join_correct (learner_eval_grade.py:165)"
+    },
+    "A5-cross-paired-hosts": {
+      "class": "cross_paired",
+      "probes": "HOLE 5 - node evidence about one host, document evidence about another, accumulated across the page's host set. No single host has both. v2 scores this join_correct (learner_eval_grade.py:186)"
+    },
+    "A6-wrong-node": {
+      "class": "wrong",
+      "probes": "contradicts the snapshot"
+    },
+    "A7-no-answer": {
+      "class": "no_answer",
+      "probes": "honest escalation"
+    },
+    "A8-structured-cite-wrong-key": {
+      "class": "wrong_subject",
+      "probes": "structured provenance exists but for a DIFFERENT subject; provenance for the wrong thing is not provenance"
+    }
+  }
+}

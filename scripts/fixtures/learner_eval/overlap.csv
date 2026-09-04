@@ -1,0 +1,9 @@
+site,kind,name,len,conf_docs,wiki_docs
+alpha,node,hv-01,5,0,0
+alpha,node,hv-02,5,1,0
+alpha,guest,store.alpha.internal,20,2,0
+alpha,guest,store-dev.alpha.internal,24,0,0
+alpha,guest,ledger.alpha.internal,21,2,0
+alpha,guest,relay.alpha.internal,20,1,0
+beta,node,hv-11,5,0,0
+beta,guest,cache.beta.internal,19,0,0

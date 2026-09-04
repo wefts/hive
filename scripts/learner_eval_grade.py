@@ -2,17 +2,23 @@
 """Grade a learner-eval run against the Proxmox API snapshot. No model involved.
 
 The classification rules are PRE-REGISTERED in
-`hive/docs/design/learner-eval-grading.md` and are not to be changed while grading.
-This file implements that document and nothing else; the summary it writes carries
-`rules_version` and a SHA-256 of the document, and the run aborts if the two
-disagree. A rule invented after seeing the row it catches is a hypothesis fitted to
-its own data -- that is what happened to `wrong_subject` in v1.
+`hive/docs/design/learner-eval-grading.md` and validated by
+`learner_eval_validate_grader.py` against synthetic positive and adversarial fixtures.
+Run the validator before trusting any number this produces: hashing and pre-registration
+make a classifier reproducible, not correct, and v2 scored 5 of 13 fixtures wrong --
+three of them by calling a fake a join.
 
-What changed in v2, and why every v1 number is unsafe as a join measure: v1 scored a
-`placement` row correct on the Proxmox node alone, requiring no document evidence at
-all, so a pure inventory lookup raised the number called "join rate". v2 requires
-evidence from BOTH sources about the SAME subject, and gives the inventory-only case
-its own class instead of silently counting it as a join.
+v3 grades on PROVENANCE, not output concordance. That an answer names the right node
+and cites some document mentioning the host proves neither source contributed. See the
+pre-registration for the full contract; the short version:
+
+  inventory provenance  a structured citation for the subject's own graph key, or the
+                        node named where no CITED document contains that node name
+  subject binding       required before inventory evidence counts at all
+  document provenance   a cited document that really contains the host, plus a
+                        substantive answer (an incidental citation on a one-word
+                        answer is not evidence)
+  pairing               per host, never accumulated across a page's host set
 
 Usage:
   scripts/learner_eval_grade.py --run ... --truth ... --overlap ... \
@@ -28,18 +34,23 @@ import pathlib
 import re
 import sys
 
-RULES_VERSION = 2
+RULES_VERSION = 3
+MIN_CONTENT_TOKENS = 3
 
-# Evidence-bearing classes, in the order the pre-registration assigns them.
-CLASSES = ("no_answer", "wrong", "wrong_subject", "answered_off",
-           "corpus_only", "inventory_only", "join_correct")
+STOPWORDS = set("""
+a an and are as at be been by can do does for from had has have how in into is it its
+of on or that the their there they this to was were what when where which who why with
+your you not no yes still today currently run runs running host hosts hosted hosting
+node nodes hypervisor hypervisors proxmox machine machines vm vms server servers service
+services page pages according documentation docs doc sur les des est une un le la pour
+dans avec que qui sont être plus toujours
+""".split())
 
 
 # --- inputs ------------------------------------------------------------------------
 
 
 def load_rules(path):
-    """The pre-registration is part of the measurement: hash it, check its version."""
     doc = pathlib.Path(path)
     if not doc.exists():
         sys.exit(f"learner_eval_grade: pre-registration {path} not found; refusing to grade")
@@ -69,7 +80,6 @@ def load_truth(path):
 
 
 def mentions(text, name):
-    """Word-boundary, case-insensitive, `-` and `_` part of the name."""
     if not name:
         return False
     return re.search(r"(^|[^A-Za-z0-9_-])" + re.escape(name) + r"([^A-Za-z0-9_-]|$)",
@@ -77,7 +87,6 @@ def mentions(text, name):
 
 
 def mentions_host(text, host):
-    """A host is mentioned by its full name or by its FQDN stem, as a whole token."""
     return mentions(text, host) or mentions(text, (host or "").split(".")[0])
 
 
@@ -85,46 +94,99 @@ def nodes_named(text, site_node_names):
     return [n for n in site_node_names if mentions(text, n)]
 
 
-def document_evidence(citations, host, docs_by_host):
-    """Citations that resolve to a document the CORPUS really shows this host in.
+def tokens(text):
+    return {t for t in re.split(r"[^A-Za-z0-9]+", (text or "").lower()) if t}
 
-    Verified against docs_with_hosts.csv, never against the answer's own prose.
-    Core.ask cites by document title, so titles and source_refs are both indexed.
-    """
-    refs = set()
+
+def structured_refs(citations):
+    return {(c.get("ref") or "").strip()
+            for c in citations or [] if (c.get("source") or "") == "structured"}
+
+
+def cited_keys(citations):
+    out = set()
     for c in citations or []:
         for key in ("ref", "url", "source"):
             v = c.get(key)
             if isinstance(v, str) and v:
-                refs.add(v.strip().lower())
+                out.add(v.strip().lower())
+    return out
+
+
+def cited_docs_containing(citations, name, docs_by_host):
+    """Cited documents that the CORPUS shows contain this name (host or node).
+
+    Verified against docs_with_hosts.csv, never against the answer's prose. Core.ask
+    cites by document title, so titles and source_refs are both indexed.
+    """
+    refs = cited_keys(citations)
     hits = []
-    for source_ref, title in docs_by_host.get((host or "").lower(), ()):
+    for source_ref, title in docs_by_host.get((name or "").lower(), ()):
         keys = {source_ref.lower(), title.strip().lower(), source_ref.split(":")[-1].lower()}
         if refs & keys or any(k and k in r for r in refs for k in keys if len(k) > 6):
             hits.append(source_ref)
     return sorted(set(hits))
 
 
-# --- the rules ---------------------------------------------------------------------
+def substantive(answer, question, identifier_tokens):
+    """Enough content of its own that an attached citation is not merely incidental."""
+    content = tokens(answer) - tokens(question) - STOPWORDS - identifier_tokens
+    content = {t for t in content if len(t) > 2 and not t.isdigit()}
+    return len(content) >= MIN_CONTENT_TOKENS, sorted(content)[:12]
 
 
-def classify(inv, doc, status):
-    """The final assignment once contradictions have been ruled out."""
-    if status != "found":
-        return "no_answer"
-    if inv and doc:
-        return "join_correct"
-    if inv:
-        return "inventory_only"
-    if doc:
-        return "corpus_only"
-    return "answered_off"
+def identifier_tokens_for(site, site_nodes, site_guests):
+    ids = set()
+    for name in list(site_nodes.get(site, [])) + [g["name"] for g in site_guests.get(site, {}).values()]:
+        ids |= tokens(name)
+    ids |= tokens(site)
+    return ids
+
+
+# --- provenance per host -------------------------------------------------------------
+
+
+def host_evidence(answer, question, citations, site, host, node, docs_by_host, id_tokens,
+                  page_row=False):
+    key = f"net:host:{site}/{host}"
+    structured = key in structured_refs(citations)
+    named = mentions_host(answer, host)
+    node_named = bool(node) and mentions(answer, node)
+    node_in_cited = bool(cited_docs_containing(citations, node, docs_by_host))
+
+    # On a page row the PAGE is the subject, so naming the host's node counts as
+    # discussing it; on a host row the answer must say what it is talking about.
+    bound = structured or named or (page_row and node_named)
+
+    inventory = None
+    if node_named and structured:
+        inventory = "structured"
+    elif node_named and bound and not node_in_cited:
+        inventory = "exclusive"
+
+    doc_hits = cited_docs_containing(citations, host, docs_by_host)
+    subst, content = substantive(answer, question, id_tokens)
+    document = bool(doc_hits) and subst
+
+    return {
+        "host": host, "node": node, "structured_citation": structured,
+        "host_named": named, "node_named": node_named,
+        "node_in_cited_document": node_in_cited,
+        "inventory_provenance": inventory, "document_provenance": document,
+        "cited_docs_mentioning_host": doc_hits, "substantive": subst,
+        "content_tokens": content, "bound": bound,
+    }
+
+
+# --- the rules -------------------------------------------------------------------------
 
 
 def grade_row(row, site_nodes, site_guests, doc_mentions, docs_by_host):
     shape, site = row["shape"], row.get("site")
     expect = row.get("expect") or {}
     answer = row.get("swarm_answer") or ""
+    question = row.get("question") or ""
+    citations = row.get("citations")
     status = row.get("swarm_status")
     out = {"grader": "proxmox_api", "rules_version": RULES_VERSION}
 
@@ -132,88 +194,122 @@ def grade_row(row, site_nodes, site_guests, doc_mentions, docs_by_host):
         out.update(grade_undocumented(status, answer, site, site_guests, doc_mentions))
         return out
 
+    id_tokens = identifier_tokens_for(site, site_nodes, site_guests)
+
     if shape == "accuracy" and expect.get("kind") == "page_still_true":
-        out.update(grade_page_accuracy(row, status, answer, expect, site_nodes, docs_by_host))
+        out.update(grade_page(status, answer, question, citations, expect, site_nodes,
+                              docs_by_host, id_tokens))
         return out
 
-    host = expect.get("host") or ""
-    want = expect.get("node")
-    site_node_names = site_nodes.get(site, [])
-    named = nodes_named(answer, site_node_names)
-    doc = document_evidence(row.get("citations"), host, docs_by_host)
-    others = [g["name"] for g in site_guests.get(site, {}).values()
-              if g["name"].lower() != host.lower() and mentions_host(answer, g["name"])]
+    host, node = expect.get("host") or "", expect.get("node")
+    named_nodes = nodes_named(answer, site_nodes.get(site, []))
+    ev = host_evidence(answer, question, citations, site, host, node, docs_by_host, id_tokens)
+    out["evidence"] = ev
+    out["nodes_named"] = named_nodes
+    out["expected_node"] = node
 
-    out.update({"nodes_named": named, "expected_node": want,
-                "cited_docs_mentioning_host": doc, "other_hosts_named": others})
-
-    verdict = placement_verdict(status, answer, host, want, named, others)
-    out.update(verdict)
-    if verdict.get("class"):
-        return out
-
-    out["class"] = classify(verdict["inventory_evidence"], bool(doc), status)
-    if out["class"] == "answered_off":
-        out["why"] = "answered with neither an inventory fact nor a citation reaching this host"
-    elif out["class"] == "inventory_only":
-        out["why"] = "correct placement, but no citation reaches a document mentioning this host"
-    elif out["class"] == "corpus_only":
-        out["why"] = "correct from documents; nothing in the answer comes from the inventory"
-    return out
-
-
-def placement_verdict(status, answer, host, want, named, others):
-    """Contradiction and subject checks shared by placement, purpose and host accuracy."""
-    if status != "found":
-        return {"class": "no_answer", "inventory_evidence": False}
-
-    wrong_nodes = [n for n in named if n != want]
-    subject_named = mentions_host(answer, host)
-
-    if wrong_nodes and not subject_named and others:
-        return {"class": "wrong_subject", "inventory_evidence": False,
-                "why": f"answers about {others}, not {host}"}
-    if wrong_nodes:
-        return {"class": "wrong", "inventory_evidence": False,
-                "why": f"places {host} on {wrong_nodes}, API says {want}"}
-    if want in named and not subject_named and others:
-        return {"class": "wrong_subject", "inventory_evidence": False,
-                "why": f"names the right node but answers about {others}, not {host}"}
-
-    return {"inventory_evidence": want in named}
-
-
-def grade_page_accuracy(row, status, answer, expect, site_nodes, docs_by_host):
-    page = expect.get("hosts", [])
-    discussed = [h for h in page if mentions_host(answer, h["host"])]
-    allowed = {h["node"] for h in (discussed or page)}
-    all_nodes = sorted({n for s in site_nodes for n in site_nodes[s]})
-    named = nodes_named(answer, all_nodes)
-    wrong_nodes = [n for n in named if n not in allowed]
-
-    doc = []
-    for h in (discussed or page):
-        doc += document_evidence(row.get("citations"), h["host"], docs_by_host)
-    doc = sorted(set(doc))
-
-    out = {"hosts_discussed": [h["host"] for h in discussed], "nodes_named": named,
-           "cited_docs_mentioning_host": doc}
     if status != "found":
         out["class"] = "no_answer"
-    elif wrong_nodes:
+        return out
+
+    # Contradiction first.
+    wrong_nodes = [n for n in named_nodes if n != node]
+    if wrong_nodes and not ev["node_named"]:
+        out["class"] = "wrong"
+        out["why"] = f"places {host} on {wrong_nodes}, API says {node}"
+        return out
+
+    # Provenance for the wrong thing is not provenance.
+    other_structured = [r for r in structured_refs(citations)
+                        if r.startswith("net:host:") and r != f"net:host:{site}/{host}"]
+    others_named = [g["name"] for g in site_guests.get(site, {}).values()
+                    if g["name"].lower() != host.lower() and mentions_host(answer, g["name"])]
+
+    if other_structured and not ev["structured_citation"]:
+        out["class"] = "wrong_subject"
+        out["why"] = f"structured citation for {other_structured}, not {host}"
+        return out
+    if others_named and not ev["host_named"] and ev["node_named"]:
+        out["class"] = "wrong_subject"
+        out["why"] = f"names the right node but answers about {others_named}, not {host}"
+        return out
+    if ev["node_named"] and not ev["bound"]:
+        out["class"] = "unbound_subject"
+        out["why"] = "names the right node but never identifies the subject"
+        return out
+
+    out["class"] = evidence_class(ev["inventory_provenance"], ev["document_provenance"])
+    out["why"] = why_for(out["class"], ev)
+    return out
+
+
+def grade_page(status, answer, question, citations, expect, site_nodes, docs_by_host, id_tokens):
+    page = expect.get("hosts", [])
+    evs = [
+        host_evidence(answer, question, citations, h["site"], h["host"], h["node"],
+                      docs_by_host, id_tokens, page_row=True)
+        for h in page
+    ]
+    all_nodes = sorted({n for s in site_nodes for n in site_nodes[s]})
+    named = nodes_named(answer, all_nodes)
+    allowed = {h["node"] for h in page}
+    out = {"evidence_per_host": evs, "nodes_named": named}
+
+    if status != "found":
+        out["class"] = "no_answer"
+        return out
+
+    wrong_nodes = [n for n in named if n not in allowed]
+    if wrong_nodes:
         out["class"] = "wrong"
         out["why"] = f"places page hosts on {wrong_nodes}, API says {sorted(allowed)}"
+        return out
+
+    both = [e for e in evs if e["inventory_provenance"] and e["document_provenance"]]
+    inv = [e for e in evs if e["inventory_provenance"]]
+    doc = [e for e in evs if e["document_provenance"]]
+
+    if both:
+        out["class"] = "join_correct"
+    elif inv and doc:
+        out["class"] = "cross_paired"
+        out["why"] = (f"inventory evidence about {[e['host'] for e in inv]}, document evidence "
+                      f"about {[e['host'] for e in doc]} — no single host has both")
+    elif inv:
+        out["class"] = "inventory_only"
+    elif doc:
+        out["class"] = "corpus_only"
     else:
-        out["inventory_evidence"] = bool(named)
-        out["class"] = classify(bool(named), bool(doc), status)
-        if out["class"] == "answered_off":
-            out["why"] = "answer states no node for any host this page names"
+        out["class"] = "answered_off"
+        out["why"] = "no provenance of either kind for any host this page names"
     return out
+
+
+def evidence_class(inventory, document):
+    if inventory and document:
+        return "join_correct"
+    if inventory:
+        return "inventory_only"
+    if document:
+        return "corpus_only"
+    return "answered_off"
+
+
+def why_for(cls, ev):
+    if cls == "inventory_only":
+        return f"inventory provenance ({ev['inventory_provenance']}); no document reaches this host"
+    if cls == "corpus_only":
+        if ev["node_in_cited_document"]:
+            return "node named, but a cited document contains it — the node may come from prose"
+        return "document provenance only; nothing in the answer comes from the inventory"
+    if cls == "answered_off":
+        if ev["cited_docs_mentioning_host"] and not ev["substantive"]:
+            return "citation reaches this host but the answer carries no content of its own"
+        return "answered with neither kind of provenance"
+    return None
 
 
 def grade_undocumented(status, answer, site, site_guests, doc_mentions):
-    """Reported separately: its evidence is inventory plus the ABSENCE of documents,
-    so document evidence cannot be positive by construction."""
     guests = site_guests.get(site, {})
     named = sorted(g["name"] for g in guests.values() if mentions_host(answer, g["name"]))
     documented = [n for n in named if doc_mentions.get((site, n.lower()), 0) > 0]
@@ -239,13 +335,19 @@ def summarize(graded, header, rules):
     def counts(rows, key="class"):
         return dict(collections.Counter(r[key] for r in rows))
 
-    joins = [r for r in graded if r.get("join") and r["shape"] != "undocumented"]
-    singles = [r for r in graded if not r.get("join")]
+    # v3: purpose and undocumented are reported apart, never inside the join numerator.
+    joins = [r for r in graded if r.get("join") and r["shape"] in ("placement", "accuracy")]
+    purpose = [r for r in graded if r["shape"] == "purpose"]
     undoc = [r for r in graded if r["shape"] == "undocumented"]
+    singles = [r for r in graded if not r.get("join") and r["shape"] in ("placement", "accuracy")]
     controls = [r for r in graded if r.get("control_class")]
 
     def n(rows, *classes):
         return sum(1 for r in rows if r["class"] in classes)
+
+    def prov(rows, kind):
+        return sum(1 for r in rows
+                   if (r.get("evidence") or {}).get("inventory_provenance") == kind)
 
     def by(rows, field):
         out = {}
@@ -255,10 +357,9 @@ def summarize(graded, header, rules):
                           "counts": counts(sub)}
         return out
 
-    # A control succeeds by reaching the inventory; no join is being asked of it.
     ctrl_ok = sum(1 for r in controls if r["control_class"] in ("inventory_only", "join_correct"))
-    full_name = [r for r in controls if r.get("control_names_full_subject")]
-    part_name = [r for r in controls if not r.get("control_names_full_subject")]
+    full = [r for r in controls if r.get("control_names_full_subject")]
+    part = [r for r in controls if not r.get("control_names_full_subject")]
 
     return {
         "kind": "learner_eval_grade",
@@ -272,22 +373,29 @@ def summarize(graded, header, rules):
             "join_correct": n(joins, "join_correct"),
             "join_rate": round(n(joins, "join_correct") / len(joins), 3) if joins else None,
             "inventory_only": n(joins, "inventory_only"),
+            "inventory_provenance_structured": prov(joins, "structured"),
+            "inventory_provenance_exclusive": prov(joins, "exclusive"),
             "corpus_only": n(joins, "corpus_only"),
+            "cross_paired": n(joins, "cross_paired"),
+            "unbound_subject": n(joins, "unbound_subject"),
+            "wrong_subject": n(joins, "wrong_subject"),
             "single_source_questions": len(singles),
             "single_source_reached_inventory": n(singles, "inventory_only", "join_correct"),
             "control_pairs": len(controls),
             "control_reached_inventory": ctrl_ok,
             "control_rate": round(ctrl_ok / len(controls), 3) if controls else None,
             "control_full_subject_name": {
-                "n": len(full_name),
-                "reached_inventory": sum(1 for r in full_name if r["control_class"]
+                "n": len(full),
+                "reached_inventory": sum(1 for r in full if r["control_class"]
                                          in ("inventory_only", "join_correct")),
             },
             "control_partial_subject_name": {
-                "n": len(part_name),
-                "reached_inventory": sum(1 for r in part_name if r["control_class"]
+                "n": len(part),
+                "reached_inventory": sum(1 for r in part if r["control_class"]
                                          in ("inventory_only", "join_correct")),
             },
+            "purpose_questions": len(purpose),
+            "purpose_counts": counts(purpose),
             "undocumented_questions": len(undoc),
             "undocumented_correct": n(undoc, "correct_undocumented"),
         },
@@ -308,22 +416,23 @@ def report(s, graded):
           f"sha={s['rules_sha256'][:12]}  set={(s.get('set') or {}).get('label')} "
           f"set_hash={(s.get('set') or {}).get('set_hash', '')[:16]} "
           f"condition_hash={(s.get('run') or {}).get('condition_hash', '')[:16]}")
-    print(f"  JOIN (both sources, same subject)  {h['join_correct']}/{h['join_questions']}"
+    print(f"  JOIN (provenance from both, same host)  {h['join_correct']}/{h['join_questions']}"
           f"  rate={h['join_rate']}")
-    print(f"    inventory_only (v1 counted these as joins)  {h['inventory_only']}")
-    print(f"    corpus_only                                 {h['corpus_only']}")
-    print(f"  SINGLE-SOURCE reached inventory    "
+    print(f"    inventory_only  {h['inventory_only']}"
+          f"  (structured {h['inventory_provenance_structured']}, "
+          f"exclusive {h['inventory_provenance_exclusive']})")
+    print(f"    corpus_only {h['corpus_only']} · cross_paired {h['cross_paired']}"
+          f" · unbound_subject {h['unbound_subject']} · wrong_subject {h['wrong_subject']}")
+    print(f"  SINGLE-SOURCE reached inventory   "
           f"{h['single_source_reached_inventory']}/{h['single_source_questions']}")
-    print(f"  CONTROL reached inventory          "
+    print(f"  CONTROL reached inventory         "
           f"{h['control_reached_inventory']}/{h['control_pairs']}  rate={h['control_rate']}")
-    print(f"    control names full subject       "
-          f"{h['control_full_subject_name']['reached_inventory']}"
-          f"/{h['control_full_subject_name']['n']}")
-    print(f"    control names partial subject    "
-          f"{h['control_partial_subject_name']['reached_inventory']}"
+    print(f"    full subject name  {h['control_full_subject_name']['reached_inventory']}"
+          f"/{h['control_full_subject_name']['n']}"
+          f"   partial  {h['control_partial_subject_name']['reached_inventory']}"
           f"/{h['control_partial_subject_name']['n']}")
-    print(f"  UNDOCUMENTED (reported apart)      "
-          f"{h['undocumented_correct']}/{h['undocumented_questions']}")
+    print(f"  PURPOSE (apart)      n={h['purpose_questions']} {h['purpose_counts']}")
+    print(f"  UNDOCUMENTED (apart) {h['undocumented_correct']}/{h['undocumented_questions']}")
     print(f"  all classes {s['counts']}")
     for shape, v in s["by_shape"].items():
         print(f"    {shape:14} n={v['n']:3} join_correct={v['join_correct']} {v['counts']}")
@@ -375,16 +484,15 @@ def main():
 
         if row.get("control_question"):
             expect = row.get("expect") or {}
-            host = expect.get("host") or ""
-            ctrl = {**row, "swarm_answer": row.get("control_answer"),
+            ctrl = {**row, "question": row["control_question"],
+                    "swarm_answer": row.get("control_answer"),
                     "swarm_status": row.get("control_status"),
                     "citations": row.get("control_citations")}
             cg = grade_row(ctrl, site_nodes, site_guests, doc_mentions, docs_by_host)
             g["control_class"] = cg["class"]
-            g["control_nodes_named"] = cg.get("nodes_named")
-            # v1 read control failures as an unreachable inventory; most controls do not
-            # even contain the full subject name, so resolution was never excluded.
-            g["control_names_full_subject"] = mentions(row["control_question"], host)
+            g["control_evidence"] = cg.get("evidence")
+            g["control_names_full_subject"] = mentions(row["control_question"],
+                                                       expect.get("host") or "")
 
         graded.append({**row, **g})
 
