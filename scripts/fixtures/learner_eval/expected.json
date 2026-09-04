@@ -1,6 +1,6 @@
 {
   "_comment": "Expected class per fixture row under grading rules v3. Written from the rule text, before running the grader, so the fixtures test the rules rather than the implementation's habits. Each adversarial row names the specific hole it probes.",
-  "rules_version": 3,
+  "rules_version": 5,
   "expected": {
     "P1-structured-join": {
       "class": "join_correct",
@@ -53,6 +53,14 @@
     "A8-structured-cite-wrong-key": {
       "class": "wrong_subject",
       "probes": "structured provenance exists but for a DIFFERENT subject; provenance for the wrong thing is not provenance"
+    },
+    "P6-provenance-real-join": {
+      "class": "join_correct",
+      "probes": "a real join proven by the kernel record: a grounded fact placing the subject on the right node AND a grounded passage from a document that contains the host"
+    },
+    "L2-provenance-rejects-the-fake": {
+      "class": "answered_off",
+      "probes": "the SAME prose as L1-concordance-ceiling, but the provenance record shows the answer was built from a fact about a different machine. Only the record can tell these apart \u2014 this is the fixture that concordance cannot pass"
     }
   },
   "known_limitations": {
@@ -61,7 +69,7 @@
       "grader_says": "join_correct",
       "truth": "not a join",
       "why": "correct host, correct node, an incidental citation and unrelated filler. `exclusive` inventory evidence only establishes that no CITED document contains the node, not that the inventory supplied it; document evidence only establishes that a citation mentions the host and that the answer has three novel tokens, which longer irrelevant text satisfies. No analysis of answer text can separate a join from a coincidence.",
-      "fix": "Swarm.Core must emit a machine-readable provenance record per answer: which graph facts grounded it and which citations were used. Grade against that."
+      "fix": "FIXED IN THE KERNEL as of rules v5: Swarm.Core emits a per-answer provenance record and the grader uses it when present. L1 carries no record, so it is graded by the concordance fallback and stays a standing limit for rows without one. Its provenance-bearing twin L2-provenance-rejects-the-fake has the same prose and IS rejected \u2014 that pair is the demonstration that the record, not the text, is what separates a join from a coincidence."
     }
   }
 }

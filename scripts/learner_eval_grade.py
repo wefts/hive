@@ -37,7 +37,7 @@ import pathlib
 import re
 import sys
 
-RULES_VERSION = 4
+RULES_VERSION = 5
 MIN_CONTENT_TOKENS = 3
 
 STOPWORDS = set("""
@@ -151,6 +151,54 @@ def identifier_tokens_for(site, site_nodes, site_guests):
     return ids
 
 
+# --- provenance: what the kernel says the answer was built from ----------------------
+
+
+def provenance_evidence(record, site, host, node, docs_by_host):
+    """Grade from the kernel's own record of what it read. No prose is consulted.
+
+    `structured`: the serve path names the subject key it read and the facts it rendered.
+    `consilium`: the grounded facts and the passages that entered the prompt.
+    Returns None when there is no usable record, so the caller falls back to concordance.
+    """
+    if not isinstance(record, dict) or not record.get("kind"):
+        return None
+
+    key = f"net:host:{site}/{host}"
+    facts = [f for f in record.get("facts") or [] if isinstance(f, dict)]
+    subject_key = record.get("subject_key")
+
+    def about_subject(f):
+        if subject_key:
+            return subject_key == key
+        subj = str(f.get("subject") or "")
+        return subj.lower() in {host.lower(), host.split(".")[0].lower()}
+
+    inventory = any(
+        about_subject(f) and str(f.get("object") or "").lower() == str(node or "").lower()
+        for f in facts
+    )
+
+    passages = [p for p in record.get("passages") or [] if isinstance(p, dict)]
+    host_docs = {ref for ref, _title in docs_by_host.get((host or "").lower(), ())}
+    document = any(
+        (p.get("source_ref") in host_docs)
+        or any((p.get("key") or "").strip().lower() == title.strip().lower()
+               for _ref, title in docs_by_host.get((host or "").lower(), ()))
+        for p in passages
+    )
+
+    return {
+        "evidence_basis": "provenance",
+        "record_kind": record.get("kind"),
+        "record_subject_key": subject_key,
+        "inventory_evidence": "record" if inventory else None,
+        "document_evidence": document,
+        "grounded_fact_count": len(facts),
+        "grounded_passage_count": len(passages),
+    }
+
+
 # --- evidence per host -------------------------------------------------------------
 
 
@@ -211,7 +259,24 @@ def grade_row(row, site_nodes, site_guests, doc_mentions, docs_by_host):
 
     host, node = expect.get("host") or "", expect.get("node")
     named_nodes = nodes_named(answer, site_nodes.get(site, []))
+
+    # v5: when the kernel said what it read, grade on that and say so. Otherwise fall
+    # back to concordance and say THAT. The two are never pooled into one headline.
+    prov = provenance_evidence(row.get("provenance"), site, host, node, docs_by_host)
+    if prov and status == "found":
+        out.update(prov)
+        out["expected_node"] = node
+        out["class"] = evidence_class(prov["inventory_evidence"], prov["document_evidence"])
+        if out["class"] == "answered_off":
+            out["why"] = "the kernel record shows neither the subject's placement nor a document about it"
+        elif out["class"] == "inventory_only":
+            out["why"] = "grounded on the placement fact; no grounded passage reaches this host"
+        elif out["class"] == "corpus_only":
+            out["why"] = "grounded on a document about this host; no placement fact among the grounded facts"
+        return out
+
     ev = host_evidence(answer, question, citations, site, host, node, docs_by_host, id_tokens)
+    ev["evidence_basis"] = "concordance"
     out["evidence"] = ev
     out["nodes_named"] = named_nodes
     out["expected_node"] = node

@@ -92,6 +92,11 @@ defmodule LearnerEvalRun do
       swarm_confidence: answer.confidence,
       swarm_answer: answer.answer,
       citations: Enum.map(answer.citations, &Map.take(&1, [:source, :ref, :url])),
+      # What the answer was BUILT FROM, straight from the kernel. Answer text cannot
+      # show whether a fact came from the inventory or from a document that happened to
+      # mention it, so the grader must not have to guess (the concordance ceiling,
+      # docs/design/learner-eval-grading.md). Absent on tier-0, errors and not-found.
+      provenance: Map.get(answer, :provenance),
       duration_ms: duration_ms
     }
 
@@ -105,6 +110,7 @@ defmodule LearnerEvalRun do
           control_tier: control.tier,
           control_answer: control.answer,
           control_citations: Enum.map(control.citations, &Map.take(&1, [:source, :ref, :url])),
+          control_provenance: Map.get(control, :provenance),
           control_duration_ms: control_ms
         })
 

@@ -1,7 +1,7 @@
 ---
 status: pre-registered for the next untouched run
-metric_kind: CONCORDANCE (not provenance — see 'What this metric actually is')
-rules_version: 4
+metric_kind: PROVENANCE when the answer carries a kernel provenance record; CONCORDANCE otherwise (recorded per row)
+rules_version: 5
 owns: hive/scripts/learner_eval_grade.py — the classification rules only
 supersedes: rules v2 (output concordance), rules v1 (node-only, not a join metric)
 validated_by: hive/scripts/learner_eval_validate_grader.py against scripts/fixtures/learner_eval/
@@ -60,10 +60,34 @@ therefore the best available *concordance* rules — useful for ranking failure 
 not for asserting that two sources were connected — and every entry reporting them says
 `concordance`.
 
-**The fix is in the kernel.** The serve path already knows which facts it grounded on
-and which citations it used, and it does not emit that. Once `Swarm.Core` emits a
-machine-readable provenance record per answer, the grader reads it instead of guessing
-from prose, `L1` becomes a real assertion, and the metric earns the name.
+**The fix is in the kernel, and as of rules v5 it exists.** `Swarm.Core` now emits a
+machine-readable `provenance` record per answer — `kind` (`structured` / `consilium`),
+the served `subject_key`, the `facts` the answer was rendered from, and the `passages`
+that entered the prompt (swarm `a4fc49b`..; `Gate.Answer` carries the validated atoms).
+
+**When a row carries that record, v5 grades on it and the row is marked
+`evidence_basis: "provenance"`.** When it does not — an older run, a tier-0 answer, an
+error — v5 falls back to the concordance rules below and marks the row
+`evidence_basis: "concordance"`. The two are never pooled into one headline: a summary
+reports the provenance-graded rows and the concordance-graded rows separately, because
+they are different measurements.
+
+### Provenance rules (used when the record is present)
+
+- **inventory provenance** — the record contains a fact about the subject whose object
+  is the node the API places it on: for a `structured` answer, `subject_key` equals the
+  subject's graph key and a fact's `object` matches the expected node; for a `consilium`
+  answer, a grounded fact whose `subject` is the host and whose `object` is that node.
+  Nothing is inferred from the answer text.
+- **document provenance** — the record's `passages` include a document that the corpus
+  shows contains the subject's hostname.
+- everything else — binding, pairing per host, contradiction — is unchanged; it just
+  reads the record instead of the prose.
+
+`L1-concordance-ceiling` carries no provenance record, so under v5 it is graded by the
+fallback and remains a standing LIMIT for concordance rows. Its provenance-bearing twin
+`L2-provenance-rejects-the-fake` is the same answer with a record that names a different
+fact, and v5 must reject it.
 
 ## The definition everything else follows from
 

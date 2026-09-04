@@ -89,8 +89,9 @@ def main():
     scored = [r for r in positives if rows.get(r, {}).get("class") == expected[r]["class"]]
     print(f"  positive controls: {len(scored)}/{len(positives)} rows whose expected class is a "
           f"SUCCESS scored as one")
-    print(f"  (the fixture file has 5 P-rows; P4's expected class is corpus_only, so only 4 of "
-          f"them are successes)")
+    p_rows = [r for r in expected if r.startswith("P")]
+    print(f"  ({len(p_rows)} P-rows in the fixture file; {len(positives)} of them have a success "
+          f"as their expected class — P4's is corpus_only)")
 
     # The ceiling of output-side grading, executable rather than only admitted in prose.
     if limits:
