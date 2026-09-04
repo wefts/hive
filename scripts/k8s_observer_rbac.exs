@@ -59,17 +59,20 @@ manifest = """
 #
 # This grants #{length(allowlist)} reads and nothing else. There is no write verb here, no
 # `watch`, no `exec`, no access to Secrets, and no wildcard.
+# Namespace FIRST: a single multi-document apply creates in order, so a ServiceAccount
+# listed before its namespace fails with "namespaces not found". Found by applying this
+# to a real cluster, not by reading it.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: swarm-observer
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: swarm-observer
   namespace: swarm-observer
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: swarm-observer
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
