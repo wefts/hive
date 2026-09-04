@@ -198,6 +198,85 @@ defmodule Hive.Posix.ObserverTest do
     end
   end
 
+  describe "the allowlist that becomes the SSH grant" do
+    test "is exactly the reads the observer declares, and ids derive from the argv" do
+      all = Observer.allowlist()
+
+      assert length(all) == 6
+      assert Enum.map(all, &elem(&1, 1)) |> Enum.uniq() == Observer.classes()
+
+      # The id is a function of the argv, so a wrapper generated from this list cannot
+      # drift from the list the code asks for without the id changing too.
+      for {id, class, argv} <- all do
+        assert id == Observer.read_id(class, argv)
+        assert String.starts_with?(id, "#{class}.")
+      end
+
+      assert all |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> length() == 6
+    end
+
+    test "every read is literal argv with no caller-supplied argument" do
+      # This is the property that lets a forced command compare against a fixed table
+      # instead of parsing anything.
+      for {_id, _class, argv} <- Observer.allowlist() do
+        assert Enum.all?(argv, &is_binary/1)
+        refute Enum.any?(argv, &String.contains?(&1, ["$", "`", ";", "|", "&", "*", "?"]))
+      end
+    end
+  end
+
+  describe "the SSH transport over a real loopback connection" do
+    @describetag :loopback
+
+    setup do
+      wrapper = Path.expand("../../tmp/posix-observer-access/swarm-observe", __DIR__)
+
+      available? =
+        File.exists?(wrapper) and
+          match?(
+            {_, 0},
+            System.cmd("ssh", ~w(-o BatchMode=yes -o ConnectTimeout=5 localhost true),
+              stderr_to_stdout: true
+            )
+          )
+
+      if available?, do: {:ok, wrapper: wrapper}, else: :ok
+    end
+
+    test "carries a real read end to end, through the generated wrapper", ctx do
+      case ctx do
+        %{wrapper: wrapper} ->
+          o =
+            Observer.observe(:self_identity, Hive.Posix.Transport.Ssh,
+              host: "localhost",
+              wrapper_path: wrapper
+            )
+
+          assert o.status == :complete
+          assert Enum.any?(o.artifacts, &(&1.relation == "self_reports_machine_id"))
+
+        _ ->
+          IO.puts("\n  SKIPPED: loopback ssh or the generated wrapper is unavailable here.")
+      end
+    end
+
+    test "a read that is not on the allowlist is REFUSED by the server", ctx do
+      case ctx do
+        %{wrapper: wrapper} ->
+          # The transport always sends an id; forge one the wrapper does not know.
+          assert {:error, :refused} =
+                   Hive.Posix.Transport.Ssh.exec(["irrelevant"],
+                     host: "localhost",
+                     wrapper_path: wrapper,
+                     read_id: "not.an.allowed.read"
+                   )
+
+        _ ->
+          IO.puts("\n  SKIPPED: loopback ssh or the generated wrapper is unavailable here.")
+      end
+    end
+  end
+
   describe "the kernel-driven loop" do
     test "one target per page, cursor threads the rest, :done at the end" do
       o = opts(%{"ss" => ok(@ss_output)}, targets: ["a", "b"])

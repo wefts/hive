@@ -86,3 +86,101 @@ defmodule Hive.Posix.Transport.Local do
   def exec([], _opts), do: {:error, :empty_read}
 
 end
+
+defmodule Hive.Posix.Transport.Ssh do
+  @moduledoc """
+  Reach a remote environment over SSH, read-only, with **server-side** enforcement.
+
+  ## It sends an id, not a command
+
+  The transport never sends a command line. It sends the read's **id**
+  (`Hive.Posix.Observer.read_id/2`), and the remote side looks that id up in a fixed
+  table or refuses. There is therefore nothing on the wire to quote, escape or inject
+  into, and the remote never parses anything a caller controls.
+
+  ## The boundary is on the server, not here
+
+  An allowlist in this file would be advice. The boundary is
+  `command="…/swarm-observe" ` in the remote account's `authorized_keys`: sshd then runs
+  the wrapper **whatever** the client asks for, and puts the client's request in
+  `SSH_ORIGINAL_COMMAND` for the wrapper to accept or refuse. A client that asks for
+  anything else gets the wrapper anyway, and the wrapper refuses.
+
+  Generate the wrapper and the `authorized_keys` line with
+  `hive/scripts/posix_observer_allowlist.exs` — both are derived from the observer's own
+  declaration, so what is granted is exactly what the code can ask for.
+
+  ## What this transport cannot establish
+
+  Reaching a host and reading its self-identification tells you **what you reached**. It
+  does not tell you that the thing you reached is the graph node you meant. That edge —
+  `env:` to `net:host:` — is still missing, and no transport closes it. Recording the
+  intended target beside the self-reported identity is what makes the difference
+  *visible*; it is not what makes it *resolved*.
+  """
+
+  @behaviour Hive.Posix.Transport
+
+  @impl true
+  def name, do: "ssh"
+
+  @impl true
+  @doc """
+  `opts`:
+    * `:host` (required) — `user@host` or an ssh_config alias;
+    * `:read_id` (required) — the id to send. The transport is TOLD the id, it does not
+      derive one: deriving it would mean reaching into the observer's declaration, which
+      is the same leak that put `self_identity` on the transport in v1;
+    * `:wrapper_path` — invoke the wrapper explicitly instead of relying on a forced
+      command. For exercising the chain on a host where no `command=` is installed; the
+      production shape leaves this unset.
+    * `:ssh_options` — extra argv for the ssh client;
+    * `:timeout_ms`.
+  """
+  def exec(_read, opts) do
+    host = Keyword.fetch!(opts, :host)
+    id = Keyword.fetch!(opts, :read_id)
+
+    remote =
+      case Keyword.get(opts, :wrapper_path) do
+        nil -> [id]
+        path -> [path, id]
+      end
+
+    argv = ssh_options(opts) ++ [host, "--"] ++ remote
+
+    case Hive.Posix.Transport.Local.exec(["ssh" | argv], opts) do
+      {:ok, %{exit_status: 0}} = ok ->
+        ok
+
+      # The wrapper's own refusal code. Distinct from a read that ran and failed: it means
+      # the server declined, which is a fact about the boundary, not about the host.
+      {:ok, %{exit_status: 93}} ->
+        {:error, :refused}
+
+      # sshd could not run the command at all -- on a hardened host that is the binary
+      # being absent behind the wrapper, which is the environment saying it cannot answer.
+      {:ok, %{exit_status: 127}} ->
+        {:error, :not_executable}
+
+      {:ok, %{exit_status: 255}} ->
+        {:error, :ssh_unreachable}
+
+      other ->
+        other
+    end
+  end
+
+  # BatchMode: never prompt. A transport that can block on a passphrase prompt is a
+  # transport that can hang a scheduled run.
+  defp ssh_options(opts) do
+    Keyword.get(opts, :ssh_options, [
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=5",
+      "-o",
+      "StrictHostKeyChecking=accept-new"
+    ])
+  end
+end

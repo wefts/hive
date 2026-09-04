@@ -82,6 +82,35 @@ defmodule Hive.Posix.Observer do
       ~w(cat /proc/self/cgroup)
     ]
 
+  @doc """
+  A stable id for one read. This is what a hardened transport sends instead of a command.
+
+  A remote side that receives an **id** never parses a command line, so there is nothing
+  to quote, escape or inject into: it looks the id up in a fixed table or refuses. The id
+  is derived from the argv itself, so the table and this declaration cannot drift.
+  """
+  @spec read_id(atom(), Transport.read()) :: String.t()
+  def read_id(class, argv) do
+    digest =
+      :crypto.hash(:sha256, Enum.join(argv, "\u0000"))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 8)
+
+    "#{class}.#{digest}"
+  end
+
+  @doc """
+  Every read this observer will ever ask for, as `{id, class, argv}`.
+
+  This IS the security ask. An SSH forced command or a kubectl RBAC rule is generated
+  from this list, so what an operator grants is exactly what the code can request —
+  neither a superset written by hand nor a stale copy.
+  """
+  @spec allowlist() :: [{String.t(), atom(), Transport.read()}]
+  def allowlist do
+    for class <- @classes, argv <- reads(class), do: {read_id(class, argv), class, argv}
+  end
+
   @doc "Ask one class through `transport`. Never raises; a failure is a status, not a crash."
   @spec observe(atom(), module(), keyword()) :: observation()
   def observe(class, transport, opts \\ [])
@@ -91,7 +120,7 @@ defmodule Hive.Posix.Observer do
   def observe(class, transport, opts) when class in @classes do
     [read] = reads(class)
 
-    case transport.exec(read, opts) do
+    case transport.exec(read, with_read_id(opts, class, read)) do
       {:ok, %{output: out, exit_status: 0}} ->
         parse(class, out, read)
 
@@ -123,7 +152,7 @@ defmodule Hive.Posix.Observer do
       reads
       |> Enum.zip([:machine_id, :boot_id, :hostname, :container_id])
       |> Enum.reduce({[], false}, fn {read, key}, {acc, ok?} ->
-        case transport.exec(read, opts) do
+        case transport.exec(read, with_read_id(opts, :self_identity, read)) do
           {:ok, %{output: out, exit_status: 0}} ->
             case extract(key, out) do
               nil -> {acc, ok?}
@@ -169,6 +198,10 @@ defmodule Hive.Posix.Observer do
       {r |> String.replace_prefix("self_reports_", "") |> String.to_atom(), v}
     end)
   end
+
+  # The observer owns the read declaration, so the observer is what can name a read. A
+  # transport that derived the id itself would be reaching into this module's knowledge.
+  defp with_read_id(opts, class, read), do: Keyword.put(opts, :read_id, read_id(class, read))
 
   # --- parsing ------------------------------------------------------------------------
 
