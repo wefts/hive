@@ -70,6 +70,7 @@ defmodule LearnerEvalTrace do
             "sem=#{inspect(t.semantic.route)} " <>
             "rank=#{inspect(t.candidates.expected_rank)} " <>
             "facts=#{t.facts.unfiltered}/#{t.facts.after_scope}/#{t.facts.after_corroboration}/#{t.facts.after_freshness} " <>
+            "hosted_on_ok=#{t.hosted_on.present} bound=#{inspect(t.binding.bound_key)} match=#{t.binding.matches_expected} " <>
             "stage2=#{inspect(t.gate.stage2)} decision=#{t.gate.decision} #{t.gate.ms}ms" <>
             "  cf: net=#{t.counterfactuals.force_network.decision} " <>
             "key=#{t.counterfactuals.force_key.decision} " <>
@@ -139,6 +140,8 @@ defmodule LearnerEvalTrace do
         expected_present: rank != nil
       },
       facts: fact_cuts(expected_key, scopes),
+      hosted_on: hosted_on_check(expected_key, expected_node_key, scopes),
+      binding: binding_check(effective, expected_key),
       gate: %{
         decision: gate_decision,
         intent: gate_audit && gate_audit.intent,
@@ -181,9 +184,28 @@ defmodule LearnerEvalTrace do
       )
 
     {decision, audit, ms} = run_gate(desc, scopes, [])
+
+    # A generative judge asked once yields an outcome, not a rate. Repeat the SAME
+    # descriptor so run-to-run variance can be separated from a real false negative.
+    repeats =
+      for _ <- 1..repeat_n(), reduce: [] do
+        acc ->
+          {_d, a, _ms} = run_gate(desc, scopes, [])
+          [inspect(a && a.stage2) | acc]
+      end
+
     %{decision: decision, intent: audit && audit.intent, blockers: (audit && audit.blockers) || [],
       stage2: audit && audit.stage2, ms: ms, descriptor: describe_summary(desc),
-      hits_unused: length(hits)}
+      hits_unused: length(hits),
+      stage2_repeats: Enum.reverse(repeats),
+      stage2_repeat_tally: repeats |> Enum.frequencies()}
+  end
+
+  defp repeat_n do
+    case Integer.parse(System.get_env("LEARNER_TRACE_REPEAT", "0")) do
+      {n, _} when n > 0 -> n
+      _ -> 0
+    end
   end
 
   # C. The Stage-2 veto cannot be the cause: an entail_fun that always entails.
@@ -260,6 +282,47 @@ defmodule LearnerEvalTrace do
   end
 
   # --- fact cuts: where along the read does the inventory fact disappear? --------------
+
+  # What the `hosted_on` edge actually POINTS AT. Counting facts and listing relation
+  # names never showed this, so "the correct fact was present" was inherited assumption
+  # rather than something the artifact demonstrated.
+  defp hosted_on_object(key, scopes) do
+    %{rows: rows} =
+      Repo.query!(
+        """
+        SELECT d.key FROM edge e
+          JOIN node s ON s.id = e.src
+          JOIN node d ON d.id = e.dst
+         WHERE s.key = $1 AND e.type = 'hosted_on'
+           AND e.visibility_scope = ANY($2) AND d.scope = ANY($2) AND s.scope = ANY($2)
+        """,
+        [key, scopes]
+      )
+
+    Enum.map(rows, fn [k] -> k end)
+  end
+
+  # Presence in a candidate list is NOT successful binding. What matters is the key the
+  # descriptor actually bound, so record it and compare.
+  defp binding_check(%Coverage.Descriptor{} = d, expected_key) do
+    %{
+      bound_key: d.neighborhood_key,
+      expected_key: expected_key,
+      bound: d.neighborhood_key != nil,
+      matches_expected: d.neighborhood_key == expected_key
+    }
+  end
+
+  defp hosted_on_check(expected_key, expected_node_key, scopes) do
+    objects = hosted_on_object(expected_key, scopes)
+
+    %{
+      objects: objects,
+      expected_node_key: expected_node_key,
+      present: expected_node_key in objects,
+      count: length(objects)
+    }
+  end
 
   defp fact_cuts(key, scopes) do
     %{rows: [[unfiltered]]} =
@@ -352,9 +415,13 @@ defmodule LearnerEvalTrace do
   defp summary(traced, scopes) do
     tally = fn f -> traced |> Enum.map(f) |> Enum.frequencies() end
 
+    conditions = conditions(scopes)
+
     %{
       kind: "learner_eval_trace_summary",
       traced_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+      condition_hash: conditions.condition_hash,
+      conditions: conditions,
       rows: length(traced),
       scopes: scopes,
       tier_gate: Application.get_env(:swarm, :tier_gate, []) |> Enum.into(%{}, fn {k, v} -> {k, to_string(v)} end),
@@ -369,9 +436,72 @@ defmodule LearnerEvalTrace do
       counterfactual_force_network: tally.(&to_string(&1.counterfactuals.force_network.decision)),
       counterfactual_force_key: tally.(&to_string(&1.counterfactuals.force_key.decision)),
       counterfactual_bypass_stage2: tally.(&to_string(&1.counterfactuals.bypass_stage2.decision)),
+      stage2_repeat_stability:
+        traced
+        |> Enum.map(fn r ->
+          t = r.counterfactuals.force_key.stage2_repeat_tally
+          {r.row_id, t}
+        end)
+        |> Enum.into(%{}),
+      stage2_rows_with_mixed_verdicts:
+        Enum.count(traced, &(map_size(&1.counterfactuals.force_key.stage2_repeat_tally) > 1)),
       facts_zero_after_freshness: Enum.count(traced, &(&1.facts.after_freshness == 0)),
-      facts_zero_after_scope: Enum.count(traced, &(&1.facts.after_scope == 0))
+      facts_zero_after_scope: Enum.count(traced, &(&1.facts.after_scope == 0)),
+      hosted_on_object_matches_expected: Enum.count(traced, & &1.hosted_on.present),
+      bound_at_all: Enum.count(traced, & &1.binding.bound),
+      bound_to_expected_key: Enum.count(traced, & &1.binding.matches_expected),
+      expected_rank_zero: Enum.count(traced, &(&1.candidates.expected_rank == 0)),
+      slowest_gate_ms: traced |> Enum.map(& &1.gate.ms) |> Enum.max(fn -> 0 end)
     }
+  end
+
+  # Every measurement carries its conditions. This artifact did not, and we have demanded
+  # it of every other one all week.
+  defp conditions(scopes) do
+    %{rows: [[nodes, edges, latest]]} =
+      Repo.query!(
+        "SELECT (SELECT count(*) FROM node), (SELECT count(*) FROM edge), " <>
+          "(SELECT max(updated_at)::text FROM edge)",
+        []
+      )
+
+    base = %{
+      set_file: System.get_env("LEARNER_TRACE_SET", ""),
+      set_sha256: file_sha256(System.get_env("LEARNER_TRACE_SET", "")),
+      database: System.get_env("SWARM_DB_NAME", ""),
+      swarm_env: System.get_env("SWARM_ENV", ""),
+      ml_address: System.get_env("SWARM_ML_ADDRESS", ""),
+      swarm_revision: git(Path.expand("../../swarm", __DIR__), ["rev-parse", "HEAD"], "unknown"),
+      swarm_dirty?: git(Path.expand("../../swarm", __DIR__), ["status", "--porcelain"], "") != "",
+      hive_revision: git(Path.expand("..", __DIR__), ["rev-parse", "HEAD"], "unknown"),
+      hive_dirty?: git(Path.expand("..", __DIR__), ["status", "--porcelain"], "") != "",
+      tier_gate: Application.get_env(:swarm, :tier_gate, []) |> Enum.into(%{}, fn {k, v} -> {k, to_string(v)} end),
+      scopes: scopes,
+      graph_nodes: nodes,
+      graph_edges: edges,
+      graph_latest_edge: latest
+    }
+
+    hash =
+      base |> Jason.encode!() |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
+
+    Map.put(base, :condition_hash, hash)
+  end
+
+  defp file_sha256(""), do: ""
+
+  defp file_sha256(path) do
+    case File.read(path) do
+      {:ok, bin} -> bin |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
+      _ -> ""
+    end
+  end
+
+  defp git(path, args, fallback) do
+    case System.cmd("git", ["-C", path | args], stderr_to_stdout: true) do
+      {out, 0} -> String.trim(out)
+      _ -> fallback
+    end
   end
 
   defp scopes do
