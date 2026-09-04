@@ -72,11 +72,13 @@ defmodule Hive.Posix.Connector do
 
   defp fetch_targets([target | rest], opts) do
     transport = transport_for(target, opts)
+    observer = Keyword.get(opts, :observer, Observer)
 
     # Identity is the first observation class, asked through the transport like any other.
     # The transport has no identity knowledge of its own -- see the note in Transport.
-    id_obs = Observer.observe(:self_identity, transport, opts)
-    identity = Observer.identity_map(id_obs)
+    [identity_class | _] = observer.classes()
+    id_obs = observer.observe(identity_class, transport, opts)
+    identity = observer.identity_map(id_obs)
 
     case continuant(identity) do
       :none ->
@@ -100,10 +102,10 @@ defmodule Hive.Posix.Connector do
         snapshot = snapshot_token(observed, key)
 
         {events, skips} =
-          Observer.classes()
+          observer.classes()
           |> Enum.map(fn
-            :self_identity -> id_obs
-            class -> Observer.observe(class, transport, opts)
+            ^identity_class -> id_obs
+            class -> observer.observe(class, transport, opts)
           end)
           |> Enum.map_reduce([], fn obs, acc ->
             {event(obs, kind, key, continuity, identity, target, transport, observed, snapshot),
@@ -132,6 +134,11 @@ defmodule Hive.Posix.Connector do
   # can offer only a hostname is incarnation-only, and says so.
   defp continuant(%{hostname: h}) when is_binary(h) and h != "",
     do: {"unidentified", "env:hostname:#{h}", :incarnation_only}
+
+  # A cluster's continuant is the kube-system namespace uid: it survives control-plane
+  # restarts and node churn, which is what a continuant has to do.
+  defp continuant(%{cluster_uid: u}) when is_binary(u) and u != "",
+    do: {"cluster", "env:k8s:#{u}", :continuant}
 
   defp continuant(_), do: :none
 
